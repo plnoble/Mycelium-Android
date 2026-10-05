@@ -5,12 +5,21 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-class GitHubReleaseClient {
-    fun latestRelease(): ReleaseInfo? {
+/** Metadata boundary for UpdateManager's future download, verification and installation flow. */
+fun interface ReleaseSource {
+    fun latestRelease(): ReleaseInfo?
+}
+
+class GitHubReleaseClient(
+    private val openConnection: (URL) -> HttpURLConnection = {
+        it.openConnection() as HttpURLConnection
+    }
+) : ReleaseSource {
+    override fun latestRelease(): ReleaseInfo? {
         val endpoint =
             "https://api.github.com/repos/${BuildConfig.GITHUB_OWNER}/${BuildConfig.GITHUB_REPO}/releases/latest"
 
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+        val connection = openConnection(URL(endpoint)).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
             readTimeout = 10_000

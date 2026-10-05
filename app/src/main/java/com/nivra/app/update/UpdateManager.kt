@@ -1,16 +1,15 @@
 package com.nivra.app.update
 
-import android.content.Context
 import com.nivra.app.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class UpdateManager(
-    private val context: Context,
-    private val client: GitHubReleaseClient = GitHubReleaseClient()
+    private val client: ReleaseSource = GitHubReleaseClient()
 ) {
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val latest = client.latestRelease()
                 ?: return@withContext UpdateResult.NoPublishedRelease
 
@@ -19,8 +18,10 @@ class UpdateManager(
             } else {
                 UpdateResult.UpToDate
             }
-        }.getOrElse {
-            UpdateResult.Error(it.message ?: "Unknown error")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            UpdateResult.Error(error.message ?: "Unknown error")
         }
     }
 }

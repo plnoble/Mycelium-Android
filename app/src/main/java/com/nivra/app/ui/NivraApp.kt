@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -31,11 +32,11 @@ import com.nivra.app.update.UpdateManager
 import com.nivra.app.update.UpdateResult
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NivraApp() {
+fun NivraApp(updateManager: UpdateManager = remember { UpdateManager() }) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val updateManager = remember(context) { UpdateManager(context.applicationContext) }
     var updateState by remember { mutableStateOf<UpdateResult?>(null) }
     var checking by remember { mutableStateOf(false) }
 
@@ -70,8 +71,11 @@ fun NivraApp() {
                     onClick = {
                         scope.launch {
                             checking = true
-                            updateState = updateManager.checkForUpdate()
-                            checking = false
+                            try {
+                                updateState = updateManager.checkForUpdate()
+                            } finally {
+                                checking = false
+                            }
                         }
                     }
                 ) {
