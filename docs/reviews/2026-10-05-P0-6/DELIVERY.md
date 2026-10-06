@@ -19,10 +19,10 @@
 
 | 项 | 电脑（JVM/Robolectric） | 真机 |
 |---|---|---|
-| `:app:assembleDebug :app:lintDebug` | **已通过**（BUILD SUCCESSFUL；lint 0 errors / 5 warnings，均为新版本提示类） | 未验证 |
+| `:app:assembleDebug :app:lintDebug` | **已通过**（BUILD SUCCESSFUL；lint 0 errors / 5 warnings：3 条版本提示 + MissingApplicationIcon + UseKtx） | 未验证 |
 | `:app:testDebugUnitTest` | **已通过**（19/19，0 失败；含 Compose v2 冒烟重新编译验证） | 未验证 |
 | APK 元数据（包名/版本/启动 Activity/权限） | **已通过**（aapt：com.nivra.app / 0.0.1 / 1 / MainActivity / INTERNET） | 未验证 |
-| Wrapper 一致性（9.5.0 + SHA-256 校验） | **已通过** | — |
+| Wrapper 一致性（9.5.0 + SHA-256 校验） | **已通过**（一审后重做：jar 用真 9.5.0 重新生成，SHA-256 `497c8c2a…` 与官方一致；此前 jar 实为 9.7.x） | — |
 | 秘密/越界扫描 | **已通过**（无密码/token/本机路径；工作流仅引用 `${{ secrets.* }}`） | — |
 | GitHub CI（PR #1） | 未验证（待推送后以 head SHA CI 为准） | — |
 | 真机安装/启动/更新检查 | 未验证（无设备接入） | 未验证 |
@@ -32,7 +32,7 @@
 ## 需要用户做的事
 
 1. 推送 `phase-0-bootstrap` 并看 PR #1 的 CI（同意后由用户执行，或授权本线执行）；
-2. 合并 PR #1 后在 GitHub 把 `gradlew` 可执行位设为 100755（或在合并命令里带 `--chmod=+x`）；
+2. ~~合并后设置 gradlew 可执行位~~（已改在提交里设为 100755，无需此项）；
 3. 真机验证（装 APK、启动、检查更新）在有设备时补做。
 
 ## 范围遵守
