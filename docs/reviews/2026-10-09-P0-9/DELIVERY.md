@@ -36,3 +36,10 @@
 
 - 构建环境：JAVA_HOME=JBR（`D:/Development/android-studio-quail4/Install/jbr`）；SDK 经 `ANDROID_HOME` 注入、不写 local.properties（本地文件会触发 lint PropertyEscape 报错，且不应入库）。
 - 真机截图按项目规则交 Claude 看图后确定。
+## 补充任务书一落实（2026-10-09，tip fa1844d）
+
+- 版本号规则：`versionName=0.1.0`（首正式版=改名后的壳）、标签 `v主.次.补` 与 versionName 去掉 `v` 后一致、每次发布 versionCode+1；release 工作流新增「标签 vs versionName 一致性门禁」（不一致即失败）。
+- 门禁演示双用例（本机跑）：`v0.1.0` 匹配 → 放行；`v0.1.2` 不一致 → 拒绝退出。演示输出见提交记录附注。
+- release 工作流 secrets 统一为改名后的四名：`MYCELIUM_ANDROID_KEYSTORE_BASE64 / MYCELIUM_ANDROID_KEYSTORE_PASSWORD / MYCELIUM_ANDROID_KEY_ALIAS / MYCELIUM_ANDROID_KEY_PASSWORD`；构建环境变量 `MYCELIUM_ANDROID_KEYSTORE_PATH` 等一一对应。
+- 构建+单测：assembleDebug + testDebugUnitTest 全绿（19/19）。
+- **本包当前状态：等统筹审（代码+版本规则）。审过后按授权推送分支、开 PR（统筹合并）；再生成密钥、配 secrets、发 v0.1.0/v0.1.1、真机更新验证。**
