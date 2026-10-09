@@ -21,9 +21,9 @@ class MainActivityTest {
     @Test
     fun launcherActivityDisplaysPhase0() {
         compose.onNodeWithText("知衍").assertIsDisplayed()
-        compose.onNodeWithText("Phase 0 · Foundation").assertIsDisplayed()
-        compose.onNodeWithText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        compose.onNodeWithText("阶段 0 · 基础框架").assertIsDisplayed()
+        compose.onNodeWithText("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             .assertIsDisplayed()
-        compose.onNodeWithText("Check GitHub for updates").assertIsEnabled()
+        compose.onNodeWithText("检查更新").assertIsEnabled()
     }
 }

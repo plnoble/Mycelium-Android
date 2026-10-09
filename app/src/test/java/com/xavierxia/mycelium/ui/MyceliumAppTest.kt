@@ -36,9 +36,9 @@ class MyceliumAppTest {
         compose.setContent { MyceliumApp(manager) }
 
         repeat(2) {
-            compose.onNodeWithText("Check GitHub for updates").performClick()
-            awaitText("No GitHub Release has been published yet.")
-            compose.onNodeWithText("Check GitHub for updates").assertIsEnabled()
+            compose.onNodeWithText("检查更新").performClick()
+            awaitText("还没有发布过任何版本。")
+            compose.onNodeWithText("检查更新").assertIsEnabled()
         }
     }
 
@@ -47,16 +47,16 @@ class MyceliumAppTest {
         val manager = UpdateManager(ReleaseSource { throw IOException("Network unavailable") })
         compose.setContent { MyceliumApp(manager) }
 
-        compose.onNodeWithText("Check GitHub for updates").performClick()
+        compose.onNodeWithText("检查更新").performClick()
 
-        awaitText("Update check failed: Network unavailable")
-        compose.onNodeWithText("Check GitHub for updates").assertIsEnabled()
+        awaitText("检查更新失败：Network unavailable")
+        compose.onNodeWithText("检查更新").assertIsEnabled()
     }
 
     private fun awaitText(text: String) {
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithText("Check GitHub for updates").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithText("检查更新").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText(text).assertIsDisplayed()
     }

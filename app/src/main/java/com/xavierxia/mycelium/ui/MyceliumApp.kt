@@ -26,6 +26,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.xavierxia.mycelium.R
 import androidx.compose.ui.unit.dp
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.update.UpdateManager
@@ -52,17 +54,17 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "Local AI Companion",
+                    text = stringResource(R.string.home_subtitle),
                     style = MaterialTheme.typography.headlineMedium
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Phase 0 · Foundation",
+                    text = stringResource(R.string.home_phase),
                     style = MaterialTheme.typography.titleMedium
                 )
                 Spacer(Modifier.height(16.dp))
-                Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-                Text("Character, memory and local inference modules come next.")
+                Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
+                Text(stringResource(R.string.home_desc))
 
                 Spacer(Modifier.height(28.dp))
 
@@ -82,7 +84,7 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
                     if (checking) {
                         CircularProgressIndicator()
                     } else {
-                        Text("Check GitHub for updates")
+                        Text(stringResource(R.string.home_check_updates))
                     }
                 }
 
@@ -90,22 +92,22 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
                     Spacer(Modifier.height(16.dp))
                     when (result) {
                         is UpdateResult.UpToDate ->
-                            Text("You are running the latest release.")
+                            Text(stringResource(R.string.update_latest))
                         is UpdateResult.Available -> {
-                            Text("New version: ${result.release.versionName}")
+                            Text(stringResource(R.string.update_new_version, result.release.versionName))
                             Spacer(Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth()) {
                                 Button(onClick = {
                                     openUrl(context, result.release.apkDownloadUrl)
                                 }) {
-                                    Text("Open release APK")
+                                    Text(stringResource(R.string.update_open_apk))
                                 }
                             }
                         }
                         is UpdateResult.NoPublishedRelease ->
-                            Text("No GitHub Release has been published yet.")
+                            Text(stringResource(R.string.update_none_published))
                         is UpdateResult.Error ->
-                            Text("Update check failed: ${result.message}")
+                            Text(stringResource(R.string.update_failed, result.message))
                     }
                 }
             }
