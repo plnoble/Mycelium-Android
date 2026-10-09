@@ -101,3 +101,27 @@ See [docs/UPDATE_ARCHITECTURE.md](docs/UPDATE_ARCHITECTURE.md).
 ## Status
 
 Planning / Phase 0.
+
+## Build and verify Phase 0
+
+Install JDK 17 or a compatible newer JDK and the Android SDK (API 37).
+Set `JAVA_HOME` and `ANDROID_HOME`, or configure `sdk.dir` in an untracked
+`local.properties`. Android Studio's bundled JDK can also be used.
+
+Use the checked-in Gradle Wrapper; no global Gradle installation is required:
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+```
+
+On Linux/macOS, use `./gradlew` with the same tasks. The wrapper pins Gradle
+9.5.0 and verifies the distribution's SHA-256 checksum.
+
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+Open the app to see **Nivra / Phase 0 · Foundation**, then tap
+**Check GitHub for updates**. If the repository has no published release,
+the app displays **No GitHub Release has been published yet.**
+
+Android CI builds this APK, runs the unit tests and Android Lint, and uploads
+the APK and verification reports. Release tags use the same wrapper and
+require the signing secrets described in [docs/PHASE_0.md](docs/PHASE_0.md).
