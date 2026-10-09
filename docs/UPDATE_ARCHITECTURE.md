@@ -1,8 +1,8 @@
-# Nivra Update Architecture
+# Mycelium（知衍）安卓版 Update Architecture
 
 ## Goal
 
-After the first manual installation, Nivra should minimize manual update work.
+After the first manual installation, Mycelium（知衍）安卓版 should minimize manual update work.
 
 Expected flow:
 
@@ -15,7 +15,7 @@ Build + test + sign APK
         |
 GitHub Release
         |
-Nivra detects newer release
+Mycelium（知衍）安卓版 detects newer release
         |
 Download APK
         |
@@ -47,7 +47,7 @@ Android must also maintain monotonically increasing `versionCode`.
 
 A release should eventually contain:
 
-- `nivra-<version>.apk`
+- `mycelium-android-<version>.apk`
 - checksum metadata
 - release notes
 
@@ -105,7 +105,7 @@ Expected CI secrets later:
 
 For a normally sideloaded Android app, download and preparation can be automated, but Android generally still requires user confirmation to install an APK update.
 
-Fully silent installation requires device-management/system-level privileges and is outside the normal Nivra application model.
+Fully silent installation requires device-management/system-level privileges and is outside the normal Mycelium（知衍）安卓版 application model.
 
 ## Model updates
 

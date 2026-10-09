@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.Nivra" parent="android:style/Theme.Material.NoActionBar">
+    <style name="Theme.Mycelium" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>

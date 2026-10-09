@@ -1,6 +1,6 @@
-package com.nivra.app.update
+package com.xavierxia.mycelium.update
 
-import com.nivra.app.BuildConfig
+import com.xavierxia.mycelium.BuildConfig
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -25,7 +25,7 @@ class GitHubReleaseClient(
             readTimeout = 10_000
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            setRequestProperty("User-Agent", "Nivra-Android/${BuildConfig.VERSION_NAME}")
+            setRequestProperty("User-Agent", "Mycelium-Android/${BuildConfig.VERSION_NAME}")
         }
 
         return try {

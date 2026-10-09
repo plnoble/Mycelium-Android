@@ -1,4 +1,4 @@
-package com.nivra.app.ui
+package com.xavierxia.mycelium.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -6,9 +6,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.nivra.app.update.GitHubReleaseClient
-import com.nivra.app.update.ReleaseSource
-import com.nivra.app.update.UpdateManager
+import com.xavierxia.mycelium.update.GitHubReleaseClient
+import com.xavierxia.mycelium.update.ReleaseSource
+import com.xavierxia.mycelium.update.UpdateManager
 import java.io.IOException
 import java.net.HttpURLConnection
 import org.junit.Rule
@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
-class NivraAppTest {
+class MyceliumAppTest {
     @get:Rule
     val compose = createComposeRule()
 
@@ -33,7 +33,7 @@ class NivraAppTest {
                 override fun usingProxy() = false
             }
         })
-        compose.setContent { NivraApp(manager) }
+        compose.setContent { MyceliumApp(manager) }
 
         repeat(2) {
             compose.onNodeWithText("Check GitHub for updates").performClick()
@@ -45,7 +45,7 @@ class NivraAppTest {
     @Test
     fun failedCheckDisplaysErrorAndAllowsRetry() {
         val manager = UpdateManager(ReleaseSource { throw IOException("Network unavailable") })
-        compose.setContent { NivraApp(manager) }
+        compose.setContent { MyceliumApp(manager) }
 
         compose.onNodeWithText("Check GitHub for updates").performClick()
 

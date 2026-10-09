@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Nivra"
+rootProject.name = "Mycelium-Android"
 include(":app")

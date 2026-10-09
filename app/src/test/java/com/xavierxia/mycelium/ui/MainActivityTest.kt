@@ -1,11 +1,11 @@
-package com.nivra.app.ui
+package com.xavierxia.mycelium.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import com.nivra.app.BuildConfig
-import com.nivra.app.MainActivity
+import com.xavierxia.mycelium.BuildConfig
+import com.xavierxia.mycelium.MainActivity
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,7 +20,7 @@ class MainActivityTest {
 
     @Test
     fun launcherActivityDisplaysPhase0() {
-        compose.onNodeWithText("Nivra").assertIsDisplayed()
+        compose.onNodeWithText("知衍").assertIsDisplayed()
         compose.onNodeWithText("Phase 0 · Foundation").assertIsDisplayed()
         compose.onNodeWithText("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             .assertIsDisplayed()

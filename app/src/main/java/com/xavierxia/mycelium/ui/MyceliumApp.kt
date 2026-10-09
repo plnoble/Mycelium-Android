@@ -1,4 +1,4 @@
-package com.nivra.app.ui
+package com.xavierxia.mycelium.ui
 
 import android.content.Context
 import android.content.Intent
@@ -27,14 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.nivra.app.BuildConfig
-import com.nivra.app.update.UpdateManager
-import com.nivra.app.update.UpdateResult
+import com.xavierxia.mycelium.BuildConfig
+import com.xavierxia.mycelium.update.UpdateManager
+import com.xavierxia.mycelium.update.UpdateResult
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NivraApp(updateManager: UpdateManager = remember { UpdateManager() }) {
+fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var updateState by remember { mutableStateOf<UpdateResult?>(null) }
@@ -42,7 +42,7 @@ fun NivraApp(updateManager: UpdateManager = remember { UpdateManager() }) {
 
     MaterialTheme {
         Scaffold(
-            topBar = { TopAppBar(title = { Text("Nivra") }) }
+            topBar = { TopAppBar(title = { Text("知衍") }) }
         ) { innerPadding ->
             Column(
                 modifier = Modifier

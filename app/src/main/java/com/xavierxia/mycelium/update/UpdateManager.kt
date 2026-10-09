@@ -1,6 +1,6 @@
-package com.nivra.app.update
+package com.xavierxia.mycelium.update
 
-import com.nivra.app.BuildConfig
+import com.xavierxia.mycelium.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

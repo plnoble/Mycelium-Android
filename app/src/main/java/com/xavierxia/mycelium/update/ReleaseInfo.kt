@@ -1,4 +1,4 @@
-package com.nivra.app.update
+package com.xavierxia.mycelium.update
 
 data class ReleaseInfo(
     val versionName: String,
