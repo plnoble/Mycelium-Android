@@ -12,9 +12,9 @@ android {
         minSdk = 29
         targetSdk = 37
         // 版本号规则（P0-9 补充任务书一）：versionName 与标签（去掉 v）一致；每次发布 versionCode +1。
-        // v0.1.0 = 改名为知衍的首个正式版。
-        versionCode = 1
-        versionName = "0.1.0"
+        // v0.1.0 = 改名为知衍的首个正式版。v0.1.1 只升版本号，用来验证应用内更新。
+        versionCode = 2
+        versionName = "0.1.1"
 
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
         buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
