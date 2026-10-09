@@ -4,18 +4,20 @@ plugins {
 }
 
 android {
-    namespace = "com.nivra.app"
+    namespace = "com.xavierxia.mycelium"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.nivra.app"
+        applicationId = "com.xavierxia.mycelium"
         minSdk = 29
         targetSdk = 37
+        // 版本号规则（P0-9 补充任务书一）：versionName 与标签（去掉 v）一致；每次发布 versionCode +1。
+        // v0.1.0 = 改名为知衍的首个正式版。
         versionCode = 1
-        versionName = "0.0.1"
+        versionName = "0.1.0"
 
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
-        buildConfigField("String", "GITHUB_REPO", "\"Nivra\"")
+        buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
     }
 
     buildFeatures {
@@ -53,13 +55,13 @@ android {
                 "proguard-rules.pro"
             )
 
-            val keystorePath = System.getenv("NIVRA_KEYSTORE_PATH")
+            val keystorePath = System.getenv("MYCELIUM_ANDROID_KEYSTORE_PATH")
             if (!keystorePath.isNullOrBlank()) {
                 signingConfigs.create("release") {
                     storeFile = file(keystorePath)
-                    storePassword = System.getenv("NIVRA_KEYSTORE_PASSWORD")
-                    keyAlias = System.getenv("NIVRA_KEY_ALIAS")
-                    keyPassword = System.getenv("NIVRA_KEY_PASSWORD")
+                    storePassword = System.getenv("MYCELIUM_ANDROID_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("MYCELIUM_ANDROID_KEY_ALIAS")
+                    keyPassword = System.getenv("MYCELIUM_ANDROID_KEY_PASSWORD")
                 }
                 signingConfig = signingConfigs.getByName("release")
             }

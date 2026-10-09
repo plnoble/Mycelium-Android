@@ -1,6 +1,6 @@
-package com.nivra.app.update
+package com.xavierxia.mycelium.update
 
-import com.nivra.app.BuildConfig
+import com.xavierxia.mycelium.BuildConfig
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -18,7 +18,7 @@ class GitHubReleaseClientTest {
         val connection = FakeConnection(404)
         val client = GitHubReleaseClient { url ->
             assertEquals(
-                "https://api.github.com/repos/plnoble/Nivra/releases/latest",
+                "https://api.github.com/repos/plnoble/Mycelium-Android/releases/latest",
                 url.toString()
             )
             connection
@@ -33,7 +33,7 @@ class GitHubReleaseClientTest {
         assertEquals("application/vnd.github+json", connection.getRequestProperty("Accept"))
         assertEquals("2022-11-28", connection.getRequestProperty("X-GitHub-Api-Version"))
         assertEquals(
-            "Nivra-Android/${BuildConfig.VERSION_NAME}",
+            "Mycelium-Android/${BuildConfig.VERSION_NAME}",
             connection.getRequestProperty("User-Agent")
         )
     }
@@ -43,10 +43,10 @@ class GitHubReleaseClientTest {
         val connection = FakeConnection(200, """
             {
               "tag_name": "v0.0.2",
-              "html_url": "https://github.com/plnoble/Nivra/releases/tag/v0.0.2",
+              "html_url": "https://github.com/plnoble/Mycelium-Android/releases/tag/v0.0.2",
               "assets": [
-                {"name": "nivra.apk.sha256", "browser_download_url": "https://example.com/checksum"},
-                {"name": "nivra.APK", "browser_download_url": "https://example.com/nivra.apk"}
+                {"name": "mycelium.apk.sha256", "browser_download_url": "https://example.com/checksum"},
+                {"name": "mycelium.apk", "browser_download_url": "https://example.com/mycelium-r.apk"}
               ]
             }
         """.trimIndent())
@@ -55,7 +55,7 @@ class GitHubReleaseClientTest {
 
         assertEquals("0.0.2", release.versionName)
         assertEquals("v0.0.2", release.tagName)
-        assertEquals("https://example.com/nivra.apk", release.apkDownloadUrl)
+        assertEquals("https://example.com/mycelium-r.apk", release.apkDownloadUrl)
         assertTrue(connection.disconnected)
     }
 

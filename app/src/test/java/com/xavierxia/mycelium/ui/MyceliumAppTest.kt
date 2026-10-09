@@ -1,4 +1,4 @@
-package com.nivra.app.ui
+package com.xavierxia.mycelium.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -6,9 +6,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.nivra.app.update.GitHubReleaseClient
-import com.nivra.app.update.ReleaseSource
-import com.nivra.app.update.UpdateManager
+import com.xavierxia.mycelium.update.GitHubReleaseClient
+import com.xavierxia.mycelium.update.ReleaseSource
+import com.xavierxia.mycelium.update.UpdateManager
 import java.io.IOException
 import java.net.HttpURLConnection
 import org.junit.Rule
@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
-class NivraAppTest {
+class MyceliumAppTest {
     @get:Rule
     val compose = createComposeRule()
 
@@ -33,30 +33,30 @@ class NivraAppTest {
                 override fun usingProxy() = false
             }
         })
-        compose.setContent { NivraApp(manager) }
+        compose.setContent { MyceliumApp(manager) }
 
         repeat(2) {
-            compose.onNodeWithText("Check GitHub for updates").performClick()
-            awaitText("No GitHub Release has been published yet.")
-            compose.onNodeWithText("Check GitHub for updates").assertIsEnabled()
+            compose.onNodeWithText("检查更新").performClick()
+            awaitText("还没有发布过任何版本。")
+            compose.onNodeWithText("检查更新").assertIsEnabled()
         }
     }
 
     @Test
     fun failedCheckDisplaysErrorAndAllowsRetry() {
         val manager = UpdateManager(ReleaseSource { throw IOException("Network unavailable") })
-        compose.setContent { NivraApp(manager) }
+        compose.setContent { MyceliumApp(manager) }
 
-        compose.onNodeWithText("Check GitHub for updates").performClick()
+        compose.onNodeWithText("检查更新").performClick()
 
-        awaitText("Update check failed: Network unavailable")
-        compose.onNodeWithText("Check GitHub for updates").assertIsEnabled()
+        awaitText("检查更新失败：Network unavailable")
+        compose.onNodeWithText("检查更新").assertIsEnabled()
     }
 
     private fun awaitText(text: String) {
         compose.waitUntil(timeoutMillis = 5_000) {
             compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodesWithText("Check GitHub for updates").fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithText("检查更新").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText(text).assertIsDisplayed()
     }

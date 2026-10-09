@@ -1,3 +1,5 @@
+> 更名说明：本文件为历史记录（原名 Nivra，2026-09-29 更名为 Mycelium（知衍）安卓版）。正文未改。
+
 # Phase 0 — Foundation
 
 ## Objective

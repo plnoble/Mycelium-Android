@@ -1,6 +1,6 @@
-package com.nivra.app.update
+package com.xavierxia.mycelium.update
 
-import com.nivra.app.BuildConfig
+import com.xavierxia.mycelium.BuildConfig
 import java.io.IOException
 import java.net.HttpURLConnection
 import kotlinx.coroutines.CancellationException
@@ -66,7 +66,7 @@ class UpdateManagerTest {
     private fun release(version: String) = ReleaseInfo(
         versionName = version,
         tagName = "v$version",
-        releasePageUrl = "https://github.com/plnoble/Nivra/releases/tag/v$version",
-        apkDownloadUrl = "https://example.com/nivra.apk"
+        releasePageUrl = "https://github.com/plnoble/Mycelium-Android/releases/tag/v$version",
+        apkDownloadUrl = "https://example.com/mycelium-r.apk"
     )
 }

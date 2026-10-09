@@ -1,3 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Nivra</string>
+    <string name="app_name">知衍</string>
+    <string name="home_subtitle">知衍 · 安卓外壳</string>
+    <string name="home_phase">阶段 0 · 基础框架</string>
+    <string name="home_desc">这是第一个公开版本的外壳。聊天功能还在开发，之后会通过应用内更新一路升级。</string>
+    <string name="home_check_updates">检查更新</string>
+    <string name="update_latest">你已经是最新版本。</string>
+    <string name="update_new_version">发现新版本：%1$s</string>
+    <string name="update_open_apk">打开下载页面</string>
+    <string name="update_none_published">还没有发布过任何版本。</string>
+    <string name="update_failed">检查更新失败：%1$s</string>
 </resources>

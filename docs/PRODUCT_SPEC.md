@@ -1,8 +1,8 @@
-# Nivra Product Specification
+# Mycelium（知衍）安卓版 Product Specification
 
 ## 1. Product definition
 
-Nivra is an Android-native, local-first AI companion.
+Mycelium（知衍）安卓版 is an Android-native, local-first AI companion.
 
 The initial product is not a generic assistant and not a 3D virtual character. Its purpose is to create the feeling of continuity with one persistent digital character through:
 
@@ -105,6 +105,6 @@ These values are internal behavioral signals, not a gamified score shown to the 
 
 ## 7. First meaningful acceptance test
 
-Nivra should be able to remember an important detail from an earlier conversation and recall it naturally days later when contextually relevant, without the user explicitly asking it to remember.
+Mycelium（知衍）安卓版 should be able to remember an important detail from an earlier conversation and recall it naturally days later when contextually relevant, without the user explicitly asking it to remember.
 
 The goal is not perfect recall. The goal is contextual continuity.

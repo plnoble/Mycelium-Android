@@ -5,7 +5,7 @@
 ## 0. 名称
 
 - 两端软件都叫 **Mycelium（知衍）**。本仓库是**知衍安卓版**。
-- 仓库现在叫 `Nivra`，将按 P0-9 改名为 `Mycelium-Android`：
+- 仓库原叫 `Nivra`（2026-09-29 更名），现在叫 `Mycelium-Android`：
   - App 显示名改为「知衍」；
   - 包名改为 `com.xavierxia.mycelium`。
 - **「Nivra」不再用于产品**，只作为旧仓库名留在历史说明里。

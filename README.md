@@ -1,6 +1,6 @@
-# Nivra
+# Mycelium（知衍）安卓版
 
-Nivra is a local-first Android AI companion focused on long-term character consistency, memory, voice conversation, and relationship continuity.
+Mycelium（知衍）安卓版 is a local-first Android AI companion focused on long-term character consistency, memory, voice conversation, and relationship continuity.
 
 ## Product principles
 
@@ -85,7 +85,7 @@ Mood / State Engine |
 
 ## Updating
 
-Nivra will use GitHub Releases as its primary release channel.
+Mycelium（知衍）安卓版 will use GitHub Releases as its primary release channel.
 
 The Android app will:
 1. Check the latest compatible GitHub Release.
@@ -118,7 +118,7 @@ On Linux/macOS, use `./gradlew` with the same tasks. The wrapper pins Gradle
 9.5.0 and verifies the distribution's SHA-256 checksum.
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
-Open the app to see **Nivra / Phase 0 · Foundation**, then tap
+Open the app to see **Mycelium（知衍）安卓版 / Phase 0 · Foundation**, then tap
 **Check GitHub for updates**. If the repository has no published release,
 the app displays **No GitHub Release has been published yet.**
 
