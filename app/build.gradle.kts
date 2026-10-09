@@ -11,8 +11,10 @@ android {
         applicationId = "com.xavierxia.mycelium"
         minSdk = 29
         targetSdk = 37
+        // 版本号规则（P0-9 补充任务书一）：versionName 与标签（去掉 v）一致；每次发布 versionCode +1。
+        // v0.1.0 = 改名为知衍的首个正式版。
         versionCode = 1
-        versionName = "0.0.1"
+        versionName = "0.1.0"
 
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
         buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
