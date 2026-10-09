@@ -21,7 +21,7 @@
 | `rg -i nivra`（排除 .git/build/PHASE_0*/work-packages/reviews） | 代码与配置 **0 命中**；剩余命中为历史说明（docs/MYCELIUM_INTEGRATION.md 的「原名 Nivra」句）与历史评审记录（docs/reviews/2026-10-05-P0-6/），逐条允许 |
 | `gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`（--rerun-tasks，ANDROID_HOME） | **全过**：19/19 测试、lint 0 error / 5 warning（与基线同口径） |
 | aapt dump badging | `package name='com.xavierxia.mycelium' versionName='0.0.1'`、`application-label:'知衍'` |
-| 真机（红魔）安装启动 | Success；`mCurrentFocus=…com.xavierxia.mycelium/.MainActivity`；首屏截图 `p09-first-screen.png`（OCR 核对含「知衍」「Version 0.0.1」），**待 Claude 看图** |
+| 真机（红魔）安装启动 | Success；`mCurrentFocus=…com.xavierxia.mycelium/.MainActivity`；首屏截图不入公开仓库（状态栏含用户手机通知），改放 Windows 评审目录 `.omx/development/reviews/2026-10-09-android-P0-9/p09-first-screen-0.1.0.png`（0.1.0 中文版，OCR 已核对），**待 Claude 看图** |
 | 更新检查假响应 | 单测 `publishedReleaseSelectsApkAsset` 等断言 `plnoble/Mycelium-Android` 与 UA（注意：旧测试里 APK 资源名 `nivra.APK` 是 `.apk` 点号结尾才被选择器命中，改名时曾误改成 `mycelium-APK` 导致 1 条测试红，已还原为带点号的 `mycelium.apk`） |
 | 版本号 | 0.0.1 / 1，未动 |
 
