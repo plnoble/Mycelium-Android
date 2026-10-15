@@ -52,18 +52,20 @@ fun searchPack(database: PackDatabase, query: String, limit: Int, includeInactiv
     )
 }
 
-/** SPEC §5: lowercase, split on non-alphanumerics, CJK bigrams minus stop words, then sort. */
+/**
+ * SPEC §5: lowercase, split where Rust `char::is_alphanumeric` is false, CJK bigrams minus
+ * stop words, then sort. Counts and windows are Unicode scalars, not UTF-16 units.
+ */
 fun searchTerms(query: String): List<String> {
     val terms = sortedSetOf<String>()
-    query.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.forEach { segment ->
+    splitScalars(query.lowercase()) { !isAlphanumeric(it) }.forEach { segment ->
         if (segment.any { isCjk(it) }) {
-            val chars = segment.toList()
-            chars.windowed(2).forEach { window ->
+            segment.windowed(2).forEach { window ->
                 val term = window.joinToString("")
                 if (term !in stopBigrams) terms += term
             }
-        } else if (segment.length >= 2) {
-            terms += segment
+        } else if (segment.size >= 2) {
+            terms += segment.joinToString("")
         }
     }
     return terms.toList()
@@ -103,7 +105,9 @@ private fun hybridHits(
     limit: Int,
     includeInactive: Boolean,
 ): List<SearchHit> {
-    val expression = query.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val expression = splitScalars(query) { isUnicodeWhitespace(it) }
+        .map { it.joinToString("") }
+        .filter { it.isNotEmpty() }
         .joinToString(" AND ") { "\"${it.replace("\"", "\"\"")}\"" }
     val exact = database.read { db ->
         db.query(
@@ -183,8 +187,42 @@ private fun PackRow.toHit() = SearchHit(
     excerpt = text(3),
 )
 
-private fun isCjk(ch: Char): Boolean = ch.code in 0x3400..0x4DBF ||
-    ch.code in 0x4E00..0x9FFF ||
-    ch.code in 0xF900..0xFAFF
+private fun isCjk(scalar: String): Boolean {
+    val code = scalar.codePointAt(0)
+    return code in 0x3400..0x4DBF || code in 0x4E00..0x9FFF || code in 0xF900..0xFAFF
+}
+
+/** Rust `char::is_alphanumeric`: Alphabetic, or number class Nd / Nl / No. */
+private fun isAlphanumeric(codePoint: Int): Boolean {
+    val type = Character.getType(codePoint)
+    return Character.isAlphabetic(codePoint) ||
+        type == Character.DECIMAL_DIGIT_NUMBER.toInt() ||
+        type == Character.LETTER_NUMBER.toInt() ||
+        type == Character.OTHER_NUMBER.toInt()
+}
+
+/** Rust `split_whitespace`: Unicode White_Space, except non-breaking spaces (U+00A0 and kin). */
+private fun isUnicodeWhitespace(codePoint: Int): Boolean =
+    Character.isWhitespace(codePoint) || codePoint == 0x85
+
+/** Splits on Unicode scalars. A predicate true means a separator, matching Rust `split`. */
+private fun splitScalars(text: String, isSeparator: (Int) -> Boolean): List<List<String>> {
+    val segments = mutableListOf<List<String>>()
+    val current = mutableListOf<String>()
+    var index = 0
+    while (index < text.length) {
+        val codePoint = text.codePointAt(index)
+        val count = Character.charCount(codePoint)
+        if (isSeparator(codePoint)) {
+            segments += current.toList()
+            current.clear()
+        } else {
+            current += text.substring(index, index + count)
+        }
+        index += count
+    }
+    segments += current.toList()
+    return segments
+}
 
 private fun String.codePointCount(): Int = codePointCount(0, length)

@@ -20,7 +20,7 @@ class ChecksumTest {
             assertTrue(path.isRegularFile(), "契约文件缺失：$name")
             val digest = MessageDigest.getInstance("SHA-256").digest(path.readBytes())
                 .joinToString("") { "%02x".format(it) }
-            assertEquals(expected[name]!!.asText(), digest, name)
+            assertEquals(expected[name]!!.asTextOrNull(), digest, name)
         }
         val present = root.toFile().walkTopDown().filter { it.isFile }
             .map { it.toPath().relativeTo(root).toString().replace('\\', '/') }

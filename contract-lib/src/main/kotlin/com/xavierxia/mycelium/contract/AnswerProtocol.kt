@@ -41,7 +41,7 @@ fun renderSystemPrompt(template: String, modeRule: String): String =
     template.replace("{mode_rule}", modeRule).replace("{max_statements}", MAX_STATEMENTS.toString())
 
 fun modeRule(rulesJson: String, mode: AnswerMode): String =
-    parseJson(rulesJson)[mode.id]?.asText() ?: throw AnswerRejected("模式规则缺少 ${mode.id}", "bad_mode")
+    parseJson(rulesJson)[mode.id]?.asTextOrNull() ?: throw AnswerRejected("模式规则缺少 ${mode.id}", "bad_mode")
 
 /** Validates one model output and renders it. A rejection is a result, not an exception. */
 fun validateAnswer(outputText: String, mode: AnswerMode, offeredCitationIds: Set<String>): AnswerOutcome {
@@ -53,7 +53,11 @@ fun validateAnswer(outputText: String, mode: AnswerMode, offeredCitationIds: Set
     if (statementsNode.size() > MAX_STATEMENTS) {
         return AnswerOutcome.Rejected("over_statement_limit", "人物回答超过 $MAX_STATEMENTS 条陈述上限")
     }
-    val refusal = node["refusal_reason"]?.asText()?.trim()?.takeIf { it.isNotEmpty() }
+    val refusalNode = node["refusal_reason"]
+    if (refusalNode != null && !refusalNode.isNull && refusalNode.asTextOrNull() == null) {
+        return AnswerOutcome.Rejected("invalid_json", "人物回答不是合法 JSON")
+    }
+    val refusal = refusalNode?.asTextOrNull()?.trim()?.takeIf { it.isNotEmpty() }
     if (statementsNode.isEmpty()) {
         if (refusal == null) {
             return AnswerOutcome.Rejected("empty_without_refusal", "人物回答没有陈述，也没有说明拒答原因")
@@ -95,22 +99,32 @@ private fun checkStatement(
     mode: AnswerMode,
     offered: Set<String>,
 ): AnswerOutcome {
-    val text = statement["text"]?.asText()?.trim().orEmpty()
+    if (!statement.isObject) return AnswerOutcome.Rejected("invalid_json", "人物回答不是合法 JSON")
+    val textNode = statement["text"]
+    val kindNode = statement["kind"]
+    val citationNode = statement["citation_ids"]
+    if (textNode?.asTextOrNull() == null ||
+        kindNode?.asTextOrNull() == null ||
+        citationNode?.stringElementsOrNull() == null
+    ) {
+        return AnswerOutcome.Rejected("invalid_json", "人物回答不是合法 JSON")
+    }
+    val text = textNode.asTextOrNull()!!.trim()
     if (text.isEmpty() || text.codePointCount() > MAX_STATEMENT_CHARS) {
         return AnswerOutcome.Rejected("statement_too_long", "人物回答第 $index 条陈述为空或超过字数上限")
     }
     if (text.contains("[C") || text.contains("【C")) {
         return AnswerOutcome.Rejected("self_written_citation", "人物回答第 $index 条自行写入了引用标记")
     }
-    val kind = statement["kind"]?.asText().orEmpty()
+    val kind = kindNode.asTextOrNull()!!
     if (kind != "evidence" && kind != "inference") {
         return AnswerOutcome.Rejected("bad_kind", "人物回答第 $index 条 kind 非法")
     }
     if (mode == AnswerMode.StrictEvidence && kind == "inference") {
         return AnswerOutcome.Rejected("inference_in_strict_mode", "严格证据模式出现了推演陈述")
     }
-    val citationIds = statement["citation_ids"]?.takeIf { it.isArray }?.elements()
-        ?.map { it.asText().trim() }?.filter { it.isNotEmpty() }?.toSortedSet()?.toList().orEmpty()
+    val citationIds = citationNode.stringElementsOrNull()!!
+        .map { it.trim() }.filter { it.isNotEmpty() }.toSortedSet().toList()
     if (citationIds.isEmpty()) {
         return AnswerOutcome.Rejected("no_citation", "人物回答第 $index 条没有引用")
     }

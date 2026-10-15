@@ -82,21 +82,25 @@ fun validateManifest(manifestBytes: ByteArray, schemaJson: String): PersonaManif
         publishedAt = node.require("published_at"),
         dataCutoff = node.require("data_cutoff"),
         counts = PackCounts(
-            sources = counts["sources"]!!.asInt(),
-            claims = counts["claims"]!!.asInt(),
-            themes = counts["themes"]!!.asInt(),
-            relationships = counts["relationships"]!!.asInt(),
-            evidence = counts["evidence"]!!.asInt(),
+            sources = counts.requireInt("sources"),
+            claims = counts.requireInt("claims"),
+            themes = counts.requireInt("themes"),
+            relationships = counts.requireInt("relationships"),
+            evidence = counts.requireInt("evidence"),
         ),
         ftsTokenizer = node.require("fts_tokenizer"),
         answerProtocolVersion = node.require("answer_protocol_version"),
-        includesFullText = node["includes_full_text"]!!.asBoolean(),
+        includesFullText = node["includes_full_text"]?.asBooleanOrNull()
+            ?: throw PackRejected("manifest 的 includes_full_text 不是布尔"),
         logicalSha256 = node.require("logical_sha256"),
     )
 }
 
 private fun JsonValue.require(field: String): String =
-    this[field]?.asText() ?: throw PackRejected("manifest 缺少 $field")
+    this[field]?.asTextOrNull() ?: throw PackRejected("manifest 的 $field 不是字符串")
+
+private fun JsonValue.requireInt(field: String): Int =
+    this[field]?.asIntOrNull() ?: throw PackRejected("manifest 的 $field 不是整数")
 
 private fun readZipEntries(bytes: ByteArray): List<Pair<String, ByteArray>> {
     val entries = mutableListOf<Pair<String, ByteArray>>()

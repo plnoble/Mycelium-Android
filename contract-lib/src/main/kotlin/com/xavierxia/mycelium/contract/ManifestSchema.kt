@@ -19,7 +19,7 @@ private fun checkObject(node: JsonValue, schema: JsonValue, path: String, errors
         errors += "$path 不是对象"
         return
     }
-    val required = schema["required"]?.elements()?.map { it.asText() }.orEmpty()
+    val required = schema["required"]?.elements()?.mapNotNull { it.asTextOrNull() }.orEmpty()
     required.filter { node[it] == null }.forEach { errors += "$path 缺少 $it" }
     val properties = schema["properties"]
     val additional = schema["additionalProperties"]?.asBooleanOrNull() ?: true
@@ -35,33 +35,49 @@ private fun checkObject(node: JsonValue, schema: JsonValue, path: String, errors
 
 private fun checkValue(node: JsonValue, schema: JsonValue, path: String, errors: MutableList<String>) {
     schema["const"]?.let { expected ->
-        if (node.asText() != expected.asText()) errors += "$path 必须是 ${expected.asText()}"
+        if (!sameJson(node, expected)) errors += "$path 必须是 ${expected.asTextOrNull() ?: expected.typeName()}"
     }
-    schema["type"]?.let { type ->
-        val allowed = if (type.isArray) type.elements().map { it.asText() } else listOf(type.asText())
-        if (node.typeName() !in allowed) errors += "$path 类型是 ${node.typeName()}，要求 $allowed"
+    val typeMatches = schema["type"]?.let { type ->
+        val allowed = if (type.isArray) type.elements().map { it.asTextOrNull().orEmpty() } else listOf(type.asTextOrNull().orEmpty())
+        val matches = node.typeName() in allowed
+        if (!matches) errors += "$path 类型是 ${node.typeName()}，要求 $allowed"
+        matches
+    } ?: true
+    // A wrong type is only a validation error. Do not read it as a string or integer.
+    if (!typeMatches) return
+    schema["pattern"]?.asTextOrNull()?.let { pattern ->
+        val text = node.asTextOrNull() ?: return@let
+        if (!text.matches(Regex(pattern))) errors += "$path 不符合 $pattern"
     }
-    schema["pattern"]?.let { pattern ->
-        if (node.asText().matches(Regex(pattern.asText())).not()) {
-            errors += "$path 不符合 ${pattern.asText()}"
-        }
+    schema["minLength"]?.asIntOrNull()?.let { minimum ->
+        val text = node.asTextOrNull() ?: return@let
+        if (text.length < minimum) errors += "$path 短于 $minimum"
     }
-    schema["minLength"]?.let { minimum ->
-        if (node.asText().length < minimum.asInt()) errors += "$path 短于 ${minimum.asInt()}"
+    schema["minimum"]?.asIntOrNull()?.let { minimum ->
+        val actual = node.asIntOrNull() ?: return@let
+        if (actual < minimum) errors += "$path 小于 $minimum"
     }
-    schema["minimum"]?.let { minimum ->
-        if (node.isObject.not() && node.asInt() < minimum.asInt()) errors += "$path 小于 ${minimum.asInt()}"
-    }
-    schema["format"]?.let { format ->
-        if (format.asText() == "date-time") {
-            try {
-                OffsetDateTime.parse(node.asText())
-            } catch (_: Exception) {
+    schema["format"]?.asTextOrNull()?.let { format ->
+        if (format == "date-time") {
+            val text = node.asTextOrNull()
+            if (text == null || runCatching { OffsetDateTime.parse(text) }.isFailure) {
                 errors += "$path 不是 RFC 3339 时间"
             }
         }
     }
-    if (schema["type"]?.asText() == "object" || schema["properties"] != null) {
+    if (schema["type"]?.asTextOrNull() == "object" || schema["properties"] != null) {
         checkObject(node, schema, path, errors)
+    }
+}
+
+/** JSON Schema `const` compares type and value. `"0.1"` and `0.1` are not the same. */
+private fun sameJson(actual: JsonValue, expected: JsonValue): Boolean {
+    if (actual.typeName() != expected.typeName()) return false
+    return when (actual.typeName()) {
+        "null" -> true
+        "string" -> actual.asTextOrNull() == expected.asTextOrNull()
+        "boolean" -> actual.asBooleanOrNull() == expected.asBooleanOrNull()
+        "integer", "number" -> actual.asNumberOrNull() == expected.asNumberOrNull()
+        else -> false
     }
 }

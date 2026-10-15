@@ -4,8 +4,23 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 
-/** Strict JSON. Trailing commas and other repairs are rejected on purpose (VALIDATION.md §1.3). */
-fun parseJson(text: String): JsonValue = JsonValue(JSONTokener(text).nextValue())
+/**
+ * One JSON value, then only whitespace. org.json still accepts a trailing comma
+ * (the desktop reference repairs that); that is not a contract behavior (VALIDATION.md §1.3).
+ * Unquoted values and single quotes are not JSON and are rejected.
+ */
+fun parseJson(text: String): JsonValue {
+    requireStrictJson(text)
+    val tokener = JSONTokener(text)
+    val value = JsonValue(tokener.nextValue())
+    while (tokener.more()) {
+        val next = tokener.next()
+        if (next != ' ' && next != '\n' && next != '\r' && next != '\t') {
+            throw IllegalArgumentException("JSON 值后面还有内容")
+        }
+    }
+    return value
+}
 
 class JsonValue(private val raw: Any?) {
     val isNull: Boolean get() = raw == null || raw == JSONObject.NULL
@@ -19,16 +34,21 @@ class JsonValue(private val raw: Any?) {
         return JsonValue(if (obj.isNull(name)) null else obj.get(name))
     }
 
-    fun asText(): String = when (raw) {
-        is String -> raw
-        null, JSONObject.NULL -> ""
-        else -> raw.toString()
+    fun asTextOrNull(): String? = raw as? String
+
+    fun stringElementsOrNull(): List<String>? {
+        if (raw !is JSONArray) return null
+        return List(raw.length()) { index -> raw.get(index) as? String ?: return null }
     }
 
-    fun asInt(): Int = when (raw) {
-        is Number -> raw.toInt()
-        else -> error("不是整数：$raw")
+    fun asInt(): Int = asIntOrNull() ?: error("不是整数：$raw")
+
+    fun asIntOrNull(): Int? = when (raw) {
+        is Int, is Long -> (raw as Number).toInt()
+        else -> null
     }
+
+    fun asNumberOrNull(): Double? = (raw as? Number)?.toDouble()
 
     fun asBoolean(): Boolean = when (raw) {
         is Boolean -> raw
@@ -55,4 +75,70 @@ class JsonValue(private val raw: Any?) {
         is Number -> "number"
         else -> "string"
     }
+}
+
+/**
+ * org.json accepts single quotes and unquoted keys. Those are not JSON.
+ * A trailing comma is still accepted here; the desktop side repairs it, and that is not a contract.
+ */
+private fun requireStrictJson(text: String) {
+    var index = 0
+    var inString = false
+    var escaped = false
+    while (index < text.length) {
+        val ch = text[index]
+        if (inString) {
+            when {
+                escaped -> escaped = false
+                ch == '\\' -> escaped = true
+                ch == '"' -> inString = false
+                ch.code < 0x20 -> throw IllegalArgumentException("字符串里有未转义控制字符")
+            }
+            index++
+            continue
+        }
+        index = when (ch) {
+            '"' -> {
+                inString = true
+                index + 1
+            }
+            '{', '}', '[', ']', ':', ',', ' ', '\n', '\r', '\t' -> index + 1
+            '-', in '0'..'9' -> consumeJsonNumber(text, index)
+            't' -> consumeLiteral(text, index, "true")
+            'f' -> consumeLiteral(text, index, "false")
+            'n' -> consumeLiteral(text, index, "null")
+            else -> throw IllegalArgumentException("不是合法 JSON")
+        }
+    }
+    if (inString) throw IllegalArgumentException("不是合法 JSON")
+}
+
+private fun consumeLiteral(text: String, start: Int, literal: String): Int {
+    if (!text.startsWith(literal, start)) throw IllegalArgumentException("不是合法 JSON")
+    return start + literal.length
+}
+
+private fun consumeJsonNumber(text: String, start: Int): Int {
+    var index = start
+    if (text[index] == '-') index++
+    if (index >= text.length || !text[index].isDigit()) throw IllegalArgumentException("不是合法 JSON")
+    if (text[index] == '0') {
+        index++
+    } else {
+        while (index < text.length && text[index].isDigit()) index++
+    }
+    if (index < text.length && text[index] == '.') {
+        index++
+        val fraction = index
+        while (index < text.length && text[index].isDigit()) index++
+        if (index == fraction) throw IllegalArgumentException("不是合法 JSON")
+    }
+    if (index < text.length && (text[index] == 'e' || text[index] == 'E')) {
+        index++
+        if (index < text.length && (text[index] == '+' || text[index] == '-')) index++
+        val exponent = index
+        while (index < text.length && text[index].isDigit()) index++
+        if (index == exponent) throw IllegalArgumentException("不是合法 JSON")
+    }
+    return index
 }

@@ -17,11 +17,11 @@ class AnswerVectorTest {
             val input = case["input"]!!
             val expected = case["expected"]!!
             val outcome = validateAnswer(
-                input["output_text"]!!.asText(),
-                AnswerMode.fromId(input["mode"]!!.asText()),
-                input["offered_citation_ids"]!!.elements().map { it.asText() }.toSet(),
+                input["output_text"]!!.asTextOrNull()!!,
+                AnswerMode.fromId(input["mode"]!!.asTextOrNull()!!),
+                input["offered_citation_ids"]!!.elements().map { it.asTextOrNull()!! }.toSet(),
             )
-            val id = case["id"]!!.asText()
+            val id = case["id"]!!.asTextOrNull()!!
             when (outcome) {
                 is AnswerOutcome.Accepted -> {
                     assertTrue(expected["accepted"]!!.asBoolean(), id)
@@ -31,7 +31,7 @@ class AnswerVectorTest {
                 }
                 is AnswerOutcome.Rejected -> {
                     assertEquals(false, expected["accepted"]!!.asBoolean(), id)
-                    assertEquals(expected["error"]!!.asText(), outcome.error, "$id: ${outcome.message}")
+                    assertEquals(expected["error"]!!.asTextOrNull(), outcome.error, "$id: ${outcome.message}")
                 }
             }
         }
@@ -48,6 +48,27 @@ class AnswerVectorTest {
         assertTrue(rendered.contains("最多 12 条 statements"))
         assertTrue(!rendered.contains("{mode_rule}") && !rendered.contains("{max_statements}"))
     }
+
+    @Test
+    fun wrongTypesAndTrailingTextAreInvalidJson() {
+        val offered = setOf("C1")
+        listOf(
+            """{"statements":[{"text":123,"kind":"evidence","citation_ids":["C1"]}],"refusal_reason":null}""",
+            """{"statements":[{"text":{"a":1},"kind":"evidence","citation_ids":["C1"]}],"refusal_reason":null}""",
+            """{"statements":[],"refusal_reason":123}""",
+            """{"statements":[],"refusal_reason":true}""",
+            """{"statements":[{"text":"一句","kind":"evidence","citation_ids":["C1"]}],"refusal_reason":null} 以上是回答""",
+            """{'statements':[],'refusal_reason':'没有'}""",
+            """{statements:[],"refusal_reason":null}""",
+            """{"statements":["一句"],"refusal_reason":null}""",
+            """{"statements":[{"text":"一句","kind":1,"citation_ids":["C1"]}],"refusal_reason":null}""",
+            """{"statements":[{"text":"一句","kind":"evidence","citation_ids":[1]}],"refusal_reason":null}""",
+        ).forEach { output ->
+            val outcome = validateAnswer(output, AnswerMode.StrictEvidence, offered)
+            assertTrue(outcome is AnswerOutcome.Rejected, output)
+            assertEquals("invalid_json", (outcome as AnswerOutcome.Rejected).error, output)
+        }
+    }
 }
 
-private fun JsonValue.nullableText(): String? = if (isNull) null else asText()
+private fun JsonValue.nullableText(): String? = if (isNull) null else asTextOrNull()

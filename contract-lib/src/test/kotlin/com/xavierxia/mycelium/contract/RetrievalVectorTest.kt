@@ -1,6 +1,7 @@
 package com.xavierxia.mycelium.contract
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.io.path.readText
 
@@ -14,13 +15,32 @@ class RetrievalVectorTest {
         cases.elements().forEach { case ->
             val result = searchPack(
                 database,
-                case["query"]!!.asText(),
+                case["query"]!!.asTextOrNull()!!,
                 case["limit"]!!.asInt(),
                 case["include_inactive"]!!.asBoolean(),
             )
-            val id = case["id"]!!.asText()
-            assertEquals(case["strategy"]!!.asText(), result.strategy, id)
-            assertEquals(case["expected"]!!.elements().map { it.asText() }, result.hits.map { it.documentKey }, id)
+            val id = case["id"]!!.asTextOrNull()!!
+            assertEquals(case["strategy"]!!.asTextOrNull(), result.strategy, id)
+            assertEquals(case["expected"]!!.elements().map { it.asTextOrNull() }, result.hits.map { it.documentKey }, id)
         }
+    }
+
+    @Test
+    fun ideographicSpaceSplitsALongQueryTheSameWayAsAsciiSpace() {
+        val files = ContractFiles(contractRoot())
+        val database = SqliteJdbcPackDatabase(files.sampleDatabase().toString())
+        val ascii = searchPack(database, "记账改 变的是", 10, false)
+        val ideographic = searchPack(database, "记账改\u3000变的是", 10, false)
+        assertEquals(ascii.hits.map { it.documentKey }, ideographic.hits.map { it.documentKey })
+        assertEquals(ascii.hits.map { it.relevance }, ideographic.hits.map { it.relevance })
+        assertTrue(ascii.hits.any { it.documentKey == "claim:lc-claim-record-1" })
+    }
+
+    @Test
+    fun searchTermsCountSupplementaryCharactersAsOneScalar() {
+        assertEquals(listOf("野家", "𠮷野"), searchTerms("𠮷野家"))
+        val lowered = "𝐀B".lowercase()
+        assertEquals(listOf(lowered), searchTerms("𝐀B"))
+        assertEquals(2, lowered.codePointCount(0, lowered.length))
     }
 }
