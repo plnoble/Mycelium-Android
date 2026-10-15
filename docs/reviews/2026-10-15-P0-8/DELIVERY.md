@@ -32,3 +32,4 @@
 
 - manifest 校验按契约 `manifest.schema.json` 的字段、常量、类型和格式执行，没有引入 Jackson。任务书推荐的 `json-schema-validator` 会带进整套 Jackson，本机 Maven Central 握手失败，所以没有用它。
 - 构建用 Android Studio 自带 JBR 25，字节码目标 17，与 `:app` 一致。本机没有单独的 JDK 17。
+- Codex 审核未完成。2026-10-15 用 `codex-cli 0.162.0-alpha.17.2` 试了两次（15:16、15:47），都停在服务重连，没有写出 `REVIEW.md`。`codex doctor` 的结论是 ChatGPT 推理地址请求超时。开审前 5 小时窗口额度 26%，周额度 4%，未到 70% 停审线。结论仍是未验证，等统筹代审或服务恢复后重审。
