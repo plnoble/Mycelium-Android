@@ -1,0 +1,16 @@
+{
+  "id": "v02-inference-accepted",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"顺序决定纪律，因为先扣款后消费的约束在发工资那一刻成立\",\"kind\":\"inference\",\"citation_ids\":[\"C1\"]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": true,
+    "refusal_reason": null,
+    "rendered": "【推演】顺序决定纪律，因为先扣款后消费的约束在发工资那一刻成立 [C1]",
+    "error": null
+  }
+}

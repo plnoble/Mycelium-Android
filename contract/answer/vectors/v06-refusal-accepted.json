@@ -1,0 +1,16 @@
+{
+  "id": "v06-refusal-accepted",
+  "input": {
+    "mode": "strict_evidence",
+    "output_text": "{\"statements\":[],\"refusal_reason\":\"当前材料中没有找到足以回答这个问题的证据。\"}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": true,
+    "refusal_reason": "当前材料中没有找到足以回答这个问题的证据。",
+    "rendered": null,
+    "error": null
+  }
+}

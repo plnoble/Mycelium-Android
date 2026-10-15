@@ -1,0 +1,16 @@
+{
+  "id": "v05-no-citation-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"没有引用的陈述\",\"kind\":\"evidence\",\"citation_ids\":[]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "no_citation"
+  }
+}

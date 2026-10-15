@@ -1,0 +1,16 @@
+{
+  "id": "v07-empty-without-refusal-rejected",
+  "input": {
+    "mode": "strict_evidence",
+    "output_text": "{\"statements\":[],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "empty_without_refusal"
+  }
+}

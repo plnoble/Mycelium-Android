@@ -1,0 +1,16 @@
+{
+  "id": "v08-statements-and-refusal-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"既有陈述\",\"kind\":\"evidence\",\"citation_ids\":[\"C1\"]}],\"refusal_reason\":\"但也想拒答\"}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "statements_and_refusal"
+  }
+}

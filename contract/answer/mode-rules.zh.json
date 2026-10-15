@@ -1,0 +1,5 @@
+{
+  "strict_evidence": "只允许 evidence 陈述；逐条复述或归纳材料明确支持的内容。证据不足时拒答，不得推演。",
+  "thought_inference": "允许 evidence 和 inference；inference 必须由所引证据直接推导，并与明确观点分开。",
+  "role_expression": "允许 evidence 和 inference，并可使用该人物常见的表达角度；不得伪造经历、情绪、承诺、实时状态或材料外观点。"
+}
