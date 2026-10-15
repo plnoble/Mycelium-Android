@@ -5,6 +5,10 @@
   - Windows 侧 P0-8 已产出 `contract/`（含样例包与 `checksums.json`），并通过 Codex 审核；
   - 第 0 阶段和 P0-9 已合并。本包要改 `settings.gradle.kts`。
 - 预计规模：3–4 个工作日
+- 开工补充（2026-10-15，统筹）：
+  - 基准是 `main` 的 `3c7074c`（0.1.1）。契约从 Windows 仓库主线工作区 `D:\Agent\Worktrees\OMNIX-Mycelium\main\contract` 同步，在 `UPSTREAM.md` 里记下那边当时的提交号（契约版本 0.1.0）。
+  - 本包是「人物搬到手机」这条线的第一步，做完接 P1-6（页面和导入）、P1-7（聊天）。
+  - 审核：先用 Codex 审代码。Codex 程序要用 `%LOCALAPPDATA%\OpenAI\Codex\bin\` 下带哈希的最新子目录里的版本（顶层那个是旧版）。Codex 通过后交统筹，由统筹决定合并。
 - 背景：
   - 手机上的角色要和电脑端说话方式一致、搜索结果一致。
   - 契约以知衍为真源，定义角色包格式、检索规则、回答协议，并附带样例和期望结果。

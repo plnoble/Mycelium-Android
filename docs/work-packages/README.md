@@ -8,10 +8,12 @@
 
 | 编号 | 标题 | 依赖 | 状态 |
 |---|---|---|---|
-| P0-6 | 完成原第 0 阶段 | — | 进行中，按 [../PHASE_0_HANDOFF.md](../PHASE_0_HANDOFF.md) |
-| [P0-9](P0-9-rename-to-mycelium.md) | 改名为知衍（App 名、包名、仓库名、文档） | P0-6 合并 | 待开始 |
-| [P0-7](P0-7-device-spike.md) | 真机技术探针（本地模型、SQLite/SQLCipher、Keystore） | P0-9 合并 | 待开始 |
-| [P0-8](P0-8-contract-consumer.md) | 契约 v0 消费方（复制 + 一致性测试） | Windows 侧 P0-8 产出样例；P0-9 合并 | 待开始 |
+| P0-6 | 完成原第 0 阶段 | — | 已合并 |
+| [P0-9](P0-9-rename-to-mycelium.md) | 改名为知衍（App 名、包名、仓库名、文档） | P0-6 合并 | 已合并，已发 0.1.0 / 0.1.1 |
+| [P0-7](P0-7-device-spike.md) | 真机技术探针（本地模型、SQLite/SQLCipher、Keystore） | P0-9 合并 | 已完成，结论见 `docs/spikes/P0-7-results.md` |
+| [P0-8](P0-8-contract-consumer.md) | 契约 v0 消费方（复制 + 一致性测试） | Windows 侧 P0-8 产出样例；P0-9 合并 | 下一个（2026-10-15 开工） |
+| [P1-6](P1-6-roundtable-skeleton.md) | 圆桌空间骨架：页面、导入角色包、浏览和搜索观点（发 0.2.0） | P0-8 合并 | 排队 |
+| [P1-7](P1-7-roundtable-chat-cloud.md) | 圆桌单聊（云端模型）：出网网关、审计记录、密钥、预算（发 0.3.0） | P1-6 合并；用户确认云端服务商 | 排队 |
 
 状态由统筹（Claude）更新。
 
