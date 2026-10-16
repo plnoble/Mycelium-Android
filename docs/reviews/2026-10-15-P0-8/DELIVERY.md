@@ -33,5 +33,6 @@
 - manifest 校验按契约 `manifest.schema.json` 的字段、常量、类型和格式执行，没有引入 Jackson。任务书推荐的 `json-schema-validator` 会带进整套 Jackson，本机 Maven Central 握手失败，所以没有用它。
 - 构建用 Android Studio 自带 JBR 25，字节码目标 17，与 `:app` 一致。本机没有单独的 JDK 17。
 - Codex 审核未完成。2026-10-15 用 `codex-cli 0.162.0-alpha.17.2` 试了两次（15:16、15:47），都停在服务重连，没有写出 `REVIEW.md`。`codex doctor` 的结论是 ChatGPT 推理地址请求超时。开审前 5 小时窗口额度 26%，周额度 4%，未到 70% 停审线。
-- 统筹代审结论是需修改，见同目录 `REVIEW.md`。五条已返工：长查询按 Unicode 空白切词（与 Rust `split_whitespace` 一致，U+00A0 仍不切）；二字词按码点切，切段用 Alphabetic 或 Nd/Nl/No；回答解析要求吃完输入、拒绝单引号和不加引号的值，字段类型不对记 `invalid_json`；manifest 类型错误只记校验错误并以 `PackRejected` 抛出，`const` 同时比类型和值；反例测试覆盖缺字段、多余字段、数字 `0.1`、坏时间、坏计数、不兼容版本、条目顺序、多条目、改过的哈希，以及全角空格查询和扩展区汉字。尾随逗号仍接受，与桌面端修复行为一致，不是契约。
+- 统筹代审结论是需修改，见同目录 `REVIEW.md`。五条已返工：长查询按 Unicode White_Space 切词（`U+0009..U+000D`、`U+0085`，或 `Character.isSpaceChar`），包含 U+00A0、U+2007、U+202F，不包含 U+001C–U+001F；二字词按码点切，切段用 Alphabetic 或 Nd/Nl/No；回答解析要求吃完输入、拒绝单引号和不加引号的值，字段类型不对记 `invalid_json`；manifest 类型错误只记校验错误并以 `PackRejected` 抛出，`const` 同时比类型和值；反例测试覆盖缺字段、多余字段、数字 `0.1`、坏时间、坏计数、不兼容版本、条目顺序、多条目、改过的哈希，以及全角空格查询和扩展区汉字。尾随逗号仍接受，与桌面端修复行为一致，不是契约。
+- 复审仍是需修改，见 `REVIEW-r1.md`。两处已补：U+00A0 查询和半角空格查询结果相同，U+001F 不切；`truefalse`、`nullnull`、`1true` 记 `invalid_json`。
 - 返工后电脑上重跑：`:contract:test` 已通过；`:app:assembleDebug :app:testDebugUnitTest :app:lintDebug` 已通过。真机仍是未验证。

@@ -201,9 +201,13 @@ private fun isAlphanumeric(codePoint: Int): Boolean {
         type == Character.OTHER_NUMBER.toInt()
 }
 
-/** Rust `split_whitespace`: Unicode White_Space, except non-breaking spaces (U+00A0 and kin). */
+/**
+ * Rust `split_whitespace` / `char::is_whitespace`: Unicode White_Space.
+ * That includes the non-breaking spaces U+00A0, U+2007 and U+202F, and excludes U+001C–U+001F.
+ * Java `Character.isWhitespace` is the opposite on those seven scalars, so it is not used here.
+ */
 private fun isUnicodeWhitespace(codePoint: Int): Boolean =
-    Character.isWhitespace(codePoint) || codePoint == 0x85
+    codePoint in 0x09..0x0D || codePoint == 0x85 || Character.isSpaceChar(codePoint)
 
 /** Splits on Unicode scalars. A predicate true means a separator, matching Rust `split`. */
 private fun splitScalars(text: String, isSeparator: (Int) -> Boolean): List<List<String>> {

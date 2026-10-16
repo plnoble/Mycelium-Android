@@ -34,6 +34,17 @@ class RetrievalVectorTest {
         assertEquals(ascii.hits.map { it.documentKey }, ideographic.hits.map { it.documentKey })
         assertEquals(ascii.hits.map { it.relevance }, ideographic.hits.map { it.relevance })
         assertTrue(ascii.hits.any { it.documentKey == "claim:lc-claim-record-1" })
+
+        val noBreak = searchPack(database, "记账改\u00A0变的是", 10, false)
+        assertEquals(ascii.hits.map { it.documentKey }, noBreak.hits.map { it.documentKey })
+        assertEquals(ascii.hits.map { it.relevance }, noBreak.hits.map { it.relevance })
+
+        val unitSeparator = searchPack(database, "记账改\u001F变的是", 10, false)
+        val primary = { hits: List<SearchHit> ->
+            hits.filter { it.relevance >= 1000.0 }.map { it.documentKey }
+        }
+        assertTrue(primary(ascii.hits).contains("claim:lc-claim-record-1"))
+        assertEquals(emptyList<String>(), primary(unitSeparator.hits))
     }
 
     @Test

@@ -103,14 +103,23 @@ private fun requireStrictJson(text: String) {
                 index + 1
             }
             '{', '}', '[', ']', ':', ',', ' ', '\n', '\r', '\t' -> index + 1
-            '-', in '0'..'9' -> consumeJsonNumber(text, index)
-            't' -> consumeLiteral(text, index, "true")
-            'f' -> consumeLiteral(text, index, "false")
-            'n' -> consumeLiteral(text, index, "null")
+            '-', in '0'..'9' -> consumeJsonNumber(text, index).also { requireValueBoundary(text, it) }
+            't' -> consumeLiteral(text, index, "true").also { requireValueBoundary(text, it) }
+            'f' -> consumeLiteral(text, index, "false").also { requireValueBoundary(text, it) }
+            'n' -> consumeLiteral(text, index, "null").also { requireValueBoundary(text, it) }
             else -> throw IllegalArgumentException("不是合法 JSON")
         }
     }
     if (inString) throw IllegalArgumentException("不是合法 JSON")
+}
+
+/** A literal or number must end the input, or be followed by whitespace, `,`, `]` or `}`. */
+private fun requireValueBoundary(text: String, index: Int) {
+    if (index >= text.length) return
+    when (text[index]) {
+        ' ', '\n', '\r', '\t', ',', ']', '}' -> return
+        else -> throw IllegalArgumentException("不是合法 JSON")
+    }
 }
 
 private fun consumeLiteral(text: String, start: Int, literal: String): Int {

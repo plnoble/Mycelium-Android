@@ -63,6 +63,9 @@ class AnswerVectorTest {
             """{"statements":["一句"],"refusal_reason":null}""",
             """{"statements":[{"text":"一句","kind":1,"citation_ids":["C1"]}],"refusal_reason":null}""",
             """{"statements":[{"text":"一句","kind":"evidence","citation_ids":[1]}],"refusal_reason":null}""",
+            """{"statements":[],"refusal_reason":truefalse}""",
+            """{"statements":[],"refusal_reason":nullnull}""",
+            "{\"statements\":[{\"text\":1true,\"kind\":\"evidence\",\"citation_ids\":[\"C1\"]}],\"refusal_reason\":null}",
         ).forEach { output ->
             val outcome = validateAnswer(output, AnswerMode.StrictEvidence, offered)
             assertTrue(outcome is AnswerOutcome.Rejected, output)
