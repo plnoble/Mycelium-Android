@@ -75,9 +75,12 @@ class PackLibrary(private val root: File, private val schemaJson: String) {
     fun delete(personaId: String, versionId: String): Boolean {
         val existing = readIndex()
         val target = existing.firstOrNull { it.personaId == personaId && it.versionId == versionId } ?: return false
-        target.file.delete()
-        writeIndex(existing.filterNot { it.personaId == personaId && it.versionId == versionId })
-        return !target.file.exists() && find(personaId, versionId) == null
+        val remaining = existing.filterNot { it.personaId == personaId && it.versionId == versionId }
+        // Two versions can carry the same database. The file stays while any remaining version names it.
+        if (remaining.none { it.file.absolutePath == target.file.absolutePath }) target.file.delete()
+        writeIndex(remaining)
+        return find(personaId, versionId) == null &&
+            (target.file.exists() || remaining.none { it.file.absolutePath == target.file.absolutePath })
     }
 
     private fun writeVersion(manifest: PersonaManifest, sqlite: ByteArray): InstalledVersion {

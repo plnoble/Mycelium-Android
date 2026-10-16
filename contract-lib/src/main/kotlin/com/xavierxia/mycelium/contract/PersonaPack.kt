@@ -1,7 +1,9 @@
 package com.xavierxia.mycelium.contract
 
 import java.io.ByteArrayOutputStream
+import java.nio.file.Files
 import java.util.zip.ZipException
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 /** A persona pack that passed the container, schema and logical-hash checks. */
@@ -122,29 +124,56 @@ private fun JsonValue.requireInt(field: String): Int =
 internal const val MAX_PACK_ENTRY_BYTES = 64L * 1024 * 1024
 
 private fun readZipEntries(bytes: ByteArray): List<Pair<String, ByteArray>> {
-    val entries = mutableListOf<Pair<String, ByteArray>>()
-    ZipInputStream(bytes.inputStream()).use { zip ->
-        while (true) {
-            val entry = try {
-                zip.nextEntry
-            } catch (error: ZipException) {
-                throw PackRejected("角色包不是完整的 zip：${error.message}")
-            } ?: break
-            // A directory entry is still an entry. Skipping it would hide an extra name.
-            if (entry.isDirectory || entry.name.endsWith("/")) {
-                entries += entry.name to ByteArray(0)
-                continue
-            }
-            if (entry.size > MAX_PACK_ENTRY_BYTES) {
-                throw PackRejected("角色包的 ${entry.name} 超过 ${MAX_PACK_ENTRY_BYTES} 字节")
-            }
-            entries += entry.name to readEntryBounded(zip, entry.name)
-        }
+    // Neither reader covers every broken pack. ZipInputStream stops after the local entries, so a
+    // missing end header still looks complete, while ZipFile does not check a stored entry's CRC.
+    val declared = readCentralDirectory(bytes)
+    val streamed = readLocalEntries(bytes)
+    if (declared.map { it.first } != streamed.map { it.first } ||
+        declared.zip(streamed).any { (left, right) -> !left.second.contentEquals(right.second) }
+    ) {
+        throw PackRejected("角色包的目录和条目内容不一致")
     }
-    return entries
+    return declared
 }
 
-private fun readEntryBounded(zip: ZipInputStream, name: String): ByteArray {
+/** ZipFile reads the central directory, so a tail of 1 or 22 bytes missing is rejected here. */
+private fun readCentralDirectory(bytes: ByteArray): List<Pair<String, ByteArray>> {
+    val file = Files.createTempFile("persona-pack-", ".mpack")
+    return try {
+        Files.write(file, bytes)
+        ZipFile(file.toFile()).use { zip ->
+            zip.entries().toList().map { entry -> readNamedEntry(entry.name, entry.isDirectory, entry.size, zip.getInputStream(entry)) }
+        }
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    } finally {
+        Files.deleteIfExists(file)
+    }
+}
+
+/** ZipInputStream checks each stored entry's CRC, which ZipFile skips. */
+private fun readLocalEntries(bytes: ByteArray): List<Pair<String, ByteArray>> =
+    try {
+        ZipInputStream(bytes.inputStream()).use { zip ->
+            generateSequence { zip.nextEntry }.map { entry ->
+                readNamedEntry(entry.name, entry.isDirectory, entry.size, zip)
+            }.toList()
+        }
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    }
+
+private fun readNamedEntry(name: String, directory: Boolean, declaredSize: Long, bytes: java.io.InputStream): Pair<String, ByteArray> {
+    if (directory || name.endsWith("/")) return name to ByteArray(0)
+    if (declaredSize > MAX_PACK_ENTRY_BYTES) throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+    return name to readEntryBounded(bytes, name)
+}
+
+private fun readEntryBounded(zip: java.io.InputStream, name: String): ByteArray {
     val buffer = ByteArrayOutputStream()
     val chunk = ByteArray(8192)
     var total = 0L

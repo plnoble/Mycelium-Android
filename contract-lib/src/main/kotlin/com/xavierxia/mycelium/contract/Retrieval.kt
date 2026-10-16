@@ -11,6 +11,8 @@ data class SearchHit(
     val documentKind: String,
     val title: String,
     val excerpt: String,
+    /** The source's published date, when the hit has one. A theme hit does not. */
+    val sourcePublishedAt: String? = null,
 )
 
 data class SearchResult(
@@ -81,8 +83,10 @@ private fun restrictedHits(
         """
         SELECT d.document_key, d.document_kind, d.title,
                CASE WHEN instr(lower(d.title), lower(?)) > 0 THEN d.title ELSE substr(d.body, 1, 240) END,
-               CASE WHEN instr(lower(d.title), lower(?)) > 0 THEN 100.0 ELSE 25.0 END
+               CASE WHEN instr(lower(d.title), lower(?)) > 0 THEN 100.0 ELSE 25.0 END,
+               s.published_at
         FROM search_docs d
+        LEFT JOIN sources s ON s.source_id = d.source_id
         WHERE (? = 1 OR d.source_status = 'active')
           AND (instr(lower(d.title), lower(?)) > 0
                OR (d.document_kind IN ('claim', 'theme', 'method') AND instr(lower(d.body), lower(?)) > 0))
@@ -114,8 +118,10 @@ private fun hybridHits(
             """
             SELECT d.document_key, d.document_kind, d.title,
                    snippet(search_fts, 1, '[', ']', '…', 24),
-                   bm25(search_fts, 4.0, 1.0)
+                   bm25(search_fts, 4.0, 1.0),
+                   s.published_at
             FROM search_fts JOIN search_docs d ON d.document_id = search_fts.rowid
+            LEFT JOIN sources s ON s.source_id = d.source_id
             WHERE search_fts MATCH ? AND (? = 1 OR d.source_status = 'active')
             ORDER BY bm25(search_fts, 4.0, 1.0), d.document_key
             LIMIT ?
@@ -159,8 +165,10 @@ private fun fallbackHits(
     return database.read { db ->
         db.query(
             """
-            SELECT d.document_key, d.document_kind, d.title, substr(d.body, 1, 240), ($score)
+            SELECT d.document_key, d.document_kind, d.title, substr(d.body, 1, 240), ($score),
+                   s.published_at
             FROM search_docs d
+            LEFT JOIN sources s ON s.source_id = d.source_id
             WHERE d.document_kind IN ('claim', 'theme', 'method')
               AND (?1 = 1 OR d.source_status = 'active')
               AND ($conditions) AND ($score) >= $minimum
@@ -185,6 +193,7 @@ private fun PackRow.toHit() = SearchHit(
     documentKind = text(1),
     title = text(2),
     excerpt = text(3),
+    sourcePublishedAt = textOrNull(5),
 )
 
 private fun isCjk(scalar: String): Boolean {

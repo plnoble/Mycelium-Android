@@ -33,9 +33,9 @@ class SqlCipherPackDatabase(private val path: String) : PackDatabase {
 
 private class SqlCipherQuery(private val database: SQLiteDatabase) : PackQuery {
     override fun query(sql: String, bind: (PackStatement) -> Unit): List<PackRow> {
-        val values = mutableListOf<Any?>()
-        bind(CollectingStatement(values))
-        database.rawQuery(sql, values.toTypedArray()).use { cursor ->
+        val arguments = SqlArgumentList()
+        bind(CollectingStatement(arguments))
+        database.rawQuery(sql, arguments.toTypedArray()).use { cursor ->
             val rows = mutableListOf<PackRow>()
             while (cursor.moveToNext()) {
                 rows += PackRow(List(cursor.columnCount) { column -> cursor.valueAt(column) })
@@ -45,19 +45,28 @@ private class SqlCipherQuery(private val database: SQLiteDatabase) : PackQuery {
     }
 }
 
-private class CollectingStatement(private val values: MutableList<Any?>) : PackStatement {
-    override fun setString(index: Int, value: String) {
-        put(index, value)
-    }
+/** Collects 1-based SQL parameters into the array `rawQuery` expects. */
+internal class SqlArgumentList {
+    private val values = mutableListOf<Any?>()
 
-    override fun setLong(index: Int, value: Long) {
-        put(index, value)
-    }
+    fun setString(index: Int, value: String) = put(index, value)
 
+    fun setLong(index: Int, value: Long) = put(index, value)
+
+    fun toTypedArray(): Array<Any?> = values.toTypedArray()
+
+    /** Index 1 is the first array slot. Setting the same index again replaces the value. */
     private fun put(index: Int, value: Any?) {
-        while (values.size < index) values += null
-        if (values.size == index) values += value else values[index - 1] = value
+        require(index >= 1) { "SQL 参数从 1 开始，实际是 $index" }
+        while (values.size < index - 1) values += null
+        if (values.size == index - 1) values += value else values[index - 1] = value
     }
+}
+
+private class CollectingStatement(private val arguments: SqlArgumentList) : PackStatement {
+    override fun setString(index: Int, value: String) = arguments.setString(index, value)
+
+    override fun setLong(index: Int, value: Long) = arguments.setLong(index, value)
 }
 
 private fun Cursor.valueAt(column: Int): Any? = when (getType(column)) {

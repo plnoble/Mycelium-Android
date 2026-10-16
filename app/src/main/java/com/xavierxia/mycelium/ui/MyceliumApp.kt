@@ -288,6 +288,7 @@ private fun SearchPage(roundtable: Roundtable, version: InstalledVersion, onOpen
                         Column(Modifier.padding(16.dp)) {
                             Text(hit.title)
                             Text(hit.excerpt)
+                            Text(hit.sourcePublishedAt?.take(10) ?: "无来源日期")
                         }
                     }
                 }

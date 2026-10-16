@@ -3,6 +3,7 @@ package com.xavierxia.mycelium.roundtable
 import com.xavierxia.mycelium.contract.ContractFiles
 import com.xavierxia.mycelium.contract.PackDatabase
 import com.xavierxia.mycelium.contract.SqliteJdbcPackDatabase
+import com.xavierxia.mycelium.contract.claimIds
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -111,6 +112,22 @@ class PackLibraryTest {
         assertFalse(file.exists())
         assertTrue(library.listAll().isEmpty())
         assertEquals(null, library.find(imported.version.personaId, imported.version.versionId))
+    }
+
+    @Test
+    fun deletingOneVersionLeavesAnotherThatSharesTheDatabase() {
+        val root = Files.createTempDirectory("pack-library-shared").toFile()
+        val library = PackLibrary(root, schema)
+        val first = library.importBytes(files.samplePack().readBytes(), ::open) as ImportOutcome.Imported
+        val second = library.importBytes(reversionedPack(), ::open) as ImportOutcome.Imported
+        assertEquals(first.version.file.absolutePath, second.version.file.absolutePath)
+        assertEquals(2, library.listAll().size)
+
+        assertTrue(library.delete(first.version.personaId, first.version.versionId))
+        val remaining = library.listAll().single()
+        assertEquals(second.version.versionId, remaining.versionId)
+        assertTrue(remaining.file.isFile)
+        assertEquals(11, claimIds(open(remaining.file.readBytes())).size)
     }
 
     /** A later version of the same database. Claim ids are renamed, so the diff is exact and the hash stays valid. */

@@ -88,6 +88,8 @@ class PersonaPackTest {
         val pack = files.samplePack().readBytes()
         val open = openDatabase()
         assertPackRejected("截断的角色包") { readPersonaPack(pack.copyOf(pack.size / 2), schema, open) }
+        assertPackRejected("末尾少 1 字节") { readPersonaPack(pack.copyOf(pack.size - 1), schema, open) }
+        assertPackRejected("末尾少 22 字节") { readPersonaPack(pack.copyOf(pack.size - 22), schema, open) }
         assertPackRejected("空文件") { readPersonaPack(ByteArray(0), schema, open) }
         val manifest = files.path("samples/synthetic-persona-v1/manifest.json").readBytes()
         assertPackRejected("persona.sqlite 不是数据库") {

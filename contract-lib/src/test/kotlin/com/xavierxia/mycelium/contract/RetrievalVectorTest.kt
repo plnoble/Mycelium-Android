@@ -22,6 +22,13 @@ class RetrievalVectorTest {
             val id = case["id"]!!.asTextOrNull()!!
             assertEquals(case["strategy"]!!.asTextOrNull(), result.strategy, id)
             assertEquals(case["expected"]!!.elements().map { it.asTextOrNull() }, result.hits.map { it.documentKey }, id)
+            result.hits.forEach { hit ->
+                if (hit.documentKind == "theme") {
+                    assertEquals(null, hit.sourcePublishedAt, id)
+                } else {
+                    assertTrue(hit.sourcePublishedAt?.isNotEmpty() == true, "$id ${hit.documentKey}")
+                }
+            }
         }
     }
 
