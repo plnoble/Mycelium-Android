@@ -1,0 +1,51 @@
+package com.xavierxia.mycelium.roundtable
+
+import android.content.Context
+import android.net.Uri
+import com.xavierxia.mycelium.contract.ClaimDetail
+import com.xavierxia.mycelium.contract.ClaimSummary
+import com.xavierxia.mycelium.contract.PackDatabase
+import com.xavierxia.mycelium.contract.SearchResult
+import com.xavierxia.mycelium.contract.ThemeSummary
+import com.xavierxia.mycelium.contract.claimIdForDocument
+import com.xavierxia.mycelium.contract.claimIds
+import com.xavierxia.mycelium.contract.listClaims
+import com.xavierxia.mycelium.contract.listThemes
+import com.xavierxia.mycelium.contract.loadClaim
+import com.xavierxia.mycelium.contract.searchPack
+import java.io.File
+
+/** Everything the roundtable screens read. The UI does not open files itself. */
+class Roundtable(context: Context) {
+    private val library = PackLibrary(File(context.filesDir, "roundtable"), schemaJson(context))
+
+    fun personas(): List<InstalledVersion> = library.listLatest()
+
+    fun installed(): List<InstalledVersion> = library.listAll()
+
+    fun importUri(uri: Uri, context: Context, openDatabase: (ByteArray) -> PackDatabase): ImportOutcome {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: return ImportOutcome.Rejected("没有读到选择的文件")
+        return library.importBytes(bytes, openDatabase)
+    }
+
+    fun delete(version: InstalledVersion): Boolean = library.delete(version.personaId, version.versionId)
+
+    fun themes(version: InstalledVersion, open: (File) -> PackDatabase): List<ThemeSummary> =
+        open(version.file).let(::listThemes)
+
+    fun claims(version: InstalledVersion, themeId: String?, open: (File) -> PackDatabase): List<ClaimSummary> =
+        listClaims(open(version.file), themeId)
+
+    fun claim(version: InstalledVersion, claimId: String, open: (File) -> PackDatabase): ClaimDetail? =
+        loadClaim(open(version.file), claimId)
+
+    fun search(version: InstalledVersion, query: String, open: (File) -> PackDatabase): SearchResult =
+        searchPack(open(version.file), query, limit = 20, includeInactive = false)
+
+    fun claimForHit(version: InstalledVersion, documentKey: String, open: (File) -> PackDatabase): String? =
+        claimIdForDocument(open(version.file), documentKey)
+
+    fun claimCount(version: InstalledVersion, open: (File) -> PackDatabase): Int =
+        claimIds(open(version.file)).size
+}

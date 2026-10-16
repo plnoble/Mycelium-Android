@@ -1,5 +1,7 @@
 package com.xavierxia.mycelium.contract
 
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipException
 import java.util.zip.ZipInputStream
 
 /** A persona pack that passed the container, schema and logical-hash checks. */
@@ -43,7 +45,15 @@ fun contractVersionCompatible(contractVersion: String): Boolean = contractVersio
  * and the recomputed logical hash must equal the manifest. Nothing is trusted before that.
  */
 fun readPersonaPack(bytes: ByteArray, schemaJson: String, openDatabase: (ByteArray) -> PackDatabase): PersonaPack {
-    val entries = readZipEntries(bytes)
+    val entries = try {
+        readZipEntries(bytes)
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: Exception) {
+        throw PackRejected("角色包读不出来：${error.message}")
+    }
     if (entries.map { it.first } != listOf("manifest.json", "persona.sqlite")) {
         throw PackRejected(
             "角色包必须且只能按顺序包含 manifest.json 和 persona.sqlite，实际是 ${entries.map { it.first }}",
@@ -53,7 +63,13 @@ fun readPersonaPack(bytes: ByteArray, schemaJson: String, openDatabase: (ByteArr
     if (!contractVersionCompatible(manifest.contractVersion)) {
         throw PackRejected("不兼容的契约版本：${manifest.contractVersion}")
     }
-    val actual = logicalSha256(openDatabase(entries[1].second))
+    val actual = try {
+        logicalSha256(openDatabase(entries[1].second))
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: Exception) {
+        throw PackRejected("persona.sqlite 不是可以读取的数据库：${error.message}")
+    }
     if (actual != manifest.logicalSha256) {
         throw PackRejected("logical_sha256 不一致：manifest 是 ${manifest.logicalSha256}，重算是 $actual")
     }
@@ -102,12 +118,44 @@ private fun JsonValue.require(field: String): String =
 private fun JsonValue.requireInt(field: String): Int =
     this[field]?.asIntOrNull() ?: throw PackRejected("manifest 的 $field 不是整数")
 
+/** One zip entry, compressed or not, may not be larger than this. A persona pack is two small files. */
+internal const val MAX_PACK_ENTRY_BYTES = 64L * 1024 * 1024
+
 private fun readZipEntries(bytes: ByteArray): List<Pair<String, ByteArray>> {
     val entries = mutableListOf<Pair<String, ByteArray>>()
     ZipInputStream(bytes.inputStream()).use { zip ->
-        generateSequence { zip.nextEntry }.forEach { entry ->
-            if (!entry.isDirectory) entries += entry.name to zip.readBytes()
+        while (true) {
+            val entry = try {
+                zip.nextEntry
+            } catch (error: ZipException) {
+                throw PackRejected("角色包不是完整的 zip：${error.message}")
+            } ?: break
+            // A directory entry is still an entry. Skipping it would hide an extra name.
+            if (entry.isDirectory || entry.name.endsWith("/")) {
+                entries += entry.name to ByteArray(0)
+                continue
+            }
+            if (entry.size > MAX_PACK_ENTRY_BYTES) {
+                throw PackRejected("角色包的 ${entry.name} 超过 ${MAX_PACK_ENTRY_BYTES} 字节")
+            }
+            entries += entry.name to readEntryBounded(zip, entry.name)
         }
     }
     return entries
+}
+
+private fun readEntryBounded(zip: ZipInputStream, name: String): ByteArray {
+    val buffer = ByteArrayOutputStream()
+    val chunk = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val read = zip.read(chunk)
+        if (read < 0) break
+        total += read
+        if (total > MAX_PACK_ENTRY_BYTES) {
+            throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+        }
+        buffer.write(chunk, 0, read)
+    }
+    return buffer.toByteArray()
 }

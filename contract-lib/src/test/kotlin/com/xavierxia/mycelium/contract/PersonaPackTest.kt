@@ -83,6 +83,35 @@ class PersonaPackTest {
         }
     }
 
+    @Test
+    fun truncatedPackAndBadDatabaseArePackRejected() {
+        val pack = files.samplePack().readBytes()
+        val open = openDatabase()
+        assertPackRejected("截断的角色包") { readPersonaPack(pack.copyOf(pack.size / 2), schema, open) }
+        assertPackRejected("空文件") { readPersonaPack(ByteArray(0), schema, open) }
+        val manifest = files.path("samples/synthetic-persona-v1/manifest.json").readBytes()
+        assertPackRejected("persona.sqlite 不是数据库") {
+            readPersonaPack(zipOf("manifest.json" to manifest, "persona.sqlite" to "这不是数据库".toByteArray()), schema, open)
+        }
+    }
+
+    @Test
+    fun directoryEntriesCountAndOversizedEntriesAreRejected() {
+        val manifest = files.path("samples/synthetic-persona-v1/manifest.json").readBytes()
+        val sqlite = files.sampleDatabase().readBytes()
+        val open = openDatabase()
+        assertPackRejected("目录条目也算多出的条目") {
+            readPersonaPack(zipOf("manifest.json" to manifest, "notes/" to ByteArray(0), "persona.sqlite" to sqlite), schema, open)
+        }
+        assertPackRejected("单个条目超过上限") {
+            readPersonaPack(
+                zipOf("manifest.json" to manifest, "persona.sqlite" to ByteArray(MAX_PACK_ENTRY_BYTES.toInt() + 1)),
+                schema,
+                open,
+            )
+        }
+    }
+
     private fun openDatabase(): (ByteArray) -> PackDatabase = { bytes ->
         val temp = Files.createTempFile("persona-pack-", ".sqlite")
         temp.toFile().deleteOnExit()
