@@ -1,0 +1,16 @@
+{
+  "id": "v13-over-statement-limit-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\": [{\"text\": \"第 1 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 2 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 3 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 4 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 5 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 6 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 7 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 8 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 9 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 10 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 11 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 12 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}, {\"text\": \"第 13 条陈述\", \"kind\": \"evidence\", \"citation_ids\": [\"C1\"]}], \"refusal_reason\": null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "over_statement_limit"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "pack_format": "mycelium-persona-pack",
+  "pack_version": "0.1",
+  "contract_version": "0.1.0",
+  "persona_id": "luchuan-synthetic-v1",
+  "display_name": "陆川",
+  "version_id": "ver-luchuan-v1",
+  "version_label": "v1",
+  "published_at": "2024-02-10T08:00:00Z",
+  "data_cutoff": "2024-10-02T00:00:00Z",
+  "counts": {
+    "sources": 4,
+    "claims": 11,
+    "themes": 3,
+    "relationships": 2,
+    "evidence": 11
+  },
+  "fts_tokenizer": "trigram",
+  "answer_protocol_version": "0.1.0",
+  "includes_full_text": true,
+  "logical_sha256": "9e5e3e8331073c44eaed8a7925c4edaa67fdee8271c68312e9ffe3d330883c69",
+  "embedding": null,
+  "signature": null
+}

@@ -1,0 +1,17 @@
+{
+  "id": "v01-evidence-accepted",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"先转走定投金额，剩下的钱再进入日常预算\",\"kind\":\"evidence\",\"citation_ids\":[\"C2\",\"C1\"]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1",
+      "C2"
+    ]
+  },
+  "expected": {
+    "accepted": true,
+    "refusal_reason": null,
+    "rendered": "先转走定投金额，剩下的钱再进入日常预算 [C1][C2]",
+    "error": null
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "v11-bad-kind-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"kind 非法的陈述\",\"kind\":\"speculation\",\"citation_ids\":[\"C1\"]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "bad_kind"
+  }
+}

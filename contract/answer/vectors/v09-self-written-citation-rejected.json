@@ -1,0 +1,16 @@
+{
+  "id": "v09-self-written-citation-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"自行写了标记 [C1] 的陈述\",\"kind\":\"evidence\",\"citation_ids\":[\"C1\"]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "self_written_citation"
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/persona-pack-manifest-v0.1.json",
+  "title": "mycelium-persona-pack manifest v0.1",
+  "type": "object",
+  "required": [
+    "pack_format",
+    "pack_version",
+    "contract_version",
+    "persona_id",
+    "display_name",
+    "version_id",
+    "version_label",
+    "published_at",
+    "data_cutoff",
+    "counts",
+    "fts_tokenizer",
+    "answer_protocol_version",
+    "includes_full_text",
+    "logical_sha256"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "pack_format": {
+      "const": "mycelium-persona-pack"
+    },
+    "pack_version": {
+      "const": "0.1"
+    },
+    "contract_version": {
+      "type": "string",
+      "pattern": "^0\\.1\\.0$"
+    },
+    "persona_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "用户确认发布的时间（RFC 3339）"
+    },
+    "data_cutoff": {
+      "type": "string",
+      "format": "date-time",
+      "description": "该版本收录材料的数据截止时间（RFC 3339）"
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "sources",
+        "claims",
+        "themes",
+        "relationships",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "claims": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "themes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "relationships": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "fts_tokenizer": {
+      "const": "trigram"
+    },
+    "answer_protocol_version": {
+      "type": "string",
+      "pattern": "^0\\.1\\.0$"
+    },
+    "includes_full_text": {
+      "type": "boolean"
+    },
+    "logical_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "embedding": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "预留：向量文件入口，v0 为 null",
+      "additionalProperties": true
+    },
+    "signature": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "预留：签名，同步阶段再加",
+      "additionalProperties": true
+    }
+  }
+}

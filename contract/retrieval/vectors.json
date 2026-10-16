@@ -1,0 +1,92 @@
+{
+  "schema_version": "persona-pack-retrieval-vectors-v1",
+  "pack": "synthetic-persona-v1",
+  "contract_version": "0.1.0",
+  "note": "命中对象 ID 序列（截到 limit，含顺序）。claim/method/theme 的键使用与桌面端一致的 record_id 排序身份（R4），消费端经 search_docs.claim_id/theme_id 回连。由知衍 core/persona_pack.rs 参考实现在本样例包上生成并冻结；两端实现按 retrieval/SPEC.md 执行后结果必须与本文件逐项一致。涵盖：2 字短查询（restricted_fields）、3 字以上长查询（trigram_hybrid）、需要二字词回退的查询（trigram 无命中、回退命中）、无结果查询、inactive 文档在两种 include_inactive 下的差异。",
+  "cases": [
+    {
+      "id": "short-restricted-title-and-fields",
+      "query": "记账",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "restricted_fields",
+      "expected": [
+        "claim:lc-claim-record-1",
+        "claim:lc-claim-record-2",
+        "claim:lc-claim-record-3",
+        "claim:lc-claim-record-4",
+        "method:lc-claim-record-2",
+        "source:lc-s1",
+        "theme:lc-theme-record-LC-T1"
+      ]
+    },
+    {
+      "id": "short-restricted-body-fallback-order",
+      "query": "预算",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "restricted_fields",
+      "expected": [
+        "claim:lc-claim-record-10",
+        "claim:lc-claim-record-8",
+        "claim:lc-claim-record-9",
+        "method:lc-claim-record-8",
+        "source:lc-s3",
+        "claim:lc-claim-record-6",
+        "theme:lc-theme-record-LC-T2"
+      ]
+    },
+    {
+      "id": "long-trigram-with-bigram-fallback-appended",
+      "query": "不做清单",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "trigram_hybrid",
+      "expected": [
+        "claim:lc-claim-record-5",
+        "method:lc-claim-record-5",
+        "source:lc-s2",
+        "claim:lc-claim-record-6",
+        "claim:lc-claim-record-7",
+        "method:lc-claim-record-8"
+      ]
+    },
+    {
+      "id": "long-trigram-misses-fallback-only",
+      "query": "体检考试",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "trigram_hybrid",
+      "expected": [
+        "claim:lc-claim-record-4"
+      ]
+    },
+    {
+      "id": "no-result",
+      "query": "加密货币",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "trigram_hybrid",
+      "expected": []
+    },
+    {
+      "id": "inactive-excluded-by-default",
+      "query": "复盘",
+      "limit": 10,
+      "include_inactive": false,
+      "strategy": "restricted_fields",
+      "expected": []
+    },
+    {
+      "id": "inactive-included-on-request",
+      "query": "复盘",
+      "limit": 10,
+      "include_inactive": true,
+      "strategy": "restricted_fields",
+      "expected": [
+        "claim:lc-claim-record-11",
+        "source:lc-s4"
+      ]
+    }
+  ]
+}

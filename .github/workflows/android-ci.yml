@@ -34,7 +34,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Run unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest :contract:test --stacktrace
 
       - name: Run Android Lint
         run: ./gradlew :app:lintDebug --stacktrace
@@ -48,6 +48,8 @@ jobs:
             app/build/reports/tests/testDebugUnitTest/
             app/build/test-results/testDebugUnitTest/
             app/build/reports/lint-results-debug.*
+            contract-lib/build/reports/tests/test/
+            contract-lib/build/test-results/test/
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

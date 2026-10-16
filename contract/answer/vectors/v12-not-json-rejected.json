@@ -1,0 +1,16 @@
+{
+  "id": "v12-not-json-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "抱歉，我无法回答这个问题。",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "invalid_json"
+  }
+}

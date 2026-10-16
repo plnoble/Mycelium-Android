@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/persona-chat-output-v0.1.json",
+  "title": "知衍人物回答协议：模型输出 JSON（answer protocol v0.1.0）",
+  "type": "object",
+  "required": ["statements", "refusal_reason"],
+  "additionalProperties": false,
+  "properties": {
+    "statements": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["text", "kind", "citation_ids"],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600,
+            "description": "一条完整陈述（按 Unicode 标量计字），不写引用标记"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["evidence", "inference"]
+          },
+          "citation_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^C[0-9]+$" }
+          }
+        }
+      }
+    },
+    "refusal_reason": {
+      "type": ["string", "null"],
+      "maxLength": 1000,
+      "description": "statements 为空时必须填写具体拒答原因；非空时不得填写"
+    }
+  }
+}

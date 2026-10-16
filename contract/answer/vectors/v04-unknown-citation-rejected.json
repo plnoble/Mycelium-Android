@@ -1,0 +1,16 @@
+{
+  "id": "v04-unknown-citation-rejected",
+  "input": {
+    "mode": "thought_inference",
+    "output_text": "{\"statements\":[{\"text\":\"材料之外的陈述\",\"kind\":\"evidence\",\"citation_ids\":[\"C9\"]}],\"refusal_reason\":null}",
+    "offered_citation_ids": [
+      "C1"
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "refusal_reason": null,
+    "rendered": null,
+    "error": "unknown_citation"
+  }
+}
