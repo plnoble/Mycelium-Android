@@ -3,7 +3,7 @@
 - 分支：`wp/P1-7-roundtable-chat`，从 `14e5058` 拉出。没有推送，没有打标签，没有发布。
 - 版本号：0.3.0（versionCode 4）。正式发布仍等用户同意。
 - 出具日期：2026-10-17。
-- 全新 worktree 的全套检查：未验证。还没有提交，不能对已提交版本开查。
+- 全新 worktree 的全套检查：已通过。对 `1c708ed` 离线重跑 `:net:test`、`:roundtable:test`、`:contract:test`、`:app:testDebugUnitTest`、`:app:assembleDebug`、`:app:lintDebug`，0 失败。lint 0 error。sqlite-jdbc 在 JBR 25 上有 `System::load` 的限制警告，测试仍通过。
 
 ## 做了什么
 
@@ -93,4 +93,4 @@
 - 没有做多人圆桌、背景卡、伴侣、本地模型单聊、流式输出。
 - 没有在走查里点「检查更新」，所以审计里没有更新记录。
 - 费用估算显示 0.0000 美元，是因为假服务只报了 120 和 36 个 token，按 0.15 / 0.6 美元每百万 token 算，四位小数就是 0。这不是漏计。
-- Codex 审核还没有做。全新 worktree 也还没有做，两者都等这次提交之后。
+- Codex 审核还没有做。全新 worktree 已对 `1c708ed` 通过，见上面。
