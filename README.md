@@ -1,6 +1,6 @@
 # Mycelium（知衍）安卓版
 
-Mycelium（知衍）安卓版 is a local-first Android AI companion focused on long-term character consistency, memory, voice conversation, and relationship continuity.
+Mycelium（知衍）安卓版 is a local-first Android personal AI focused on long-term character consistency, memory, voice conversation, and relationship continuity.
 
 ## Product principles
 
@@ -52,7 +52,7 @@ Mood / State Engine |
 - Versioning and release infrastructure
 - GitHub-based update architecture
 
-### Phase 1 — Text Companion
+### Phase 1 — Text Chat
 - Chat UI
 - Character profile
 - Conversation persistence
@@ -78,7 +78,7 @@ Mood / State Engine |
 - Streaming voice
 - Interruption / barge-in
 
-### Phase 5 — Proactive Companion
+### Phase 5 — Proactive Character
 - Time awareness
 - Follow-up on unresolved topics
 - Carefully rate-limited proactive messages
