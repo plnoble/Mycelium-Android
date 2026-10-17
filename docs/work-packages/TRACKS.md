@@ -38,3 +38,39 @@
 - 由一个开发 agent 在 `D:\Agent\Project\Nivra` 做，按顺序：P0-8 契约消费方 → P1-6 圆桌骨架（发 0.2.0）→ P1-7 圆桌单聊（发 0.3.0）。本仓库 `main` 的合并由统筹决定。
 - A-探针线已结束，它的两个 worktree 只读保留。
 - 进度和交接写在 `docs/tracks/A-圆桌.md`。
+- 2026-10-17 补充：P1-6a（「伴侣」改名「炉边」）也归 A-圆桌线，在单独的 worktree 做，见任务书。
+
+## 2026-10-17 起：A-炉边线
+
+用户要求另开一条线做「炉边」，和 A-圆桌线的 P1-7 并行。
+
+### 分工
+
+| | A-圆桌线 | A-炉边线 |
+|---|---|---|
+| 工作包（按顺序） | P1-7 圆桌单聊；P1-6a 改名 | P2-1 本地模型引擎 → P2-2 炉边人物和对话（之后的 P2-3 记忆等由统筹再排） |
+| 工作目录 | `D:\Agent\Project\Nivra`；P1-6a 在 `D:\Agent\Worktrees\Mycelium-Android\P1-6a` | `D:\Agent\Worktrees\Mycelium-Android\hearth`（`git worktree add` 从 `main` 建） |
+| 负责的模块 | `:net`、`:roundtable`；「我的」里的云端模型和隐私记录 | `:model-api`、`:llm`；「我的」里的本地模型；之后的 `:hearth` 和炉边页面 |
+| 进度和交接 | `docs/tracks/A-圆桌.md` | `docs/tracks/A-炉边.md` |
+
+- A-炉边线**不进** `D:\Agent\Project\Nivra`；A-圆桌线也不进 `hearth` 目录。
+- 一个工作包合并后，再从新的 `main` 拉下一个分支。`hearth` 这个 worktree 可以一直用，换分支前先确认工作区干净。
+
+### 共用的文件
+
+- `settings.gradle.kts`、`app/build.gradle.kts`、`MyceliumApp.kt`、架构测试这几处两条线都会改。规则是：只加自己那部分，不改对方的代码。
+- 交审前，先把最新的 `main` 并进自己的分支。冲突自己解决不了的，报统筹。
+- 模型接口以 A-炉边线的 `:model-api` 为准。P1-7 的「回答模型」接口要统一过去：哪个包后合并，就由哪个包负责对齐。
+
+### 共用这台电脑和这台手机
+
+1. Gradle 全局缓存是共用的：不清缓存，不升级 Gradle Wrapper（9.5.0）、NDK（30.0.16248370）和 CMake（3.22.1）。要装或升级 SDK 组件，先在自己的交接文件里写明，再报统筹。
+2. 两条线同时构建会抢 CPU 和内存，变慢是正常的，不要为此改构建配置。
+3. 红魔只有一台。要做真机测试或走查，先请用户确认另一条线现在没在用手机。两条线装的都是 `com.xavierxia.mycelium.debug`，后装的会覆盖先装的，走查前先重装自己的包。
+4. 手机上 `/sdcard/Models/` 里的模型是用户的原文件：只读，不改、不删、不移动。
+5. llama.cpp 源码：A-探针线的 worktree `D:\Agent\Worktrees\Mycelium-Android\spike-P0-7` 里，`spikes/p0-7/app/src/main/cpp/llama-build` 是固定提交 `5e03bdd…` 的本地克隆，可以从这里克隆，不用联网。不要在探针目录里改任何东西。
+
+### 其他
+
+- 审核、Codex 额度、禁止提交的内容、汇报格式、要用户明确同意的事，都和上面「规则」一节相同。Codex 额度是所有线共用的，5 小时窗口超过 70% 就不发起，交统筹代审。
+- 两条线都不合并 `main`、不推送、不打标签、不发布。合并由统筹做；推送和发布由用户决定。

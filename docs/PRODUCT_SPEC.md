@@ -2,7 +2,7 @@
 
 ## 1. Product definition
 
-Mycelium（知衍）安卓版 is an Android-native, local-first AI companion.
+Mycelium（知衍）安卓版 is an Android-native, local-first personal AI.
 
 The initial product is not a generic assistant and not a 3D virtual character. Its purpose is to create the feeling of continuity with one persistent digital character through:
 
@@ -17,7 +17,7 @@ The initial product is not a generic assistant and not a 3D virtual character. I
 
 ### In scope
 - Android native application
-- One companion character
+- One character whose personality the user defines
 - Local LLM inference
 - Text conversation
 - Conversation history

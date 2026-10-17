@@ -34,3 +34,8 @@ secrets.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# P2-1 pinned native source (prepared locally)
+llm/vendor/
+*.apk
+
