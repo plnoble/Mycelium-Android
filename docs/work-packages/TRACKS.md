@@ -48,7 +48,7 @@
 
 | | A-圆桌线 | A-炉边线 |
 |---|---|---|
-| 工作包（按顺序） | P1-7 圆桌单聊；P1-6a 改名 | P2-1 本地模型引擎 → P2-2 炉边人物和对话（之后的 P2-3 记忆等由统筹再排） |
+| 工作包（按顺序） | P1-7 圆桌单聊；P1-6a 改名 | P2-1 本地模型引擎（已合并）→ P2-1b 全套检查脚本和零警告 → P2-2 炉边人物和对话（之后的 P2-3 记忆等由统筹再排） |
 | 工作目录 | `D:\Agent\Project\Nivra`；P1-6a 在 `D:\Agent\Worktrees\Mycelium-Android\P1-6a` | `D:\Agent\Worktrees\Mycelium-Android\hearth`（`git worktree add` 从 `main` 建） |
 | 负责的模块 | `:net`、`:roundtable`；「我的」里的云端模型和隐私记录 | `:model-api`、`:llm`；「我的」里的本地模型；之后的 `:hearth` 和炉边页面 |
 | 进度和交接 | `docs/tracks/A-圆桌.md` | `docs/tracks/A-炉边.md` |
