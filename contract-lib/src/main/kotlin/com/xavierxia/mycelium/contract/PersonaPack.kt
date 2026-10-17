@@ -1,5 +1,9 @@
 package com.xavierxia.mycelium.contract
 
+import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.util.zip.ZipException
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 /** A persona pack that passed the container, schema and logical-hash checks. */
@@ -43,7 +47,15 @@ fun contractVersionCompatible(contractVersion: String): Boolean = contractVersio
  * and the recomputed logical hash must equal the manifest. Nothing is trusted before that.
  */
 fun readPersonaPack(bytes: ByteArray, schemaJson: String, openDatabase: (ByteArray) -> PackDatabase): PersonaPack {
-    val entries = readZipEntries(bytes)
+    val entries = try {
+        readZipEntries(bytes)
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: Exception) {
+        throw PackRejected("角色包读不出来：${error.message}")
+    }
     if (entries.map { it.first } != listOf("manifest.json", "persona.sqlite")) {
         throw PackRejected(
             "角色包必须且只能按顺序包含 manifest.json 和 persona.sqlite，实际是 ${entries.map { it.first }}",
@@ -53,7 +65,13 @@ fun readPersonaPack(bytes: ByteArray, schemaJson: String, openDatabase: (ByteArr
     if (!contractVersionCompatible(manifest.contractVersion)) {
         throw PackRejected("不兼容的契约版本：${manifest.contractVersion}")
     }
-    val actual = logicalSha256(openDatabase(entries[1].second))
+    val actual = try {
+        logicalSha256(openDatabase(entries[1].second))
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: Exception) {
+        throw PackRejected("persona.sqlite 不是可以读取的数据库：${error.message}")
+    }
     if (actual != manifest.logicalSha256) {
         throw PackRejected("logical_sha256 不一致：manifest 是 ${manifest.logicalSha256}，重算是 $actual")
     }
@@ -102,12 +120,71 @@ private fun JsonValue.require(field: String): String =
 private fun JsonValue.requireInt(field: String): Int =
     this[field]?.asIntOrNull() ?: throw PackRejected("manifest 的 $field 不是整数")
 
+/** One zip entry, compressed or not, may not be larger than this. A persona pack is two small files. */
+internal const val MAX_PACK_ENTRY_BYTES = 64L * 1024 * 1024
+
 private fun readZipEntries(bytes: ByteArray): List<Pair<String, ByteArray>> {
-    val entries = mutableListOf<Pair<String, ByteArray>>()
-    ZipInputStream(bytes.inputStream()).use { zip ->
-        generateSequence { zip.nextEntry }.forEach { entry ->
-            if (!entry.isDirectory) entries += entry.name to zip.readBytes()
-        }
+    // Neither reader covers every broken pack. ZipInputStream stops after the local entries, so a
+    // missing end header still looks complete, while ZipFile does not check a stored entry's CRC.
+    val declared = readCentralDirectory(bytes)
+    val streamed = readLocalEntries(bytes)
+    if (declared.map { it.first } != streamed.map { it.first } ||
+        declared.zip(streamed).any { (left, right) -> !left.second.contentEquals(right.second) }
+    ) {
+        throw PackRejected("角色包的目录和条目内容不一致")
     }
-    return entries
+    return declared
+}
+
+/** ZipFile reads the central directory, so a tail of 1 or 22 bytes missing is rejected here. */
+private fun readCentralDirectory(bytes: ByteArray): List<Pair<String, ByteArray>> {
+    val file = Files.createTempFile("persona-pack-", ".mpack")
+    return try {
+        Files.write(file, bytes)
+        ZipFile(file.toFile()).use { zip ->
+            zip.entries().toList().map { entry -> readNamedEntry(entry.name, entry.isDirectory, entry.size, zip.getInputStream(entry)) }
+        }
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    } finally {
+        Files.deleteIfExists(file)
+    }
+}
+
+/** ZipInputStream checks each stored entry's CRC, which ZipFile skips. */
+private fun readLocalEntries(bytes: ByteArray): List<Pair<String, ByteArray>> =
+    try {
+        ZipInputStream(bytes.inputStream()).use { zip ->
+            generateSequence { zip.nextEntry }.map { entry ->
+                readNamedEntry(entry.name, entry.isDirectory, entry.size, zip)
+            }.toList()
+        }
+    } catch (error: PackRejected) {
+        throw error
+    } catch (error: ZipException) {
+        throw PackRejected("角色包不是完整的 zip：${error.message}")
+    }
+
+private fun readNamedEntry(name: String, directory: Boolean, declaredSize: Long, bytes: java.io.InputStream): Pair<String, ByteArray> {
+    if (directory || name.endsWith("/")) return name to ByteArray(0)
+    if (declaredSize > MAX_PACK_ENTRY_BYTES) throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+    return name to readEntryBounded(bytes, name)
+}
+
+private fun readEntryBounded(zip: java.io.InputStream, name: String): ByteArray {
+    val buffer = ByteArrayOutputStream()
+    val chunk = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val read = zip.read(chunk)
+        if (read < 0) break
+        total += read
+        if (total > MAX_PACK_ENTRY_BYTES) {
+            throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+        }
+        buffer.write(chunk, 0, read)
+    }
+    return buffer.toByteArray()
 }

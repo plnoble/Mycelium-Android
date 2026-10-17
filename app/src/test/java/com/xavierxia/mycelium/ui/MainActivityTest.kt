@@ -3,7 +3,9 @@ package com.xavierxia.mycelium.ui
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.MainActivity
 import org.junit.Rule
@@ -19,11 +21,16 @@ class MainActivityTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun launcherActivityDisplaysPhase0() {
-        compose.onNodeWithText("知衍").assertIsDisplayed()
-        compose.onNodeWithText("阶段 0 · 基础框架").assertIsDisplayed()
-        compose.onNodeWithText("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
-            .assertIsDisplayed()
+    fun threeSpacesAreReachableAndTheUpdateCheckStaysOnMine() {
+        compose.onAllNodesWithText("圆桌")[0].assertIsDisplayed()
+        compose.onNodeWithText("导入角色包").assertIsDisplayed()
+        compose.onNodeWithText("在电脑版知衍的角色页导出角色包，传到手机后在这里导入。").assertIsDisplayed()
+
+        compose.onNodeWithText("伴侣").performClick()
+        compose.onNodeWithText("伴侣空间在下一阶段开发：只用手机上的模型，不联网。").assertIsDisplayed()
+
+        compose.onNodeWithText("我的").performClick()
+        compose.onNodeWithText("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）").assertIsDisplayed()
         compose.onNodeWithText("检查更新").assertIsEnabled()
     }
 }

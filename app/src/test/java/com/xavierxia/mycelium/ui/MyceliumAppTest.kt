@@ -34,6 +34,7 @@ class MyceliumAppTest {
             }
         })
         compose.setContent { MyceliumApp(manager) }
+        compose.onNodeWithText("我的").performClick()
 
         repeat(2) {
             compose.onNodeWithText("检查更新").performClick()
@@ -46,6 +47,7 @@ class MyceliumAppTest {
     fun failedCheckDisplaysErrorAndAllowsRetry() {
         val manager = UpdateManager(ReleaseSource { throw IOException("Network unavailable") })
         compose.setContent { MyceliumApp(manager) }
+        compose.onNodeWithText("我的").performClick()
 
         compose.onNodeWithText("检查更新").performClick()
 
