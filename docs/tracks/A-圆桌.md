@@ -11,3 +11,6 @@
 - 2026-10-16：统筹复审 `456156d`，见 `docs/reviews/2026-10-16-P1-6/REVIEW-r1.md`。代码四条通过，全新 worktree 全套检查通过。结论仍是需修改，因为真机证据还没有。
 - 2026-10-17：真机补齐。检索向量在 `456156d` 上第一次失败：`rawQuery` 收到的是整个绑定数组，SQLCipher 把它当成第 1 个参数，抛出数据类型不匹配。已改为展开数组。重跑后 instrumented test 2 个、0 失败。陆川走查 7 步完成，截图在 Windows 仓库 `.omx/development/reviews/2026-10-17-android-P1-6/`。调试版 0.2.0（versionCode 3）和正式版 0.1.1（versionCode 2，最后更新时间 2026-10-10 05:23:04）同时安装。这一轮除了证据，还有这一处绑定调用的改动，不是只看 `456156d`。
 - P1-7 云端服务商已定为 DeepSeek 官方接口（main `2a2317b`）。P1-6 合并前不开 P1-7。
+- 2026-10-17：P1-6 复审第 2 轮通过，见 `docs/reviews/2026-10-16-P1-6/REVIEW-r2.md`。已合并进本地 main（`5496949`，入档 `14e5058`），没有推送。0.2.0 的推送和发布仍等用户决定。
+- 2026-10-17：P1-7 从 `14e5058` 拉出 `wp/P1-7-roundtable-chat`。`:net` 是唯一出网模块，检查更新改走网关。`:roundtable` 做检索、拼提示、校验和费用，不依赖 HTTP 库。DeepSeek 按 2026-10-17 官方文档核对：`https://api.deepseek.com`、`deepseek-flash`、非高峰缓存未命中 0.15 / 0.6 美元每百万 token。开放平台没有写明 API 数据是否用于训练，界面写「未找到明文条款」。
+- 2026-10-17：电脑上 `:net:test`、`:roundtable:test`、`:contract:test`、`:app:testDebugUnitTest`、`:app:assembleDebug`、`:app:lintDebug` 已通过。真机 `DeviceConversationTest` 1 个已通过。陆川三问走查已通过，用的是电脑上的假服务，没有真实密钥。审计 3 条，都是圆桌聊天。截图在 Windows 仓库 `.omx/development/reviews/2026-10-17-android-P1-7/`。调试版 0.3.0（versionCode 4）和正式版 0.1.1（versionCode 2，最后更新时间 2026-10-10 05:23:04）同时安装。见 `docs/reviews/2026-10-17-P1-7/DELIVERY.md`。还没有提交，全新 worktree 和 Codex 审核都未做。

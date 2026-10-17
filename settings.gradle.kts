@@ -17,6 +17,8 @@ dependencyResolutionManagement {
 rootProject.name = "Mycelium-Android"
 include(":app")
 include(":contract")
+include(":net")
+include(":roundtable")
 
 // The pure-Kotlin contract consumer lives in contract-lib/. The directory name
 // contract/ is reserved for the byte-for-byte copy of the Windows contract.
