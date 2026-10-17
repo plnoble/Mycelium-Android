@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.xavierxia.mycelium"
     compileSdk = 37
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "com.xavierxia.mycelium"
@@ -104,6 +105,7 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
 
     implementation(project(":contract"))
+    implementation(project(":llm"))
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material3:material3")
@@ -138,3 +140,5 @@ dependencies {
     androidTestImplementation("androidx.test:monitor:1.8.0")
     androidTestImplementation(project(":contract"))
 }
+
+
