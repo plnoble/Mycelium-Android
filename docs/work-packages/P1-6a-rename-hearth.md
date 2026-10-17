@@ -1,6 +1,7 @@
 # P1-6a 改名：「伴侣」空间改为「炉边」
 
 - 仓库 / 基准：安卓仓库 `main`（P1-6 合并后）→ 分支 `wp/P1-6a-rename-hearth`
+- 工作目录：P1-7 已经在 `D:\Agent\Project\Nivra` 开工，那里有没提交的改动。本包用 `git worktree add` 在 `D:\Agent\Worktrees\Mycelium-Android\P1-6a` 单独做，不要动 `Nivra` 里 P1-7 的改动。合并后删掉这个 worktree。
 - 依赖：P1-6 已合并。
 - 预计规模：半天以内。
 - 版本：版本号不变，仍是 0.2.0（versionCode 3）。0.2.0 还没发布，这次改名随 0.2.0 一起发；发不发、什么时候发由用户决定。
@@ -35,4 +36,5 @@
 
 ## 审核
 
-- 改动很小，直接交统筹看，不用调 Codex。通过后由统筹合并进本地 `main`，然后再开 P1-7。
+- 改动很小，直接交统筹看，不用调 Codex。通过后由统筹合并进本地 `main`。
+- P1-7 不用停。P1-7 交审前，先把最新的 `main`（已含本包）并进 `wp/P1-7-roundtable-chat`。两边都改了 `MyceliumApp.kt`，有冲突时以本包的命名为准。
