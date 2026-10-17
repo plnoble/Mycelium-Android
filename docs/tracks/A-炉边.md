@@ -3,10 +3,14 @@
 ## 已通过
 
 - 2026-10-17：独立 worktree `D:\Agent\Worktrees\Mycelium-Android\hearth`，分支 `wp/P2-1-local-llm`，起点 `main @ 41bfd10`。不进 `D:\Agent\Project\Nivra`。
-- 新增 `:model-api`（统一模型接口）和 `:llm`（llama.cpp 引擎、模型登记、思考段处理、取消）。`app/.../localmodels/` 有「我的 → 本地模型」页面和真机测试 `LocalModelDeviceTest`。改过 `settings.gradle.kts`、`app/build.gradle.kts`、`MyceliumApp.kt`、`.gitignore`。
-- llama.cpp 源码在 `llm/vendor/llama.cpp`，被 Git 忽略，提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`，由 `scripts/prepare-llama.ps1` 从本地克隆准备。不联网。
-- 11:46 的构建：JVM 测试 41 个通过（`:model-api` 3、`:llm` 11、`:app` 27），lint 0 error，调试包和真机测试包都编好了。之后只改过 `llm/README.md`。这个目录里还没跑过 `:contract:test`。
-- 真机证据在 Windows 仓库 `.omx/development/reviews/2026-10-17-android-P2-1/`：`baseline.txt`、`device-first-run.txt`、`device-first-metrics.txt`，以及截图 `import-progress.png`、`model-list.png`。`LocalModelDeviceTest` 已通过：用持久 SAF 文件描述符直接读取，没有复制；加载 419 毫秒；64 token 约 15.8 token/秒；生成中停止 2 毫秒；提示处理阶段取消 33 毫秒；卸载后 RSS 从 3.35 GB 回落到 350 MB。64 token 太短，不能当作比 P0-7 的 4B@6（约 8 token/秒）更快的结论。
+- `7623fa1`：`:model-api`、`:llm`、「我的 → 本地模型」、`LocalModelDeviceTest`。llama.cpp 在 `llm/vendor/llama.cpp`（Git 忽略），提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`，由 `scripts/prepare-llama.ps1` 从本地克隆准备，不联网。
+- 11:46 的构建：JVM 测试 41 个通过（`:model-api` 3、`:llm` 11、`:app` 27），lint 0 error，调试包和真机测试包都编好了。那个目录当时没跑 `:contract:test`。
+- 真机（红魔，用户已确认 A-圆桌线没在用；只动调试包）：完整 instrumented 套件 3 个测试、0 失败。持久 SAF 直接读，没有复制。这次加载 400 毫秒；64 token 约 15.98 token/秒；生成中停止 1 毫秒；提示处理阶段取消 18 毫秒；卸载后 RSS 回到约 346 MB。更早一次是 419 毫秒、约 15.83 token/秒。64 token 不拿来和 P0-7 比。
+- 256 token：1 次，6 线程、8192 上下文，11.71 token/秒，加载 1478 毫秒。界面另一次加载显示 450 毫秒。P0-7 4B@6 的 256 token 是 8.73/8.74/8.73 和重编后 8.17/8.16/7.77。本包只跑了一次、提示只有 44 token，不能写成已经确认更快。
+- 流式截图 `stream-generation.png`，加上 `import-progress.png`、`model-list.png`，都在 Windows 仓库 `.omx/development/reviews/2026-10-17-android-P2-1/`。只截了知衍（调试），裁掉状态栏。原模型 SHA256 未变。正式版仍是 0.1.1，最后更新时间 2026-10-10 05:23:04。
+- 交付报告：`docs/reviews/2026-10-17-P2-1/DELIVERY.md`。六个 `.so` 的 SHA256 是真机那一包去掉符号后的。换目录重编会把编译路径写进二进制，所以校验值会变，源码没变。Codex 因额度 87% 没有发起。
+- 全新目录对 `7623fa1` 离线重跑：先用 `scripts/prepare-llama.ps1` 从本地克隆准备 llama.cpp（提交核对通过），然后 `:contract:test` 14、`:model-api:test` 3、`:llm:testDebugUnitTest` 11、`:app:testDebugUnitTest` 27，加上两个打包和 lint，0 失败，lint 0 error。sqlite-jdbc 在 JBR 25 上有 `System::load` 警告，测试仍通过。
+- 交审前看过 `main`：仍是 `41bfd10`，没有要并进来的提交。
 - 环境约定不变：JBR、已装 SDK、Gradle 9.5.0、NDK 30.0.16248370、CMake 3.22.1。离线构建，不清全局缓存，不升级工具链。
 
 ## 失败
@@ -15,7 +19,5 @@
 
 ## 未验证
 
-- 完整真机测试集当时正在用 adb 跑，结果不明。手机上残留 `com.xavierxia.mycelium.debug.test` 进程。用手机前先请用户确认 A-圆桌线没在用。
-- 还缺：256 token 的生成速度；「试运行」里一次流式生成的截图（只截知衍（调试），裁掉状态栏）；`docs/reviews/2026-10-17-P2-1/DELIVERY.md`；全新 worktree 对已提交版本的全套检查（新目录没有 `llm/vendor`，先用 `scripts/prepare-llama.ps1` 从本地克隆准备）。
-- 交审前看一眼 `main` 有没有新提交，有就先并进来。Codex 共享额度已到 87%，本包不调 Codex，做完交统筹代审。
+- 没有。交统筹代审。
 - 只在本分支提交。不推送、不打标签、不发布、不合并 `main`。`:llm` 和 `:model-api` 不许有联网代码。手机上的原模型文件只读。
