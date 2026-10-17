@@ -2,9 +2,14 @@ package com.xavierxia.mycelium.roundtable
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.xavierxia.mycelium.contract.claimIdForDocument
+import com.xavierxia.mycelium.contract.listClaims
+import com.xavierxia.mycelium.contract.listThemes
+import com.xavierxia.mycelium.contract.loadClaim
 import com.xavierxia.mycelium.contract.parseJson
 import com.xavierxia.mycelium.contract.searchPack
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -35,5 +40,26 @@ class DeviceRetrievalTest {
             assertEquals(id, case["strategy"]!!.asTextOrNull(), result.strategy)
             assertEquals(id, case["expected"]!!.elements().map { it.asTextOrNull() }, result.hits.map { it.documentKey })
         }
+    }
+
+    /** Themes, claims, claim detail, and search-hit lookup all bind parameters. */
+    @Test
+    fun boundQueriesReachTheSamplePack() {
+        val context = InstrumentationRegistry.getInstrumentation().context
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = File(target.cacheDir, "synthetic-persona-v1-bound.sqlite")
+        context.assets.open("samples/synthetic-persona-v1/persona.sqlite").use { input ->
+            database.outputStream().use { input.copyTo(it) }
+        }
+        val opened = SqlCipherPackDatabase(database.path)
+        val themes = listThemes(opened)
+        assertEquals(3, themes.size)
+        assertEquals(11, listClaims(opened, null).size)
+        assertTrue(listClaims(opened, themes.first().themeId).isNotEmpty())
+        val detail = loadClaim(opened, "LC-C1")
+        assertTrue(detail != null)
+        assertTrue(detail!!.evidence.isNotEmpty())
+        assertTrue(detail.relations.isNotEmpty())
+        assertEquals("LC-C1", claimIdForDocument(opened, "claim:lc-claim-record-1"))
     }
 }

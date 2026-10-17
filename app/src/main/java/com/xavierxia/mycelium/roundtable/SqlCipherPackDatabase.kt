@@ -35,7 +35,8 @@ private class SqlCipherQuery(private val database: SQLiteDatabase) : PackQuery {
     override fun query(sql: String, bind: (PackStatement) -> Unit): List<PackRow> {
         val arguments = SqlArgumentList()
         bind(CollectingStatement(arguments))
-        database.rawQuery(sql, arguments.toTypedArray()).use { cursor ->
+        // rawQuery is Java varargs. The array must be spread, or it is bound as parameter 1.
+        database.rawQuery(sql, *arguments.toTypedArray()).use { cursor ->
             val rows = mutableListOf<PackRow>()
             while (cursor.moveToNext()) {
                 rows += PackRow(List(cursor.columnCount) { column -> cursor.valueAt(column) })
