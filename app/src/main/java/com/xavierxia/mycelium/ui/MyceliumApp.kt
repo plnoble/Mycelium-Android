@@ -63,10 +63,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class Space(val label: String) { Roundtable("圆桌"), Companion("伴侣"), Mine("我的") }
+private enum class Space(val label: String) { Roundtable("圆桌"), Hearth("炉边"), Mine("我的") }
 
 private val roundtableColors = lightColorScheme(primary = Color(0xFF8D4A2B), secondary = Color(0xFF8D4A2B))
-private val companionColors = darkColorScheme(primary = Color(0xFF7EB6A4), secondary = Color(0xFF7EB6A4))
+private val hearthColors = darkColorScheme(primary = Color(0xFF7EB6A4), secondary = Color(0xFF7EB6A4))
 
 @Composable
 fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
@@ -74,7 +74,7 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
     val roundtable = remember { Roundtable(context) }
     var space by remember { mutableStateOf(Space.Roundtable) }
     var revision by remember { mutableIntStateOf(0) }
-    val colors = if (space == Space.Companion) companionColors else roundtableColors
+    val colors = if (space == Space.Hearth) hearthColors else roundtableColors
 
     MaterialTheme(colorScheme = colors) {
         Scaffold(
@@ -85,7 +85,7 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
                         NavigationBarItem(
                             selected = space == item,
                             onClick = { space = item },
-                            icon = { Text(if (item == Space.Roundtable) "桌" else if (item == Space.Companion) "伴" else "我") },
+                            icon = { Text(if (item == Space.Roundtable) "桌" else if (item == Space.Hearth) "炉" else "我") },
                             label = { Text(item.label) },
                         )
                     }
@@ -94,7 +94,7 @@ fun MyceliumApp(updateManager: UpdateManager = remember { UpdateManager() }) {
         ) { padding ->
             when (space) {
                 Space.Roundtable -> RoundtableScreen(roundtable, revision, padding) { revision++ }
-                Space.Companion -> CompanionScreen(padding)
+                Space.Hearth -> HearthScreen(padding)
                 Space.Mine -> MineScreen(roundtable, updateManager, revision, padding) { revision++ }
             }
         }
@@ -322,11 +322,11 @@ private fun ClaimScreen(roundtable: Roundtable, version: InstalledVersion, claim
 }
 
 @Composable
-private fun CompanionScreen(padding: PaddingValues) {
+private fun HearthScreen(padding: PaddingValues) {
     Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("伴侣", style = MaterialTheme.typography.headlineMedium)
+        Text("炉边", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(12.dp))
-        Text("伴侣空间在下一阶段开发：只用手机上的模型，不联网。")
+        Text("炉边在下一阶段开发：只用手机上的模型，不联网。")
     }
 }
 

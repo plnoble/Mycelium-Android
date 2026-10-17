@@ -26,8 +26,8 @@ class MainActivityTest {
         compose.onNodeWithText("导入角色包").assertIsDisplayed()
         compose.onNodeWithText("在电脑版知衍的角色页导出角色包，传到手机后在这里导入。").assertIsDisplayed()
 
-        compose.onNodeWithText("伴侣").performClick()
-        compose.onNodeWithText("伴侣空间在下一阶段开发：只用手机上的模型，不联网。").assertIsDisplayed()
+        compose.onNodeWithText("炉边").performClick()
+        compose.onNodeWithText("炉边在下一阶段开发：只用手机上的模型，不联网。").assertIsDisplayed()
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）").assertIsDisplayed()
