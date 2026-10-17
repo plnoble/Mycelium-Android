@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.xavierxia.mycelium.localmodels.LocalModelsScreen
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.R
 import com.xavierxia.mycelium.contract.ClaimDetail
@@ -343,9 +344,18 @@ private fun MineScreen(
     var checking by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateResult?>(null) }
     var pendingDelete by remember { mutableStateOf<InstalledVersion?>(null) }
+    var localModels by remember { mutableStateOf(false) }
+    if (localModels) {
+        LocalModelsScreen(padding, onBack = { localModels = false })
+        return
+    }
     val installed = remember(revision) { roundtable.installed() }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）") }
+        item {
+            Text("模型", style = MaterialTheme.typography.titleMedium)
+            TextButton(onClick = { localModels = true }) { Text("本地模型") }
+        }
         item {
             Button(enabled = !checking, onClick = {
                 scope.launch {
@@ -449,3 +459,4 @@ private class DeletingDatabase(private val file: File) : com.xavierxia.mycelium.
             file.delete()
         }
 }
+
