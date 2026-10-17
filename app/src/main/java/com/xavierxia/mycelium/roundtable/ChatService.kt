@@ -12,27 +12,50 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.time.YearMonth
-import java.time.ZoneOffset
 
 /** Roundtable chat as the screens use it: one persona version, one encrypted history. */
 class ChatService(context: Context) {
     private val app = context.applicationContext
-    private val settings = CloudSettingsStore(app, SecretStore("mycelium-cloud"))
+    private val settings = CloudSettingsStore(app, KeystoreSecretBox("mycelium-cloud"))
     private val databaseFile = File(app.filesDir, "roundtable/conversations.sqlite")
-    private var gateway = gatewayFor(settings.read())
+    private var gateway = gatewayFor(settings)
 
-    fun settings(): ModelSettings = settings.read()
+    fun services(): List<CloudService> = settings.services()
 
-    fun keyHint(): String? = settings.keyHint()
+    fun addService(id: String?, name: String, baseUrl: String, apiKey: String?): String {
+        val serviceId = settings.addService(id, name, baseUrl, apiKey)
+        gateway = gatewayFor(settings)
+        return serviceId
+    }
+
+    fun removeService(serviceId: String) {
+        settings.removeService(serviceId)
+        gateway = gatewayFor(settings)
+    }
+
+    fun keyHint(serviceId: String): String? = settings.keyHint(serviceId)
+
+    fun models(serviceId: String): List<String> = settings.models(serviceId)
+
+    fun saveModels(serviceId: String, models: List<String>) = settings.saveModels(serviceId, models)
+
+    fun selection(): CloudSelection? = settings.selection()
+
+    fun rememberSelection(serviceId: String, model: String) = settings.rememberSelection(serviceId, model)
 
     fun trainingPolicy(): String = DeepSeekDefaults.TRAINING_POLICY
 
     fun privacyPolicyUrl(): String = DeepSeekDefaults.PRIVACY_POLICY_URL
 
-    fun saveSettings(baseUrl: String, model: String, input: Double, output: Double, limit: Double, apiKey: String?) {
-        settings.save(baseUrl, model, input, output, limit, apiKey)
-        gateway = gatewayFor(settings.read())
+    /** Pulls the model list through the gateway. The key stays out of the audit log. */
+    fun fetchModels(serviceId: String): List<String> {
+        val service = settings.services().firstOrNull { it.id == serviceId }
+            ?: throw ModelListError("这个服务已经删掉了")
+        return pullModels(
+            gateway = gatewayFor(settings).gateway,
+            baseUrl = service.baseUrl,
+            apiKey = settings.apiKey(serviceId),
+        )
     }
 
     fun audit() = gateway.audit.read()
@@ -45,24 +68,7 @@ class ChatService(context: Context) {
 
     fun delete(conversationId: String) = store().delete(conversationId)
 
-    fun previewCost(
-        persona: InstalledVersion,
-        question: String,
-        mode: AnswerMode,
-        template: String,
-        rulesJson: String,
-    ): CostEstimate {
-        val current = settings.read()
-        return CloudChat(
-            model = DeepSeekAnswerModel(gateway.gateway),
-            openPack = { SqlCipherPackDatabase(persona.file.path) },
-            template = template,
-            rulesJson = rulesJson,
-            spentThisMonth = { 0.0 },
-        ).preview(question, mode, current, emptyList())
-    }
-
-    fun ask(
+    suspend fun ask(
         persona: InstalledVersion,
         conversationId: String?,
         question: String,
@@ -70,22 +76,27 @@ class ChatService(context: Context) {
         template: String,
         rulesJson: String,
     ): Pair<String, ChatReply> {
-        val current = settings.read()
-        gateway = gatewayFor(current)
+        val selected = settings.selection() ?: throw IllegalStateException("请先在「云端模型」里选一个模型")
+        val service = settings.services().firstOrNull { it.id == selected.serviceId }
+            ?: throw IllegalStateException("选中的服务已经删掉了，请重新选一个模型")
+        val currentGateway = gatewayFor(settings)
+        gateway = currentGateway
         val history = conversationId?.let { messages(it) }.orEmpty().toTurns()
-        val month = YearMonth.now(ZoneOffset.UTC).toString()
         val chat = CloudChat(
-            model = DeepSeekAnswerModel(gateway.gateway),
+            model = CloudChatModel(
+                gateway = currentGateway.gateway,
+                serviceName = service.name,
+                baseUrl = service.baseUrl,
+                apiKey = settings.apiKey(service.id),
+                model = selected.model,
+            ),
+            providerName = service.name,
+            modelName = selected.model,
             openPack = { SqlCipherPackDatabase(persona.file.path) },
             template = template,
             rulesJson = rulesJson,
-            spentThisMonth = {
-                gateway.audit.read()
-                    .filter { it.purpose == GatewayPurpose.RoundtableChat && it.at.startsWith(month) }
-                    .sumOf { it.estimatedCostUsd }
-            },
         )
-        val reply = chat.ask(question, mode, current, history)
+        val reply = chat.ask(question, mode, history)
         if (reply is ChatReply.Shown) {
             val citations = JSONArray()
             reply.citations.forEach { card ->
@@ -127,7 +138,7 @@ class ChatService(context: Context) {
         HttpText(response.status, response.body)
     }
 
-    private fun gatewayFor(current: ModelSettings) = AndroidGateway(app, current.baseUrl, current.prices)
+    private fun gatewayFor(store: CloudSettingsStore) = AndroidGateway(app, store.allBaseUrls())
 
     private fun store() = ConversationStore { openEncrypted() }
 

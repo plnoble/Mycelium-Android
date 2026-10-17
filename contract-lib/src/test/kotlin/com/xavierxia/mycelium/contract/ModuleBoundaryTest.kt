@@ -8,7 +8,7 @@ import kotlin.io.path.readText
 
 /**
  * HTTP stays in :net. :roundtable and :contract call the gateway interface.
- * A future companion module, named with that prefix, must not depend on :net.
+ * A future hearth module, named with that prefix, must not depend on :net.
  */
 class ModuleBoundaryTest {
     private val root = generateSequence(java.nio.file.Path.of("").toAbsolutePath()) { it.parent }
@@ -32,7 +32,7 @@ class ModuleBoundaryTest {
                     assertFalse(production.contains(token), "$module 含有 $token")
                 }
             }
-            if (module.startsWith(":companion")) {
+            if (module.startsWith(":hearth")) {
                 assertFalse(build.contains("""project(":net")"""), "$module 不许依赖 :net")
             }
         }

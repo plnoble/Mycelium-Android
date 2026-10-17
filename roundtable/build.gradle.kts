@@ -25,6 +25,7 @@ java {
 dependencies {
     implementation(project(":contract"))
     implementation(project(":net"))
+    implementation(project(":model-api"))
     implementation("org.json:json:20240303")
 
     testImplementation(kotlin("test"))

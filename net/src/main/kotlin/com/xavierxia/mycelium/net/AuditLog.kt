@@ -12,7 +12,9 @@ data class AuditEntry(
     val sentBody: String,
     val status: Int?,
     val succeeded: Boolean,
-    val estimatedCostUsd: Double,
+    /** Token usage the service reported. Recorded only, never used to block a call. */
+    val promptTokens: Int?,
+    val completionTokens: Int?,
 )
 
 /** Append-only record of everything the gateway sent. Credentials are not part of an entry. */
@@ -49,7 +51,8 @@ private fun AuditEntry.toJson(): JSONObject = JSONObject()
     .put("sentBody", sentBody)
     .put("status", status ?: JSONObject.NULL)
     .put("succeeded", succeeded)
-    .put("estimatedCostUsd", estimatedCostUsd)
+    .put("promptTokens", promptTokens ?: JSONObject.NULL)
+    .put("completionTokens", completionTokens ?: JSONObject.NULL)
 
 private fun JSONObject.toEntry(): AuditEntry = AuditEntry(
     at = getString("at"),
@@ -59,5 +62,8 @@ private fun JSONObject.toEntry(): AuditEntry = AuditEntry(
     sentBody = getString("sentBody"),
     status = if (isNull("status")) null else getInt("status"),
     succeeded = getBoolean("succeeded"),
-    estimatedCostUsd = getDouble("estimatedCostUsd"),
+    promptTokens = intOrNull("promptTokens"),
+    completionTokens = intOrNull("completionTokens"),
 )
+
+private fun JSONObject.intOrNull(name: String): Int? = if (has(name) && !isNull(name)) getInt(name) else null

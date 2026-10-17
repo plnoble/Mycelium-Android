@@ -5,7 +5,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 
 /** Why a request leaves the phone. The audit log stores this, never the credentials. */
-enum class GatewayPurpose { Update, RoundtableChat }
+enum class GatewayPurpose { Update, FetchModels, RoundtableChat }
 
 data class GatewayRequest(
     val url: String,
@@ -34,7 +34,6 @@ class OutboundGateway(
     private val audit: AuditLog,
     private val clock: () -> String,
     private val open: (URI) -> HttpURLConnection,
-    private val costOf: (GatewayRequest, GatewayResponse) -> Double = { _, _ -> 0.0 },
 ) {
     fun send(request: GatewayRequest): GatewayResponse {
         val target = parse(request.url)
@@ -56,11 +55,13 @@ class OutboundGateway(
                     sentBody = request.body.orEmpty(),
                     status = null,
                     succeeded = false,
-                    estimatedCostUsd = 0.0,
+                    promptTokens = null,
+                    completionTokens = null,
                 ),
             )
             throw failure
         }
+        val usage = tokenUsage(response.body)
         audit.record(
             AuditEntry(
                 at = clock(),
@@ -70,7 +71,8 @@ class OutboundGateway(
                 sentBody = request.body.orEmpty(),
                 status = response.status,
                 succeeded = response.status in 200..299,
-                estimatedCostUsd = runCatching { costOf(request, response) }.getOrDefault(0.0),
+                promptTokens = usage?.first,
+                completionTokens = usage?.second,
             ),
         )
         return response
@@ -114,21 +116,27 @@ class OutboundGateway(
 
 /** Hosts the gateway may call. Localhost is allowed only when the debug build asks for it. */
 class AllowedHosts(
-    private val modelBaseUrl: String,
+    private val modelBaseUrls: List<String>,
     private val allowCleartextLocalhost: Boolean,
 ) {
+    constructor(modelBaseUrl: String, allowCleartextLocalhost: Boolean) :
+        this(listOf(modelBaseUrl), allowCleartextLocalhost)
+
     fun allows(target: URI, purpose: GatewayPurpose): Boolean {
         val host = target.host.orEmpty().lowercase()
         val https = target.scheme == "https"
         return when (purpose) {
             GatewayPurpose.Update -> https && host in UPDATE_HOSTS
-            GatewayPurpose.RoundtableChat -> modelHost(host, target.scheme)
+            GatewayPurpose.FetchModels, GatewayPurpose.RoundtableChat -> modelHost(host, target.scheme)
         }
     }
 
-    private fun modelHost(host: String, scheme: String?): Boolean {
+    private fun modelHost(host: String, scheme: String?): Boolean =
+        modelBaseUrls.any { base -> matches(base, host, scheme) }
+
+    private fun matches(base: String, host: String, scheme: String?): Boolean {
         val configured = try {
-            URI(modelBaseUrl)
+            URI(base)
         } catch (_: Exception) {
             return false
         }
@@ -143,6 +151,17 @@ class AllowedHosts(
     private companion object {
         val UPDATE_HOSTS = setOf("api.github.com", "github.com", "objects.githubusercontent.com")
     }
+}
+
+/** Reads the `usage` object a service reports. Absent or malformed usage is simply not recorded. */
+private fun tokenUsage(body: String): Pair<Int, Int>? {
+    val usage = try {
+        org.json.JSONObject(body).optJSONObject("usage")
+    } catch (_: Exception) {
+        null
+    } ?: return null
+    if (!usage.has("prompt_tokens") && !usage.has("completion_tokens")) return null
+    return usage.optInt("prompt_tokens") to usage.optInt("completion_tokens")
 }
 
 /** The only HTTP open in the project. Callers outside :net use the gateway, not this function. */

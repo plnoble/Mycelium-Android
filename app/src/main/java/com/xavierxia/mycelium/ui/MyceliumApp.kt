@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -56,10 +57,11 @@ import com.xavierxia.mycelium.contract.SearchResult
 import com.xavierxia.mycelium.contract.ThemeSummary
 import com.xavierxia.mycelium.net.AuditEntry
 import com.xavierxia.mycelium.net.GatewayPurpose
-import com.xavierxia.mycelium.roundtable.BudgetExceeded
 import com.xavierxia.mycelium.roundtable.ChatReply
 import com.xavierxia.mycelium.roundtable.ChatService
 import com.xavierxia.mycelium.roundtable.CitationCard
+import com.xavierxia.mycelium.roundtable.CloudService
+import com.xavierxia.mycelium.roundtable.CloudSelection
 import com.xavierxia.mycelium.roundtable.DeepSeekDefaults
 import com.xavierxia.mycelium.roundtable.ImportOutcome
 import com.xavierxia.mycelium.roundtable.InstalledVersion
@@ -397,7 +399,10 @@ private fun MineScreen(
         item { Text("版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）") }
         item {
             Text("模型", style = MaterialTheme.typography.titleMedium)
+            Text("本地", style = MaterialTheme.typography.titleSmall)
             TextButton(onClick = { localModels = true }) { Text("本地模型") }
+            Text("云端", style = MaterialTheme.typography.titleSmall)
+            TextButton(onClick = { page = "cloud" }) { Text("云端模型") }
         }
         item {
             Button(enabled = !checking, onClick = {
@@ -415,10 +420,7 @@ private fun MineScreen(
         }
         item { UpdateText(update, context) }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { page = "cloud" }) { Text("云端模型") }
-                TextButton(onClick = { page = "privacy" }) { Text("隐私记录") }
-            }
+            TextButton(onClick = { page = "privacy" }) { Text("隐私记录") }
         }
         item { Text("已导入的角色包", style = MaterialTheme.typography.titleMedium) }
         if (installed.isEmpty()) {
@@ -494,9 +496,27 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
     var rejection by remember { mutableStateOf<String?>(null) }
     var showReason by remember { mutableStateOf(false) }
     var card by remember { mutableStateOf<CitationCard?>(null) }
-    var estimate by remember { mutableStateOf<String?>(null) }
+    var services by remember { mutableStateOf(chat.services()) }
+    var selection by remember { mutableStateOf(chat.selection()) }
+    var picking by remember { mutableStateOf(false) }
+    val savedModels = remember(selection, services) {
+        services.associate { service ->
+            service.id to chat.models(service.id).map { SavedChoice(service, it) }
+        }
+    }
     Column(modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("${version.displayName} · ${version.versionLabel}")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = {
+                services = chat.services()
+                picking = true
+            }) {
+                val name = selection?.let { choice ->
+                    services.firstOrNull { it.id == choice.serviceId }?.name
+                }
+                Text(if (name == null) "选择模型" else "模型：$name ${selection?.model.orEmpty()}")
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 AnswerMode.ThoughtInference to "允许推演",
@@ -512,7 +532,7 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
                     Text(message.text, style = MaterialTheme.typography.titleSmall)
                 } else {
                     AnswerText(message.text) { mark -> cardFrom(message, mark)?.let { card = it } }
-                    Text("云端 · ${message.provider ?: "DeepSeek"} ${message.model.orEmpty()}")
+                    Text("云端 · ${message.provider ?: "云端"} ${message.model.orEmpty()}")
                 }
             }
         }
@@ -522,7 +542,6 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
             TextButton(onClick = { showReason = !showReason }) { Text(if (showReason) "收起原因" else "展开原因") }
             if (showReason) Text(it)
         }
-        estimate?.let { Text(it) }
         OutlinedTextField(question, { question = it }, modifier = Modifier.fillMaxWidth(), label = { Text("问题") })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = !busy && question.isNotBlank(), onClick = {
@@ -531,8 +550,6 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
                     notice = null
                     rejection = null
                     try {
-                        val preview = withContext(Dispatchers.IO) { chat.previewCost(version, question, mode, template, rules) }
-                        estimate = "本次估算不超过 ${"%.4f".format(preview.usd)} 美元"
                         val (id, reply) = withContext(Dispatchers.IO) {
                             chat.ask(version, conversationId, question, mode, template, rules)
                         }
@@ -541,12 +558,9 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
                                 conversationId = id
                                 messages = withContext(Dispatchers.IO) { chat.messages(id) }
                                 question = ""
-                                estimate = "本次估算 ${"%.4f".format(reply.estimatedCostUsd)} 美元"
                             }
                             is ChatReply.Rejected -> rejection = reply.reason
                         }
-                    } catch (over: BudgetExceeded) {
-                        notice = over.message
                     } catch (failure: Exception) {
                         notice = failure.message ?: "这次没有发出去"
                     } finally {
@@ -574,7 +588,33 @@ private fun ChatScreen(chat: ChatService, version: InstalledVersion, modifier: M
             confirmButton = { TextButton(onClick = { card = null }) { Text("关闭") } },
         )
     }
+    if (picking) {
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            title = { Text("选择模型") },
+            text = {
+                val choices = savedModels.values.flatten()
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (choices.isEmpty()) {
+                        Text("还没有保存模型。在「我的 → 云端模型」里拉取并勾选。")
+                    } else {
+                        choices.forEach { choice ->
+                            val chosen = selection?.serviceId == choice.service.id && selection?.model == choice.model
+                            TextButton(onClick = {
+                                chat.rememberSelection(choice.service.id, choice.model)
+                                selection = chat.selection()
+                                picking = false
+                            }) { Text(if (chosen) "● ${choice.service.name} · ${choice.model}" else "${choice.service.name} · ${choice.model}") }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { picking = false }) { Text("关闭") } },
+        )
+    }
 }
+
+private data class SavedChoice(val service: CloudService, val model: String)
 
 @Composable
 private fun AnswerText(rendered: String, onCitation: (String) -> Unit) {
@@ -611,49 +651,165 @@ private fun cardFrom(message: StoredMessage, citationId: String): CitationCard? 
 
 @Composable
 private fun CloudSettingsScreen(chat: ChatService, padding: PaddingValues, onBack: () -> Unit) {
-    val current = remember { chat.settings() }
-    var baseUrl by remember { mutableStateOf(current.baseUrl) }
-    var model by remember { mutableStateOf(current.model) }
-    var input by remember { mutableStateOf(current.prices.inputPerMillion.toString()) }
-    var output by remember { mutableStateOf(current.prices.outputPerMillion.toString()) }
-    var limit by remember { mutableStateOf(current.monthlyLimitUsd.toString()) }
+    val scope = rememberCoroutineScope()
+    var services by remember { mutableStateOf(chat.services()) }
+    var editing by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf(DeepSeekDefaults.BASE_URL) }
     var key by remember { mutableStateOf("") }
-    var hint by remember { mutableStateOf(chat.keyHint()) }
+    var hint by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var fetched by remember { mutableStateOf<List<String>?>(null) }
+    var checked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pulling by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<CloudService?>(null) }
+
+    fun startCreate() {
+        creating = true
+        editing = null
+        name = ""
+        baseUrl = DeepSeekDefaults.BASE_URL
+        key = ""
+        hint = null
+        notice = null
+        fetched = null
+        checked = emptySet()
+    }
+
+    fun startEdit(service: CloudService) {
+        creating = false
+        editing = service.id
+        name = service.name
+        baseUrl = service.baseUrl
+        key = ""
+        hint = chat.keyHint(service.id)
+        notice = null
+        fetched = null
+        checked = chat.models(service.id).toSet()
+    }
+
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { TextButton(onClick = onBack) { Text("返回") } }
         item { Text("云端模型", style = MaterialTheme.typography.titleMedium) }
-        item { OutlinedTextField(baseUrl, { baseUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("接口地址") }) }
-        item { OutlinedTextField(model, { model = it }, modifier = Modifier.fillMaxWidth(), label = { Text("模型名") }) }
-        item {
-            OutlinedTextField(
-                key,
-                { typed -> key = typed },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(if (hint == null) "API key" else "API key（已保存 $hint，留空则不改）") },
-            )
-        }
-        item { OutlinedTextField(input, { input = it }, modifier = Modifier.fillMaxWidth(), label = { Text("输入单价（美元 / 百万 token）") }) }
-        item { OutlinedTextField(output, { output = it }, modifier = Modifier.fillMaxWidth(), label = { Text("输出单价（美元 / 百万 token）") }) }
-        item { OutlinedTextField(limit, { limit = it }, modifier = Modifier.fillMaxWidth(), label = { Text("每月上限（美元）") }) }
-        item { Text("API 数据是否用于训练：${DeepSeekDefaults.TRAINING_POLICY}") }
-        item { Text(chat.privacyPolicyUrl(), style = MaterialTheme.typography.bodySmall) }
-        item {
-            Button(onClick = {
-                val inputPrice = input.toDoubleOrNull()
-                val outputPrice = output.toDoubleOrNull()
-                val monthly = limit.toDoubleOrNull()
-                if (inputPrice == null || outputPrice == null || monthly == null) {
-                    notice = "单价和上限要填数字"
-                    return@Button
+        item { Text("每个服务填名称、接口地址和 key。地址默认填 DeepSeek，可以改成别的。") }
+        item { Button(onClick = { startCreate() }) { Text("添加服务") } }
+
+        if (creating || editing != null) {
+            item {
+                OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("名称") })
+            }
+            item {
+                OutlinedTextField(baseUrl, { baseUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("接口地址") })
+            }
+            item {
+                OutlinedTextField(
+                    key,
+                    { typed -> key = typed },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(if (hint == null) "API key" else "API key（已保存 $hint，留空则不改）") },
+                )
+            }
+            item { Text("API 数据是否用于训练：${DeepSeekDefaults.TRAINING_POLICY}") }
+            item { Text(chat.privacyPolicyUrl(), style = MaterialTheme.typography.bodySmall) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = !pulling, onClick = {
+                        scope.launch {
+                            notice = null
+                            try {
+                                val serviceId = withContext(Dispatchers.IO) {
+                                    chat.addService(editing, name, baseUrl, key.ifBlank { null })
+                                }
+                                editing = serviceId
+                                creating = false
+                                key = ""
+                                hint = chat.keyHint(serviceId)
+                                services = chat.services()
+                                pulling = true
+                                try {
+                                    val models = withContext(Dispatchers.IO) { chat.fetchModels(serviceId) }
+                                    fetched = models
+                                    checked = chat.models(serviceId).toSet()
+                                    if (models.isEmpty()) notice = "这个服务没有返回可用的模型"
+                                } finally {
+                                    pulling = false
+                                }
+                            } catch (failure: Exception) {
+                                notice = failure.message ?: "这次没有拉到模型"
+                            }
+                        }
+                    }) { Text(if (pulling) "正在拉取" else "拉取模型") }
+                    TextButton(onClick = {
+                        if (creating) {
+                            creating = false
+                        } else {
+                            editing = null
+                        }
+                        notice = null
+                    }) { Text("取消") }
                 }
-                chat.saveSettings(baseUrl, model, inputPrice, outputPrice, monthly, key.ifBlank { null })
-                key = ""
-                hint = chat.keyHint()
-                notice = "已保存"
-            }) { Text("保存") }
+            }
+            item { notice?.let { Text(it) } }
+            fetched?.let { models ->
+                if (models.isNotEmpty()) {
+                    item { Text("勾选要保存的模型，可以多选：") }
+                    items(models) { model ->
+                        Row {
+                            Checkbox(
+                                checked = model in checked,
+                                onCheckedChange = { on ->
+                                    checked = if (on) checked + model else checked - model
+                                },
+                            )
+                            Text(model)
+                        }
+                    }
+                    item {
+                        Button(onClick = {
+                            val serviceId = editing ?: return@Button
+                            chat.saveModels(serviceId, checked.toList())
+                            services = chat.services()
+                            notice = "已保存 ${checked.size} 个模型"
+                        }) { Text("保存勾选的模型") }
+                    }
+                }
+            }
         }
-        item { notice?.let { Text(it) } }
+
+        item { Text("已保存的服务", style = MaterialTheme.typography.titleMedium) }
+        if (services.isEmpty()) item { Text("还没有云端服务。点「添加服务」填地址和 key。") }
+        items(services, key = { it.id }) { service ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(service.name, style = MaterialTheme.typography.titleSmall)
+                    Text(service.baseUrl)
+                    Text("key：${chat.keyHint(service.id) ?: "未填写"}")
+                    val models = chat.models(service.id)
+                    Text(if (models.isEmpty()) "还没有保存模型" else "已保存：${models.joinToString("、")}")
+                    Row {
+                        TextButton(onClick = { startEdit(service) }) { Text("编辑") }
+                        TextButton(onClick = { removing = service }) { Text("删除") }
+                    }
+                }
+            }
+        }
+    }
+    removing?.let { service ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("删除这个服务？") },
+            text = { Text("「${service.name}」和它保存的模型列表会一起删掉。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    chat.removeService(service.id)
+                    services = chat.services()
+                    if (editing == service.id) editing = null
+                    removing = null
+                }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } },
+        )
     }
 }
 
@@ -680,7 +836,12 @@ private fun AuditCard(entry: AuditEntry) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(entry.at.take(19).replace('T', ' '))
             Text("${purposeLabel(entry.purpose)} · ${entry.host} · HTTP ${entry.status ?: "无"} · ${if (entry.succeeded) "成功" else "失败"}")
-            Text("${entry.sentCharacters} 字 · 估算 ${"%.4f".format(entry.estimatedCostUsd)} 美元")
+            val usage = if (entry.promptTokens != null || entry.completionTokens != null) {
+                " · token 用量 ${entry.promptTokens ?: 0} 入 / ${entry.completionTokens ?: 0} 出"
+            } else {
+                ""
+            }
+            Text("${entry.sentCharacters} 字$usage")
             if (entry.sentBody.isNotEmpty()) Text(entry.sentBody)
         }
     }
@@ -688,6 +849,7 @@ private fun AuditCard(entry: AuditEntry) {
 
 private fun purposeLabel(purpose: GatewayPurpose): String = when (purpose) {
     GatewayPurpose.Update -> "更新"
+    GatewayPurpose.FetchModels -> "拉取模型列表"
     GatewayPurpose.RoundtableChat -> "圆桌聊天"
 }
 
