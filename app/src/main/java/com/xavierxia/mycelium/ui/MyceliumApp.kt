@@ -664,6 +664,9 @@ private fun CloudSettingsScreen(chat: ChatService, padding: PaddingValues, onBac
     var checked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pulling by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<CloudService?>(null) }
+    // Saving models or replacing a key does not change the service list, so the card needs its own
+    // signal; without it the card keeps showing the pre-save text.
+    var revision by remember { mutableIntStateOf(0) }
 
     fun startCreate() {
         creating = true
@@ -726,6 +729,7 @@ private fun CloudSettingsScreen(chat: ChatService, padding: PaddingValues, onBac
                                 key = ""
                                 hint = chat.keyHint(serviceId)
                                 services = chat.services()
+                                revision++
                                 pulling = true
                                 try {
                                     val models = withContext(Dispatchers.IO) { chat.fetchModels(serviceId) }
@@ -770,6 +774,7 @@ private fun CloudSettingsScreen(chat: ChatService, padding: PaddingValues, onBac
                             val serviceId = editing ?: return@Button
                             chat.saveModels(serviceId, checked.toList())
                             services = chat.services()
+                            revision++
                             notice = "已保存 ${checked.size} 个模型"
                         }) { Text("保存勾选的模型") }
                     }
@@ -780,12 +785,13 @@ private fun CloudSettingsScreen(chat: ChatService, padding: PaddingValues, onBac
         item { Text("已保存的服务", style = MaterialTheme.typography.titleMedium) }
         if (services.isEmpty()) item { Text("还没有云端服务。点「添加服务」填地址和 key。") }
         items(services, key = { it.id }) { service ->
+            val models = remember(service.id, revision) { chat.models(service.id) }
+            val keyHint = remember(service.id, revision) { chat.keyHint(service.id) }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(service.name, style = MaterialTheme.typography.titleSmall)
                     Text(service.baseUrl)
-                    Text("key：${chat.keyHint(service.id) ?: "未填写"}")
-                    val models = chat.models(service.id)
+                    Text("key：${keyHint ?: "未填写"}")
                     Text(if (models.isEmpty()) "还没有保存模型" else "已保存：${models.joinToString("、")}")
                     Row {
                         TextButton(onClick = { startEdit(service) }) { Text("编辑") }
