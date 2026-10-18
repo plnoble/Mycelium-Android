@@ -3,8 +3,23 @@ package com.xavierxia.mycelium.net
 import java.net.HttpURLConnection
 import java.net.URI
 
-/** Why a request leaves the phone. The audit log stores this, never the credentials. */
-enum class GatewayPurpose { Update, FetchModels, RoundtableChat }
+/**
+ * Why a request leaves the phone. The audit log stores this, never the credentials.
+ *
+ * [HearthChatTest] is the hearth test mode: the body is still sent (the service needs it) but the
+ * audit keeps only time, host, purpose, size and status, so no conversation text is written down.
+ */
+enum class GatewayPurpose {
+    Update,
+    FetchModels,
+    RoundtableChat,
+    HearthChat,
+    HearthChatTest,
+    ;
+
+    /** Only the hearth test mode keeps the body out of the audit log. */
+    val recordsBody: Boolean get() = this != HearthChatTest
+}
 
 data class GatewayRequest(
     val url: String,
@@ -40,6 +55,8 @@ class OutboundGateway(
             throw GatewayRejected("地址不在出网白名单里：${target.host}")
         }
         val sent = request.body?.codePointCount() ?: 0
+        // The purpose decides what may be written down: the test mode never stores the body.
+        val recorded = if (request.purpose.recordsBody) request.body.orEmpty() else ""
         val response = try {
             exchange(target, request)
         } catch (failure: GatewayRejected) {
@@ -51,7 +68,7 @@ class OutboundGateway(
                     host = target.host,
                     purpose = request.purpose,
                     sentCharacters = sent,
-                    sentBody = request.body.orEmpty(),
+                    sentBody = recorded,
                     status = null,
                     succeeded = false,
                     promptTokens = null,
@@ -67,7 +84,7 @@ class OutboundGateway(
                 host = target.host,
                 purpose = request.purpose,
                 sentCharacters = sent,
-                sentBody = request.body.orEmpty(),
+                sentBody = recorded,
                 status = response.status,
                 succeeded = response.status in 200..299,
                 promptTokens = usage?.first,
@@ -126,7 +143,9 @@ class AllowedHosts(
         val https = target.scheme == "https"
         return when (purpose) {
             GatewayPurpose.Update -> https && host in UPDATE_HOSTS
-            GatewayPurpose.FetchModels, GatewayPurpose.RoundtableChat -> modelHost(host, target.scheme)
+            GatewayPurpose.FetchModels, GatewayPurpose.RoundtableChat,
+            GatewayPurpose.HearthChat, GatewayPurpose.HearthChatTest,
+            -> modelHost(host, target.scheme)
         }
     }
 

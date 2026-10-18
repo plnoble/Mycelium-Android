@@ -135,6 +135,51 @@ class GatewayTest {
         assertEquals("问", entry.sentBody)
     }
 
+    @Test
+    fun hearthChatUsesTheModelHostsAndTheTestModeKeepsTheBodyOutOfTheAudit() {
+        val hosts = AllowedHosts(listOf("https://api.deepseek.com"), allowCleartextLocalhost = false)
+        assertTrue(hosts.allows(URI("https://api.deepseek.com/chat/completions"), GatewayPurpose.HearthChat))
+        assertTrue(hosts.allows(URI("https://api.deepseek.com/chat/completions"), GatewayPurpose.HearthChatTest))
+        assertFalse(hosts.allows(URI("https://api.github.com/chat/completions"), GatewayPurpose.HearthChat))
+
+        LocalHttp { HttpReply(200, """{"choices":[{"message":{"content":"{}"}}]}""") }.use { server ->
+            val gateway = gateway("http://127.0.0.1:${server.port}", cleartext = true)
+            gateway.send(
+                GatewayRequest(
+                    url = "http://127.0.0.1:${server.port}/chat/completions",
+                    purpose = GatewayPurpose.HearthChatTest,
+                    method = "POST",
+                    body = """{"model":"deepseek-flash","messages":[{"role":"user","content":"我有点撑不住了"}]}""",
+                ),
+            )
+        }
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertEquals(GatewayPurpose.HearthChatTest, entry.purpose)
+        assertTrue(entry.succeeded)
+        // Time, host, purpose, size and status are kept; the text itself is not.
+        assertEquals("", entry.sentBody)
+        assertTrue(entry.sentCharacters > 0)
+        assertFalse(File(directory, "privacy/audit.json").readText().contains("撑不住"))
+    }
+
+    @Test
+    fun theHearthImmersiveModeStillRecordsTheBody() {
+        LocalHttp { HttpReply(200, """{"choices":[{"message":{"content":"{}"}}]}""") }.use { server ->
+            val gateway = gateway("http://127.0.0.1:${server.port}", cleartext = true)
+            gateway.send(
+                GatewayRequest(
+                    url = "http://127.0.0.1:${server.port}/chat/completions",
+                    purpose = GatewayPurpose.HearthChat,
+                    method = "POST",
+                    body = """{"model":"deepseek-flash","messages":[{"role":"user","content":"今天很累"}]}""",
+                ),
+            )
+        }
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertEquals(GatewayPurpose.HearthChat, entry.purpose)
+        assertTrue(entry.sentBody.contains("今天很累"))
+    }
+
     private fun gateway(base: String, cleartext: Boolean = false) = OutboundGateway(
         hosts = AllowedHosts(base, cleartext),
         audit = AuditLog(File(directory, "privacy/audit.json")),

@@ -840,7 +840,11 @@ private fun AuditCard(entry: AuditEntry) {
                 ""
             }
             Text("${entry.sentCharacters} 字$usage")
-            if (entry.sentBody.isNotEmpty()) Text(entry.sentBody)
+            if (entry.sentBody.isNotEmpty()) {
+                Text(entry.sentBody)
+            } else if (!entry.purpose.recordsBody) {
+                Text("（测试模式：不记正文）")
+            }
         }
     }
 }
@@ -849,6 +853,8 @@ private fun purposeLabel(purpose: GatewayPurpose): String = when (purpose) {
     GatewayPurpose.Update -> "更新"
     GatewayPurpose.FetchModels -> "拉取模型列表"
     GatewayPurpose.RoundtableChat -> "圆桌聊天"
+    GatewayPurpose.HearthChat -> "炉边聊天"
+    GatewayPurpose.HearthChatTest -> "炉边 · 测试模式"
 }
 
 /** FTS marks the matched span with brackets. The card shows the words, not the markers. */

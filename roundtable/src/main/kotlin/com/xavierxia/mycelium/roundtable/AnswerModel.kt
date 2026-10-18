@@ -46,6 +46,9 @@ sealed class ChatReply {
  * The cloud answer model, the same seam the on-device engine implements: :model-api's ChatModel.
  * Not streaming, so the whole body is emitted as one delta. Retrieval, prompting, validation and
  * storage stay outside this class.
+ *
+ * [purpose] is what the audit log records. The hearth space passes its own purpose (and the test
+ * mode's, which keeps the body out of the log); the default keeps the roundtable behaviour.
  */
 class CloudChatModel(
     private val gateway: OutboundGateway,
@@ -53,6 +56,7 @@ class CloudChatModel(
     private val baseUrl: String,
     private val apiKey: String?,
     private val model: String,
+    private val purpose: GatewayPurpose = GatewayPurpose.RoundtableChat,
     private val readTimeoutMs: Int = 60_000,
 ) : ChatModel {
     override val info = ModelInfo(
@@ -83,7 +87,7 @@ class CloudChatModel(
         val response = gateway.send(
             GatewayRequest(
                 url = baseUrl.trimEnd('/') + "/chat/completions",
-                purpose = GatewayPurpose.RoundtableChat,
+                purpose = purpose,
                 method = "POST",
                 headers = mapOf(
                     "Authorization" to "Bearer $key",
