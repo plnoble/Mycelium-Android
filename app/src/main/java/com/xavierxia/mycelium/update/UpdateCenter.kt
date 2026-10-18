@@ -1,5 +1,6 @@
 package com.xavierxia.mycelium.update
 
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.net.DownloadOutcome
@@ -23,6 +24,18 @@ sealed interface DownloadUiState {
     data object Verifying : DownloadUiState
     data class Ready(val file: File, val size: Long) : DownloadUiState
     data object Installing : DownloadUiState
+
+    /**
+     * 还没允许「安装未知应用」：先说明再带路，**这时没有建会话**。
+     * 文件跟着状态一起带着：从设置页回来允许了就立刻接着装（工作包第 5 步）。
+     */
+    data class NeedsUnknownSources(val file: File, val size: Long) : DownloadUiState
+
+    /**
+     * 会话悬挂 / 回执没到 / 会话已经不在了：只能**标记待核实**。
+     * C5 第 4 条否掉了原来「还是旧版本 + 超过 10 分钟就判取消」的写法，这一条不许冒充取消。
+     */
+    data object NeedsVerification : DownloadUiState
 
     /**
      * [message] 是失败项的**人话**：四项校验的第 4 步要「说明是哪一项」，空间不足要说「还差多少」。
@@ -57,6 +70,11 @@ data class UpdateUiState(
     val lastSuccessAtMs: Long = 0L,
     val ignoredTag: String? = null,
     val download: DownloadUiState = DownloadUiState.Idle,
+    /**
+     * 安装结果的一句人话（成功 / 已取消 / 待核实 / 各自的失败）。
+     * 成功与取消会把候选发布清掉，卡片也随之消失，所以这条提示不能挂在卡片上（工作包第 5 步）。
+     */
+    val installNotice: String? = null,
 )
 
 /**
@@ -75,6 +93,10 @@ class UpdateCenter(
     private val installer: InstallSessionGateway = UnwiredInstallSessionGateway,
     private val clock: () -> Long = System::currentTimeMillis,
     private val currentVersionName: String = BuildConfig.VERSION_NAME,
+    /** 装着的**当前** versionCode：提交时记基线，回前台拿它做权威判定（C5 第 3 条）。 */
+    private val installedVersionCode: () -> Long = { BuildConfig.VERSION_CODE.toLong() },
+    /** 会话状态落盘口。生产装配传 `UpdatePreferences`，测例传内存实现。 */
+    private val sessionState: InstallSessionState = MemoryInstallSessionState(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) : ViewModel() {
     private val _state = MutableStateFlow(UpdateUiState())
@@ -131,9 +153,43 @@ class UpdateCenter(
         _state.value = _state.value.copy(autoCheck = on)
     }
 
-    /** 回到前台：核一遍待安装的文件还在不在（文件被系统清掉就不能再显示「可以安装」）。 */
+    /**
+     * 回到前台：**先做权威判定**（装上了就是装上了），再认回回执落盘的结果，最后才做文件兜底。
+     *
+     * 三条都按 C5 定稿：
+     *  * `longVersionCode` 比提交时的基线大 → 成功，哪怕广播一次都没到；
+     *  * 落盘的会话已经是终态 → 按终态收尾（明确取消 / 终态结果才清理）；
+     *  * 非终态里「会话不在了」或「超过窗口期」→ 只**标记待核实**，不判取消、不删文件（Q9 被否）。
+     */
     fun onResume() {
+        val record = sessionState.read()
+        if (record != null) {
+            if (installedVersionCode() > record.baselineVersionCode) {
+                finishInstalled(record.tagName)
+                return
+            }
+            if (record.phase.isTerminal) {
+                consumeTerminal(record)
+                return
+            }
+            // 非终态：会话已经不在系统里，或者已经超过窗口期 → 待核实（C5 第 4 条）。
+            val stale = clock() - record.updatedAtMs >= INSTALL_VERIFICATION_WINDOW_MS
+            if (stale || !installer.sessionAlive(record.sessionId)) {
+                _state.value = _state.value.copy(
+                    download = DownloadUiState.NeedsVerification,
+                    installNotice = VERIFY_NOTICE,
+                )
+                return
+            }
+        }
         val current = _state.value
+        // 从「安装未知应用」设置页回来且已经允许了：立刻接着装（工作包第 5 步）。
+        val blocked = current.download
+        if (blocked is DownloadUiState.NeedsUnknownSources && installer.canRequestPackageInstalls()) {
+            startSession(DownloadUiState.Ready(blocked.file, blocked.size))
+            return
+        }
+        // 文件被系统清掉就不能再显示「可以安装」。
         val ready = current.download
         if (ready is DownloadUiState.Ready && !ready.file.isFile) {
             prefs.pendingApkPath = null
@@ -193,22 +249,119 @@ class UpdateCenter(
         }
     }
 
+    /**
+     * 「下载并安装」。三步定稿（C5 / 工作包第 5 步）：
+     *  1. 没允许「安装未知应用」→ 只带路、**不建会话**，界面弹说明再去设置页；
+     *  2. 允许了 → 建会话、按流写入、`commit`，把系统确认界面交给系统；
+     *  3. 结果不靠猜：回前台读 `longVersionCode`（权威）+ 回执落盘的会话状态。
+     */
     fun install() {
         val ready = _state.value.download as? DownloadUiState.Ready ?: return
         if (!installReady) return
-        _state.value = _state.value.copy(download = DownloadUiState.Installing)
+        if (!installer.canRequestPackageInstalls()) {
+            _state.value = _state.value.copy(
+                download = DownloadUiState.NeedsUnknownSources(ready.file, ready.size),
+                installNotice = null,
+            )
+            return
+        }
+        startSession(ready)
+    }
+
+    /** 说明对话框上点「去设置」：把设置页 Intent 交给界面去拉起。返回 null 表示当前不是这个状态。 */
+    fun unknownSourcesIntent(): Intent? =
+        if (_state.value.download is DownloadUiState.NeedsUnknownSources) installer.unknownSourcesIntent() else null
+
+    /** 说明对话框上点「以后再说」：停在说明上，不装也不建会话。 */
+    fun dismissUnknownSources() {
+        if (_state.value.download is DownloadUiState.NeedsUnknownSources) {
+            _state.value = _state.value.copy(download = DownloadUiState.Idle)
+        }
+    }
+
+    /** 用户放弃悬挂的会话（`abandon`）并清掉本应用那条记录：会话清理只认自己落盘的 sessionId。 */
+    fun abandonInstall() {
+        installer.cancel()
+        sessionState.read()?.let { sessionState.clear(it.sessionId) }
+        _state.value = _state.value.copy(download = DownloadUiState.Idle)
+    }
+
+    private fun startSession(ready: DownloadUiState.Ready) {
+        val release = _state.value.release ?: return
+        // 上一次会话还挂着（非终态）时再来一次：先放弃它，否则新记录会被幂等规则挡下。
+        val previous = sessionState.read()
+        if (previous != null) {
+            if (!previous.phase.isTerminal) installer.cancel()
+            sessionState.clear(previous.sessionId)
+        }
+        _state.value = _state.value.copy(download = DownloadUiState.Installing, installNotice = null)
+        val baseline = installedVersionCode()
         scope.launch {
-            when (installer.install(ready.file)) {
-                is InstallOutcome.Installed -> {
-                    // 装完之后当前版本要等重启才变，先把候选与文件一起收掉，别反复提示。
-                    prefs.clearPending()
-                    _state.value = _state.value.copy(download = DownloadUiState.Idle, release = null)
-                }
-                is InstallOutcome.Cancelled -> _state.value = _state.value.copy(download = ready)
-                is InstallOutcome.Failed -> _state.value =
-                    _state.value.copy(download = DownloadUiState.Failed(DownloadFailureReason.Installation))
+            when (val outcome = installer.install(ready.file, release.tagName, baseline)) {
+                // 同步就确认成功（测例的显式 fake；真机的成功回执走落盘那条路）。
+                is InstallOutcome.Installed -> finishInstalled(release.tagName)
+                is InstallOutcome.Cancelled -> finishCancelledInstall(release.tagName)
+                is InstallOutcome.Failed -> failInstall(outcome.message)
+                // 交给系统了：界面停在「正在安装」，结果由回执 + 回前台复查认。
+                is InstallOutcome.Committed -> Unit
             }
         }
+    }
+
+    /** 落盘状态已经是终态：只有明确取消与终态结果才收尾（C5 第 4 条）。 */
+    private fun consumeTerminal(record: InstallSessionRecord) {
+        when (val status = installStatusOf(record.statusCode)) {
+            is InstallStatus.Succeeded -> finishInstalled(record.tagName)
+            is InstallStatus.Cancelled -> finishCancelledInstall(record.tagName)
+            is InstallStatus.PendingUserAction -> _state.value =
+                _state.value.copy(download = DownloadUiState.Installing)
+            else -> failInstall(installFailureText(status))
+        }
+    }
+
+    /**
+     * 成功：清这一版的文件、重置「上次检查」、清掉忽略状态，提示「更新完成，下次打开生效」。
+     * 不自动重启（工作包第 5 步 / 简报 §5.2）。
+     */
+    private fun finishInstalled(tagName: String) {
+        files.deleteForTag(tagName)
+        prefs.clearPending()
+        prefs.lastAutoAttemptAtMs = 0L
+        prefs.lastSuccessAtMs = 0L
+        prefs.ignoredTag = null
+        sessionState.read()?.let { sessionState.clear(it.sessionId) }
+        _state.value = UpdateUiState(
+            autoCheck = prefs.autoCheck,
+            lastAutoAttemptAtMs = prefs.lastAutoAttemptAtMs,
+            lastSuccessAtMs = prefs.lastSuccessAtMs,
+            ignoredTag = null,
+            download = DownloadUiState.Idle,
+            installNotice = INSTALLED_NOTICE,
+        )
+    }
+
+    /** 明确取消：提示「已取消，安装包已清理」并删文件（工作包第 5 步）。 */
+    private fun finishCancelledInstall(tagName: String) {
+        files.deleteForTag(tagName)
+        prefs.clearPending()
+        sessionState.read()?.let { sessionState.clear(it.sessionId) }
+        _state.value = UpdateUiState(
+            autoCheck = prefs.autoCheck,
+            lastAutoAttemptAtMs = prefs.lastAutoAttemptAtMs,
+            lastSuccessAtMs = prefs.lastSuccessAtMs,
+            ignoredTag = prefs.ignoredTag,
+            download = DownloadUiState.Idle,
+            installNotice = CANCELLED_NOTICE,
+        )
+    }
+
+    /** 失败：文件留着（还能重试），提示按类型各不相同。 */
+    private fun failInstall(message: String) {
+        sessionState.read()?.let { sessionState.clear(it.sessionId) }
+        _state.value = _state.value.copy(
+            download = DownloadUiState.Failed(DownloadFailureReason.Installation, message),
+            installNotice = null,
+        )
     }
 
     private suspend fun performCheck(auto: Boolean) {
@@ -279,18 +432,26 @@ class UpdateCenter(
     /**
      * 进程重建：从偏好存储恢复开关、两个时间戳、忽略状态和候选发布，并**重新核对**
      * 目标 tag 与元数据一致、比当前版本新、没被忽略、已下载的文件还在。
+     *
+     * 另外多一条（C5 第 3 条：结果与清理要能在新进程完成）：候选发布是「当时比当前版本新」
+     * 才落盘的，现在它**不再比当前版本新**了，只可能是这中间装上了——成功安装一定会终结旧进程，
+     * 所以这条路径就是「新进程认回成功」。按成功收尾，人话与清理一个不少。
      */
     private fun restore() {
         // 启动时清一次过期文件（>7 天的 .apk / .part / .sha256）；当前 tag 的 .part 留着续传。
         files.purge(clock(), prefs.pendingReleaseTag)
         val tag = prefs.pendingReleaseTag
-        val candidate = prefs.pendingReleaseJson
+        val stored = prefs.pendingReleaseJson
             ?.let(ReleaseJson::decode)
-            ?.takeIf {
-                it.tagName == tag &&
-                    it.tagName != prefs.ignoredTag &&
-                    VersionComparator.isNewer(it.versionName, currentVersionName)
-            }
+            ?.takeIf { it.tagName == tag }
+        if (stored != null && !VersionComparator.isNewer(stored.versionName, currentVersionName)) {
+            finishInstalled(stored.tagName)
+            return
+        }
+        val candidate = stored?.takeIf {
+            it.tagName != prefs.ignoredTag &&
+                VersionComparator.isNewer(it.versionName, currentVersionName)
+        }
         // 对不上就整个丢掉：宁可下次启动再查一遍，也不留半个候选发布。
         if (candidate == null) prefs.clearPending()
         _state.value = UpdateUiState(
@@ -304,6 +465,9 @@ class UpdateCenter(
     }
 
     private fun restoredDownload(candidate: ReleaseInfo?): DownloadUiState {
+        // 会话还没到终态（进程可能在系统确认界面旁边被回收过）：先显示「正在安装」，
+        // 真实的成功 / 取消 / 待核实由紧接着的 onResume 按落盘状态与 versionCode 决定。
+        if (sessionState.read()?.phase?.isTerminal == false) return DownloadUiState.Installing
         val path = prefs.pendingApkPath ?: return DownloadUiState.Idle
         val file = File(path)
         // 重新核对文件存在性：文件不在了就不能再显示「可以安装」。
@@ -313,4 +477,30 @@ class UpdateCenter(
         }
         return DownloadUiState.Ready(file, file.length())
     }
+}
+
+/** 成功 / 已取消两句人话（简报 §5.1 的原文口径）。 */
+internal const val INSTALLED_NOTICE = "更新完成，下次打开生效。"
+internal const val CANCELLED_NOTICE = "已取消，安装包已清理。"
+internal const val VERIFY_NOTICE = "这次安装还没确认完成。可以回到系统界面确认，或者稍后再看这里。"
+
+/**
+ * 会话已经提交、但长时间没有终态回执的窗口期。
+ *
+ * 超过它**只标记待核实**：C5 第 4 条明确否掉了「还是旧版本 + 超过 10 分钟 = 用户取消」这个写法，
+ * 超时不能把没完成的安装冒充取消（文件不删、会话也不假装放弃）。
+ */
+internal const val INSTALL_VERIFICATION_WINDOW_MS = 10 * 60 * 1000L
+
+/** 安装失败的人话：四类失败各一条，界面照它显示（简报测例 5/7）。 */
+internal fun installFailureText(status: InstallStatus): String = when (status) {
+    is InstallStatus.InsufficientStorage -> "空间不够，安装没做完。清出一些空间再试。"
+    is InstallStatus.Incompatible -> "这个安装包和当前系统不兼容，装不上。"
+    is InstallStatus.Invalid -> "系统认为安装包无效，拒绝了。请重新下载。"
+    is InstallStatus.Blocked -> "被设备策略挡住了，装不上。请联系设备管理员。"
+    is InstallStatus.Conflict -> "和手机上已装的版本冲突，装不上。"
+    is InstallStatus.Cancelled -> CANCELLED_NOTICE
+    is InstallStatus.Succeeded -> INSTALLED_NOTICE
+    is InstallStatus.PendingUserAction -> "还在等你在系统界面上确认安装。"
+    is InstallStatus.Failed -> "安装失败（系统状态码 ${status.code}）。"
 }

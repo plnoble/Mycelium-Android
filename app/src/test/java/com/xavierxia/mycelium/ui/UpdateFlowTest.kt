@@ -1,6 +1,7 @@
 package com.xavierxia.mycelium.ui
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -266,7 +267,12 @@ private class WiredVerifier : ApkVerifier {
 private class WiredInstaller : InstallSessionGateway {
     override val isAvailable: Boolean = true
 
-    override suspend fun install(apk: File): InstallOutcome = InstallOutcome.Cancelled
+    override fun canRequestPackageInstalls(): Boolean = true
+
+    override fun unknownSourcesIntent(): Intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES")
+
+    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome =
+        InstallOutcome.Cancelled
 
     override fun cancel() = Unit
 }

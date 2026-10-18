@@ -1,5 +1,6 @@
 package com.xavierxia.mycelium.update
 
+import android.content.Intent
 import com.xavierxia.mycelium.net.DownloadOutcome
 import com.xavierxia.mycelium.net.DownloadProgress
 import com.xavierxia.mycelium.net.GatewayCall
@@ -54,20 +55,60 @@ interface ApkVerifier {
     suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome
 }
 
-/** 一次安装会话的结果（含用户取消）。 */
+/**
+ * 一次安装的**即时**结果。终态不在这里：会话交给系统之后，成功/取消/失败由回执落盘
+ * （`InstallSessionState`）和回前台时的 `longVersionCode` 复查给出（C5 第 3 条）。
+ */
 sealed interface InstallOutcome {
     data object Installed : InstallOutcome
     data object Cancelled : InstallOutcome
     data class Failed(val message: String) : InstallOutcome
+
+    /** 会话已经 `commit` 给系统，等用户在系统确认界面点「安装」。 */
+    data class Committed(val sessionId: Int) : InstallOutcome
+}
+
+/**
+ * 系统回执的分类（简报 §5.2 + C5）。[PendingUserAction] 的 [PendingUserAction.intent] 允许为 null：
+ * 真机上 `EXTRA_INTENT` 取不到时仍然要落盘「等用户确认」，交给回前台的复查兜底，而不是谎报失败。
+ */
+sealed interface InstallStatus {
+    data class PendingUserAction(val intent: Intent?) : InstallStatus
+    data object Succeeded : InstallStatus
+    data object Cancelled : InstallStatus
+    data object InsufficientStorage : InstallStatus
+    data object Incompatible : InstallStatus
+    data object Invalid : InstallStatus
+    data object Blocked : InstallStatus
+    data object Conflict : InstallStatus
+    data class Failed(val code: Int) : InstallStatus
 }
 
 interface InstallSessionGateway {
     val isAvailable: Boolean
 
-    suspend fun install(apk: File): InstallOutcome
+    /** 「安装未知应用」是否已授权。没授权时**不建会话**，先说明再带路（工作包第 5 步）。 */
+    fun canRequestPackageInstalls(): Boolean
 
-    /** 用户在界面上点取消：会话要能停下来。 */
+    /** 本应用的「安装未知应用」设置页。只带路，开不开由用户决定。 */
+    fun unknownSourcesIntent(): Intent
+
+    /**
+     * 开会话 → 按流写入 → `commit`。只报「有没有把包交给系统」，终态由回执与前台复查认。
+     *
+     * [tagName] 与 [baselineVersionCode] 会连同 sessionId 一起落盘：前者用来在结果出来后清那
+     * 一版的文件，后者是「装上了没有」的权威判定基线（C5 第 3 条）。
+     */
+    suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome
+
+    /** 用户在界面上放弃：放弃悬挂的会话（`abandon`）并清掉本应用这一条记录。 */
     fun cancel()
+
+    /**
+     * 这个会话在系统里还活着吗。会话没了而版本又没变，只能判「待核实」，
+     * 不能当成用户取消（C5 第 4 条否掉了 Q9 的原始写法）。假实现默认 true。
+     */
+    fun sessionAlive(sessionId: Int): Boolean = true
 }
 
 /**
@@ -98,7 +139,12 @@ object UnwiredApkVerifier : ApkVerifier {
 object UnwiredInstallSessionGateway : InstallSessionGateway {
     override val isAvailable: Boolean = false
 
-    override suspend fun install(apk: File): InstallOutcome = InstallOutcome.Failed(NOT_WIRED)
+    override fun canRequestPackageInstalls(): Boolean = false
+
+    override fun unknownSourcesIntent(): Intent = Intent()
+
+    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome =
+        InstallOutcome.Failed(NOT_WIRED)
 
     override fun cancel() = Unit
 }

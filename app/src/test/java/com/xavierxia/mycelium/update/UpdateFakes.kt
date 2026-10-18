@@ -1,5 +1,7 @@
 package com.xavierxia.mycelium.update
 
+import android.content.Intent
+import android.provider.Settings
 import com.xavierxia.mycelium.net.DownloadOutcome
 import com.xavierxia.mycelium.net.DownloadProgress
 import com.xavierxia.mycelium.net.DownloadResult
@@ -101,17 +103,44 @@ internal class RecordingVerifier(private val outcome: VerifyOutcome = VerifyOutc
     }
 }
 
-internal class RecordingInstaller(private val outcome: InstallOutcome = InstallOutcome.Installed) : InstallSessionGateway {
+/**
+ * 显式 fake（没有 mock 框架）：装了几次、装了哪一版、基线是多少、有没有被放弃，全都看得见。
+ * 第 5 步的网关多了「未知来源」两问与会话存活性，所以这三个开关都可变，方便测「授权之后接着装」。
+ */
+internal class RecordingInstaller(
+    private val outcome: InstallOutcome = InstallOutcome.Installed,
+    var canInstall: Boolean = true,
+    var alive: Boolean = true,
+) : InstallSessionGateway {
     override val isAvailable: Boolean = true
     var installs = 0
         private set
+    var cancels = 0
+        private set
+    var lastApk: File? = null
+        private set
+    var lastTag: String? = null
+        private set
+    var lastBaseline: Long = 0L
+        private set
 
-    override suspend fun install(apk: File): InstallOutcome {
+    override fun canRequestPackageInstalls(): Boolean = canInstall
+
+    override fun unknownSourcesIntent(): Intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+
+    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome {
         installs += 1
+        lastApk = apk
+        lastTag = tagName
+        lastBaseline = baselineVersionCode
         return outcome
     }
 
-    override fun cancel() = Unit
+    override fun cancel() {
+        cancels += 1
+    }
+
+    override fun sessionAlive(sessionId: Int): Boolean = alive
 }
 
 internal fun testCenter(
@@ -124,6 +153,8 @@ internal fun testCenter(
     verifier: ApkVerifier = UnwiredApkVerifier,
     installer: InstallSessionGateway = UnwiredInstallSessionGateway,
     currentVersionName: String = CURRENT_VERSION,
+    installedVersionCode: () -> Long = { 4L },
+    sessionState: InstallSessionState = MemoryInstallSessionState(),
 ): UpdateCenter = UpdateCenter(
     updates = UpdateManager(source),
     prefs = prefs,
@@ -134,6 +165,8 @@ internal fun testCenter(
     installer = installer,
     clock = clock,
     currentVersionName = currentVersionName,
+    installedVersionCode = installedVersionCode,
+    sessionState = sessionState,
     // 下载那一段通过 scope 启动；Unconfined + 不挂起的 fake 让它同步跑完，测例才确定。
     scope = CoroutineScope(Dispatchers.Unconfined),
 )

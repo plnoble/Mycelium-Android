@@ -23,6 +23,7 @@
     <string name="update_notes_expand">展开更新说明</string>
     <string name="update_notes_collapse">收起更新说明</string>
     <string name="update_download_install">下载并安装</string>
+    <string name="update_install">安装</string>
     <string name="update_ignore_version">忽略这个版本</string>
     <!-- 隐私记录页：一次下载实际收到的字节数。 -->
     <string name="privacy_downloaded_bytes">本次下载 %1$s MiB</string>

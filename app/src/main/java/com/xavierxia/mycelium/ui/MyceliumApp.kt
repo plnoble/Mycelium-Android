@@ -77,6 +77,7 @@ import com.xavierxia.mycelium.roundtable.InstalledVersion
 import com.xavierxia.mycelium.roundtable.Roundtable
 import com.xavierxia.mycelium.roundtable.SqlCipherPackDatabase
 import com.xavierxia.mycelium.roundtable.StoredMessage
+import com.xavierxia.mycelium.update.AndroidInstallSessionGateway
 import com.xavierxia.mycelium.update.CurrentAppFacts
 import com.xavierxia.mycelium.update.DownloadFailureReason
 import com.xavierxia.mycelium.update.DownloadUiState
@@ -132,9 +133,10 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
         // 第 4 步接线：应用内下载与四项校验都走 ChatService 手上的同一个网关，
         // 审计因此和聊天/检查更新写进同一份 privacy/audit.json。
         val transport = chat.updateTransport()
+        val prefs = UpdatePreferences(context)
         UpdateCenter(
             updates = manager,
-            prefs = UpdatePreferences(context),
+            prefs = prefs,
             isDebugPackage = BuildConfig.APPLICATION_ID.endsWith(".debug"),
             files = files,
             downloader = GatewayApkDownloader(files, transport),
@@ -144,6 +146,9 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
                 installed = CurrentAppFacts(context),
                 selfPackageName = BuildConfig.APPLICATION_ID,
             ),
+            // 第 5 步接线：会话与回执共用同一份偏好存储，进程重建后还能把结果认回来。
+            installer = AndroidInstallSessionGateway(context, prefs),
+            sessionState = prefs,
             scope = scope,
         )
     }
@@ -460,6 +465,10 @@ private fun MineScreen(
     var pendingDelete by remember { mutableStateOf<InstalledVersion?>(null) }
     var page by remember { mutableStateOf("packs") }
     var localModels by remember { mutableStateOf(false) }
+    // 跳「安装未知应用」设置页。回来立刻复查：允许了就接着装，没允许就停在说明上（工作包第 5 步）。
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        center.onResume()
+    }
     if (localModels) {
         LocalModelsScreen(padding, onBack = { localModels = false })
         return
@@ -492,6 +501,11 @@ private fun MineScreen(
         if (updateError != null) {
             item { Text(stringResource(R.string.update_failed, updateErrorText(updateError))) }
         }
+        // 安装结果的一句话：成功与取消会把卡片收掉，所以它不挂在卡片上（工作包第 5 步）。
+        val installNotice = state.installNotice
+        if (installNotice != null) {
+            item { Text(installNotice) }
+        }
         val release = state.release
         if (release != null) {
             item {
@@ -500,6 +514,7 @@ private fun MineScreen(
                     installReady = center.installReady,
                     download = state.download,
                     onDownload = { center.startDownload() },
+                    onInstall = { center.install() },
                     onCancel = { center.cancelDownload() },
                     onIgnore = { center.ignore(release.tagName) },
                 )
@@ -555,6 +570,28 @@ private fun MineScreen(
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
         )
     }
+    // 「安装未知应用」先说明、再带路。只带路，开不开由用户决定；这时还没有建安装会话。
+    if (state.download is DownloadUiState.NeedsUnknownSources) {
+        AlertDialog(
+            onDismissRequest = { center.dismissUnknownSources() },
+            title = { Text("需要允许「安装未知应用」") },
+            text = {
+                Text(
+                    "更新包已经下载并校验好了，要交给系统的安装器才能装上。" +
+                        "系统要求你先允许本应用安装应用。点「去设置」打开本应用的设置页，" +
+                        "打开那个开关再回来，就可以接着装。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    center.unknownSourcesIntent()?.let { settingsLauncher.launch(it) }
+                }) { Text("去设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { center.dismissUnknownSources() }) { Text("以后再说") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -583,6 +620,7 @@ private fun UpdateCard(
     installReady: Boolean,
     download: DownloadUiState,
     onDownload: () -> Unit,
+    onInstall: () -> Unit,
     onCancel: () -> Unit,
     onIgnore: () -> Unit,
 ) {
@@ -614,7 +652,10 @@ private fun UpdateCard(
                 }
                 is DownloadUiState.Verifying -> Text("正在校验下载的文件…")
                 is DownloadUiState.Ready -> Text("下载并校验通过，可以安装。")
-                is DownloadUiState.Installing -> Text("正在安装…")
+                is DownloadUiState.Installing -> Text("正在安装…请在系统的安装界面上点「安装」。")
+                is DownloadUiState.NeedsUnknownSources -> Text("要先允许「安装未知应用」，才能把安装包交给系统。")
+                is DownloadUiState.NeedsVerification ->
+                    Text("这次安装还没确认完成。可以回到系统界面确认，或者稍后再看这里。")
                 is DownloadUiState.Failed -> Text(downloadFailureText(download.reason, download.message))
                 is DownloadUiState.Idle -> Unit
             }
@@ -624,7 +665,10 @@ private fun UpdateCard(
                 val installable = release.apkUrl != null && release.sha256Url != null
                 if (download is DownloadUiState.Running) {
                     Button(onClick = onCancel) { Text("取消") }
-                } else if (installReady && installable && download !is DownloadUiState.Ready) {
+                } else if (download is DownloadUiState.Ready) {
+                    // 下载并校验通过之后才出现的安装入口（第 5 步）。
+                    Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
+                } else if (installReady && installable && download !is DownloadUiState.Installing) {
                     Button(onClick = onDownload) { Text(stringResource(R.string.update_download_install)) }
                 }
                 TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version)) }
