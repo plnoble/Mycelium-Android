@@ -47,6 +47,10 @@
 
 - **可以改**：`:llm` 的模型登记部分（不改引擎内部）、`:net` 的白名单、重定向处理和下载用途、app 里「我的」和设置页，以及对应测试。
 - **不许碰**：llama.cpp 的源码和固定提交（P2-6 再说）、圆桌的数据、`contract/`、发布签名、版本号。
+10. **把 `:llm` 纳入 lint 门禁**（P2-1b 审核裁定）：
+    - `ModelRegistry` 的空间检查不再直接用 `File.usableSpace`，改成可注入的「可分配空间」查询：安卓上用 `StorageManager#getAllocatableBytes`，JVM 测试用假实现。新的下载流程也用同一个查询。
+    - `:llm` 的 lint 配置关掉 `ChromeOsAbiSupport`，写明理由「只支持手机的 arm64-v8a」。
+    - `scripts/check-all.*` 加上全模块 lint（或在 `:app` 的 lint 里打开 `checkDependencies`），零 error、零 warning。
 
 ## 验收标准
 
