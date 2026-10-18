@@ -161,7 +161,36 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
     fun clearNotice() = mutable.update { it.copy(notice = null) }
 
     /** Reloads characters, models and cloud services; the screen calls it every time it appears. */
-    fun refresh() = viewModelScope.launch { reload() }
+    fun refresh() = viewModelScope.launch {
+        reload()
+        // Coming back to the page with a character open: show its stored history again (the test
+        // session that lived here is gone). Never while a turn is running.
+        val current = mutable.value
+        val character = current.openCharacter
+        if (character != null && current.editing == null && current.mode == HearthMode.IMMERSIVE && operation?.isActive != true) {
+            loadConversation(character)
+        }
+    }
+
+    /** Reads one character's conversations and the newest one's messages. */
+    private suspend fun loadConversation(character: HearthCharacter) {
+        val token = generationToken
+        val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
+        if (token != generationToken) return
+        val first = conversations.firstOrNull()?.id
+        val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
+        if (token != generationToken) return
+        mutable.update {
+            it.copy(
+                conversations = conversations,
+                openConversation = first,
+                messages = messages,
+                streaming = null,
+                streamLabel = null,
+                droppedTurns = 0,
+            )
+        }
+    }
 
     // --- characters ----------------------------------------------------------
 
@@ -251,28 +280,16 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openChat(character: HearthCharacter) = viewModelScope.launch {
         abandonTurn()
-        val token = generationToken
-        val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
-        if (token != generationToken) return@launch
-        val first = conversations.firstOrNull()?.id
-        val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
-        // A blocked read that comes back after the page moved on must not refill it.
-        if (token != generationToken) return@launch
         mutable.update {
             it.copy(
                 openCharacter = character,
                 editing = null,
                 cloudConfirm = null,
-                conversations = conversations,
-                openConversation = first,
-                messages = messages,
-                streaming = null,
-                streamLabel = null,
-                droppedTurns = 0,
                 mode = HearthMode.IMMERSIVE,
                 notice = null,
             )
         }
+        loadConversation(character)
     }
 
     fun closeCharacter() {
