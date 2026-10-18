@@ -1,8 +1,8 @@
 package com.xavierxia.mycelium.update
 
 import com.xavierxia.mycelium.BuildConfig
+import com.xavierxia.mycelium.net.HttpText
 import java.io.IOException
-import java.net.HttpURLConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -12,14 +12,7 @@ import org.junit.Test
 class UpdateManagerTest {
     @Test
     fun github404BecomesNoPublishedRelease() = runBlocking {
-        val client = GitHubReleaseClient { url ->
-            object : HttpURLConnection(url) {
-                override fun getResponseCode() = HTTP_NOT_FOUND
-                override fun connect() = Unit
-                override fun disconnect() = Unit
-                override fun usingProxy() = false
-            }
-        }
+        val client = GitHubReleaseClient { _, _, _ -> HttpText(404, "") }
 
         assertEquals(UpdateResult.NoPublishedRelease, UpdateManager(client).checkForUpdate())
     }

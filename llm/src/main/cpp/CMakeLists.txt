@@ -36,7 +36,12 @@ add_library(mycelium_llm SHARED engine.cpp
     "${LLAMA_SOURCE}/common/jinja/string.cpp"
     "${LLAMA_SOURCE}/common/unicode.cpp"
     "${LLAMA_SOURCE}/common/json.cpp")
-target_include_directories(mycelium_llm PRIVATE "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/vendor")
+# llama.cpp's headers are third-party (pinned, never patched): mark them SYSTEM so their own
+# warnings (for example unused functions in jinja headers) stay exempt while our file does not.
+target_include_directories(mycelium_llm SYSTEM PRIVATE "${LLAMA_SOURCE}/common" "${LLAMA_SOURCE}/vendor")
 target_compile_options(mycelium_llm PRIVATE -O2 -fexceptions)
+# Our own JNI file must be warning-free. The strict flags go on engine.cpp only: the same target
+# also compiles llama.cpp's jinja/json sources, which keep their upstream flags (see llm/README.md).
+set_source_files_properties(engine.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 target_link_libraries(mycelium_llm PRIVATE llama)
 

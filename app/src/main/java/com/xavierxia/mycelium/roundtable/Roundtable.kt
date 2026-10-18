@@ -13,7 +13,9 @@ import com.xavierxia.mycelium.contract.listClaims
 import com.xavierxia.mycelium.contract.listThemes
 import com.xavierxia.mycelium.contract.loadClaim
 import com.xavierxia.mycelium.contract.searchPack
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 
 /** Everything the roundtable screens read. The UI does not open files itself. */
 class Roundtable(context: Context) {
@@ -24,8 +26,14 @@ class Roundtable(context: Context) {
     fun installed(): List<InstalledVersion> = library.listAll()
 
     fun importUri(uri: Uri, context: Context, openDatabase: (ByteArray) -> PackDatabase): ImportOutcome {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: return ImportOutcome.Rejected("没有读到选择的文件")
+        val bytes = try {
+            context.contentResolver.openInputStream(uri)?.use { it.readAtMost(MAX_WHOLE_PACK_BYTES) }
+                ?: return ImportOutcome.Rejected("没有读到选择的文件")
+        } catch (rejected: PackTooLarge) {
+            return ImportOutcome.Rejected(rejected.message ?: "角色包太大")
+        } catch (failure: Exception) {
+            return ImportOutcome.Rejected("没有读到选择的文件")
+        }
         return library.importBytes(bytes, openDatabase)
     }
 
@@ -48,4 +56,23 @@ class Roundtable(context: Context) {
 
     fun claimCount(version: InstalledVersion, open: (File) -> PackDatabase): Int =
         claimIds(open(version.file)).size
+}
+
+/** Same ceiling as one zip entry. The whole file is read before unzipping, so it is capped here too. */
+internal const val MAX_WHOLE_PACK_BYTES = 64L * 1024 * 1024
+
+private class PackTooLarge : Exception("角色包超过 64 MB，没有导入")
+
+private fun InputStream.readAtMost(limit: Long): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    var total = 0L
+    while (true) {
+        val read = read(buffer)
+        if (read < 0) break
+        total += read
+        if (total > limit) throw PackTooLarge()
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
 }
