@@ -37,7 +37,7 @@ fun pullModels(
     } catch (_: SocketTimeoutException) {
         throw ModelListError("服务没有在时间内响应，这次没有拉到模型")
     } catch (_: IOException) {
-        // The raw exception text (for example an okhttp address dump) means nothing to the user.
+        // The raw exception text (for example an address dump from the HTTP client) means nothing to the user.
         throw ModelListError("连不上这个地址，请检查接口地址和网络后再试")
     }
     if (response.status !in 200..299) {
