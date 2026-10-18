@@ -14,7 +14,6 @@ class ModelListError(message: String) : Exception(message)
  * Calls `GET {baseUrl}/models`, the OpenAI-compatible listing. The request goes through the
  * gateway, so it is whitelisted, audited, and its key never reaches the audit log.
  */
-/** Pulls `GET {baseUrl}/models`. Named apart from the screen-level helper to keep one meaning. */
 fun pullModels(
     gateway: OutboundGateway,
     baseUrl: String,
@@ -37,8 +36,9 @@ fun pullModels(
         )
     } catch (_: SocketTimeoutException) {
         throw ModelListError("服务没有在时间内响应，这次没有拉到模型")
-    } catch (failure: IOException) {
-        throw ModelListError("连不上这个地址：${failure.message ?: "网络错误"}")
+    } catch (_: IOException) {
+        // The raw exception text (for example an okhttp address dump) means nothing to the user.
+        throw ModelListError("连不上这个地址，请检查接口地址和网络后再试")
     }
     if (response.status !in 200..299) {
         throw ModelListError(

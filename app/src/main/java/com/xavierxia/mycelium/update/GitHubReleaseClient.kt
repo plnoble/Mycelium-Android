@@ -2,7 +2,6 @@ package com.xavierxia.mycelium.update
 
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.net.HttpText
-import com.xavierxia.mycelium.net.httpGet
 import org.json.JSONObject
 
 /** Status and body of one GET. The app's implementation goes through the outbound gateway. */
@@ -15,8 +14,9 @@ fun interface ReleaseSource {
     fun latestRelease(): ReleaseInfo?
 }
 
+/** No default transport: the app passes the gateway, so every update check is whitelisted and audited. */
 class GitHubReleaseClient(
-    private val get: HttpGet = HttpGet { url, headers, timeout -> httpGet(url, headers, timeout) },
+    private val get: HttpGet,
 ) : ReleaseSource {
     override fun latestRelease(): ReleaseInfo? {
         val endpoint =

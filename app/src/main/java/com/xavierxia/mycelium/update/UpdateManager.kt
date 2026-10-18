@@ -6,7 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class UpdateManager(
-    private val client: ReleaseSource = GitHubReleaseClient()
+    private val client: ReleaseSource,
 ) {
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
         try {

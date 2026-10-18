@@ -1,6 +1,5 @@
 package com.xavierxia.mycelium.net
 
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 
@@ -168,23 +167,3 @@ private fun tokenUsage(body: String): Pair<Int, Int>? {
 fun openHttp(uri: URI): HttpURLConnection = uri.toURL().openConnection() as HttpURLConnection
 
 data class HttpText(val status: Int, val body: String)
-
-/** GET used by the update check. Redirects are not followed; the status is returned as-is. */
-fun httpGet(url: String, headers: Map<String, String>, timeoutMs: Int): HttpText {
-    val connection = openHttp(URI(url)).apply {
-        requestMethod = "GET"
-        connectTimeout = timeoutMs
-        readTimeout = timeoutMs
-        instanceFollowRedirects = false
-        headers.forEach { (name, value) -> setRequestProperty(name, value) }
-    }
-    return try {
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        HttpText(status, stream?.bufferedReader()?.use { it.readText() }.orEmpty())
-    } catch (failure: IOException) {
-        throw failure
-    } finally {
-        connection.disconnect()
-    }
-}
