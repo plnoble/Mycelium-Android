@@ -62,6 +62,24 @@ class HearthModeTest {
     }
 
     @Test
+    fun testModeLeavesTheWholeStoredConversationByteForByteUnchanged() {
+        // Row counts alone would also pass if a test-mode turn had overwritten the last answer, so
+        // this compares the complete stored snapshot (text, source label and timestamps).
+        val id = chat.finish(character, null, "在吗", "在。", "本机 · 测试", "2026-10-18T10:06", HearthMode.IMMERSIVE)
+        val beforeMessages = log.messages(requireNotNull(id))
+        val beforeConversations = log.conversations(character.id)
+        val beforeCharacter = store.character(character.id)
+
+        assertNull(chat.finish(character, id, "测试里的问题", "测试里的回答", "本机 · 测试", "2026-10-18T10:07", HearthMode.TEST))
+        assertFalse(chat.redo(id, "被改写的回答", "本机 · 测试", "2026-10-18T10:08", HearthMode.TEST))
+
+        assertEquals(beforeMessages, log.messages(requireNotNull(id)))
+        assertEquals(beforeConversations, log.conversations(character.id))
+        assertEquals(beforeCharacter, store.character(character.id))
+        assertEquals(listOf("在吗", "在。"), log.messages(requireNotNull(id)).map { it.text })
+    }
+
+    @Test
     fun redoingFromTheScreenKeepsTheLastQuestion() {
         val onScreen = listOf(
             HearthMessage(ChatRole.USER, "第一个问题", null),

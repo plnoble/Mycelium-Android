@@ -18,6 +18,12 @@ fun assemblePrompt(character: HearthCharacter, history: List<ChatMessage>, quest
     require(systemTokens + 32 < contextTokens) { "人物设定比上下文还长，请缩短设定或加大上下文" }
     val turns = completeTurns(history)
     val questionTokens = estimateTokens(question)
+    // The sheet and the question are never trimmed, so a question that cannot fit even without any
+    // history is refused: better a clear message than silently cutting the character (or the safety
+    // line) out of the prompt.
+    require(systemTokens + questionTokens + 32 <= contextTokens) {
+        "这个问题太长了，装不下人物设定；请说短一点，或把上下文长度调大"
+    }
     var first = 0
     while (first < turns.size && systemTokens + turns.subList(first, turns.size).sumOf { estimateTokens(it.content) } + questionTokens + 32 > contextTokens) {
         first += 2

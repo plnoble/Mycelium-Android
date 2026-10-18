@@ -29,6 +29,11 @@ data class GatewayRequest(
     val body: String? = null,
     val connectTimeoutMs: Int = 15_000,
     val readTimeoutMs: Int = 60_000,
+    /**
+     * The caller asks the audit log to keep only the size of this request, never its text. It only
+     * changes what is written down: the service still receives the real body.
+     */
+    val omitAuditBody: Boolean = false,
 )
 
 data class GatewayResponse(
@@ -55,8 +60,9 @@ class OutboundGateway(
             throw GatewayRejected("地址不在出网白名单里：${target.host}")
         }
         val sent = request.body?.codePointCount() ?: 0
-        // The purpose decides what may be written down: the test mode never stores the body.
-        val recorded = if (request.purpose.recordsBody) request.body.orEmpty() else ""
+        // Two independent guards, both applied to the success and the failure entry: the request can
+        // ask for it, and the test-mode purpose can never record a body no matter who calls it.
+        val recorded = if (request.omitAuditBody || !request.purpose.recordsBody) "" else request.body.orEmpty()
         val response = try {
             exchange(target, request)
         } catch (failure: GatewayRejected) {

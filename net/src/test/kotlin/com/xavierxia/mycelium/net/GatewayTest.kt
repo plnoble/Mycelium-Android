@@ -136,6 +136,29 @@ class GatewayTest {
     }
 
     @Test
+    fun aRequestCanAskForNoBodyInTheAuditAndItAlsoHoldsWhenTheCallFails() {
+        // A request-level option, independent of the purpose: the service still gets the text, the
+        // audit keeps only its size. Here the call cannot even connect, which is the path that used
+        // to write the body unconditionally.
+        val gateway = gateway("http://127.0.0.1:1", cleartext = true)
+        assertThrows(Exception::class.java) {
+            gateway.send(
+                GatewayRequest(
+                    url = "http://127.0.0.1:1/chat/completions",
+                    purpose = GatewayPurpose.HearthChat,
+                    method = "POST",
+                    body = """{"messages":[{"role":"user","content":"我今天很难过"}]}""",
+                    omitAuditBody = true,
+                ),
+            )
+        }
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertEquals("", entry.sentBody)
+        assertTrue(entry.sentCharacters > 0)
+        assertFalse(File(directory, "privacy/audit.json").readText().contains("难过"))
+    }
+
+    @Test
     fun hearthChatUsesTheModelHostsAndTheTestModeKeepsTheBodyOutOfTheAudit() {
         val hosts = AllowedHosts(listOf("https://api.deepseek.com"), allowCleartextLocalhost = false)
         assertTrue(hosts.allows(URI("https://api.deepseek.com/chat/completions"), GatewayPurpose.HearthChat))

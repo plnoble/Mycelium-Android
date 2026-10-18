@@ -48,7 +48,8 @@ sealed class ChatReply {
  * storage stay outside this class.
  *
  * [purpose] is what the audit log records. The hearth space passes its own purpose (and the test
- * mode's, which keeps the body out of the log); the default keeps the roundtable behaviour.
+ * mode's, which keeps the body out of the log) plus [omitAuditBody]; the defaults keep the
+ * roundtable behaviour.
  */
 class CloudChatModel(
     private val gateway: OutboundGateway,
@@ -57,6 +58,12 @@ class CloudChatModel(
     private val apiKey: String?,
     private val model: String,
     private val purpose: GatewayPurpose = GatewayPurpose.RoundtableChat,
+    private val omitAuditBody: Boolean = false,
+    /**
+     * Hearth-style chat: plain conversation text with the caller's generation parameters. The
+     * roundtable protocol (JSON object answer, its own parameters) stays the default.
+     */
+    private val naturalChat: Boolean = false,
     private val readTimeoutMs: Int = 60_000,
 ) : ChatModel {
     override val info = ModelInfo(
@@ -81,7 +88,16 @@ class CloudChatModel(
         val payload = JSONObject()
             .put("model", model)
             .put("messages", list)
-            .put("response_format", JSONObject().put("type", "json_object"))
+        if (naturalChat) {
+            // A character talks, so it gets the parameters its owner set, not the compiler's ones.
+            payload
+                .put("temperature", parameters.temperature.toDouble())
+                .put("max_tokens", parameters.maxTokens)
+                .put("top_p", parameters.topP.toDouble())
+        } else {
+            payload.put("response_format", JSONObject().put("type", "json_object"))
+        }
+        payload
             // Official thinking-mode guide: thinking is on by default. extra_body carries this object.
             .put("thinking", JSONObject().put("type", "disabled"))
         val response = gateway.send(
@@ -96,6 +112,7 @@ class CloudChatModel(
                 ),
                 body = payload.toString(),
                 readTimeoutMs = readTimeoutMs,
+                omitAuditBody = omitAuditBody,
             ),
         )
         if (response.status !in 200..299) {
