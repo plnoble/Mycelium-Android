@@ -1,9 +1,11 @@
 # P2-2 交付报告：炉边（人物与对话，2026-10-18 修订）
 
-- 分支：`wp/P2-2-hearth-chat`（已并入 `main`，最新基线 `a54c604`）
+- 分支：`wp/P2-2-hearth-chat`（已并入 `main`，最新基线 `a54c604`）；本报告所在工作树 `p2-2-hintfix`，**tip `e6c1d65`**
 - 本报告对应的提交：见第八节「提交与证据对应表」
+- 本报告已于 2026-10-19 更新到**第二轮整改与最终门禁**（见 3.5、3.6、第十节）
 - 任务书：`docs/work-packages/P2-2-hearth-characters-chat.md`（以文末「2026-10-18 修订」「附录：预设人物」「2026-10-18 统筹裁定」为准）
-- 审核报告：`PLAN-REVIEW.md`（方案审，结论需修改）、`SPECIAL-隐私出网.md`（专项审，结论需修改）、`REVIEW.md`（全量审，见下）
+- 审核报告：`PLAN-REVIEW.md`（方案审，结论需修改）、`SPECIAL-隐私出网.md`（专项审，结论需修改）、`REVIEW.md`（全量审，9 条）、`REVIEW-r2.md`（复审，本分支已入库 `e6c1d65`；判第 5、6 条通过、其余七条不通过）、**`REVIEW-r3.md`（第三次复审，尚未产出：等待任务已挂在 2026-10-19 07:06:40 额度重置后自动执行，见 3.6）**
+- 本包当前状态：**待审**——第三次复审结论出来前不得交付、不得推送（第二轮整改见 3.5，最终门禁见第十节，审核链见 3.6）
 
 ## 一、这一包做了什么
 
@@ -52,6 +54,10 @@
 `bash scripts/check-all.sh --skip-llama-prepare` → **通过：0 失败、0 警告、退出码 0**（`p2-2-work/checkall-sh4.txt`）。
 两条门禁脚本在 P2-2 的改动上都验过了；GitHub 上的远端 CI 仍需推送后才能看到（推送由用户决定）。
 
+> **本节的记录早于第二轮整改**（133 用例、提交 `f614d36` / `5005bc4` 等）。第二轮整改后的从零门禁结论见
+> **第十节「最终门禁」**：提交 `c91eaaa`、**154 用例 0 失败**、lint 0 error / 0 warning，`check-all.ps1` 与
+> `check-all.sh` 都给出通过结论。
+
 ## 三、三轮审核与逐条落实
 
 ### 3.1 开工前方案审（`PLAN-REVIEW.md`，Codex，审基线 `e94599b`）：需修改，12 条
@@ -88,7 +94,8 @@
 ### 3.3 全量审（`REVIEW.md`）与 9 条整改
 
 2026-10-18 **21:05–21:19** 在只读 worktree 上跑完（Codex），产出 `REVIEW.md`：**结论「需修改」，9 条**
-（4 条 P1 + 5 条 P2）。该轮结束时的额度读数：**5 小时窗口 59%、每周 41%**。第一轮（17:23–17:27）曾撞上
+（**5 条【P1】+ 4 条【P2】**，即 `REVIEW.md` 第 107、120、134、148、162、176、190、202、216 行的九个标题）。
+该轮结束时的额度读数：**5 小时窗口 59%、每周 41%**。第一轮（17:23–17:27）曾撞上
 用量上限（139,068 token、报告 0 字节，空文件已删），本轮是重置后的重跑。
 
 **逐条整改状态表**（被验证提交 `313e745`；第 5 条的补验测例在 `a196aed`）
@@ -109,21 +116,30 @@
 重置 **2026-10-19 02:06**，credits 0），**那一次报告未生成**。挂的**无人值守任务已按点执行并产出报告**：
 `p2-2-work/review-r2-wait.log` 记到 02:07:36 开始、审核目标 `cb6c2db746d4aad7d902de0191db7938596c360f`、
 02:15:26 结束、报告 13087 字节；结论为**需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**。
-报告当前是**未入库文件**，位置 `D:\Agent\Project\Nivra\docs\reviews\2026-10-18-P2-2\REVIEW-r2.md`
-（工作树 `p2-2-r2-item9` 里另有一份同内容副本）。本报告所在工作树的基线 `3bfbdc3` 在 `cb6c2db` 之后
-还有两个整改提交（`6fd00c8` 第 3、4 条 hearth 半边、`3bfbdc3` 第 6 条），复审结论未覆盖这两笔。
+报告 `REVIEW-r2.md` 现已在本分支**入库**（提交 `e6c1d65`，本分支 tip 即 `e6c1d65`；此前「未入库文件、
+位置在 `D:\Agent\Project\Nivra\…`」的说法作废）。它的审核目标是 `cb6c2db`，其后另有七笔提交
+（`6fd00c8` 复审第 3、4 条的 hearth 半边；`3bfbdc3` 第 8 条；`42fee21` 第 1 条；`bfa9217` 第 2 条；
+`e152472` 第 4 条；`c91eaaa` 令牌原子化＋第 7 条；`b9efc1d` 只更正证据表述），**复审结论未覆盖这些
+提交**——所以本报告既不把复审的「不通过」当成对第二轮整改的评语，也不把第二轮整改写成「已通过」。
+逐条整改见 **3.5**。
 
 **因此本包现在的状态是：方案审 12 条与隐私与出网专项审 7 条已按裁定整改（逐条状态见 3.1/3.2）；
 9 条整改已提交**（`313e745`、`a196aed`），**复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条仍不通过，
-正按复审意见二次整改。「9 条已全部整改并通过整树与真机复验」的表述在此撤回**：3.4 的整树与真机复验
-只说明那批改动构建、单测、lint 与设备测例通过，不构成「复审通过」，也不等于这 9 条的问题已消失。
+第二轮已按复审意见整改**（逐条见 3.5，提交 `42fee21`、`bfa9217`、`6fd00c8`、`e152472`、`c91eaaa`、
+`3bfbdc3`、`b9efc1d`），**第三次复审尚未产出**（`REVIEW-r3.md`，见 3.6）。**「9 条已全部整改并通过整树与
+真机复验」的表述在此撤回**：3.4 的整树与真机复验只说明那批改动构建、单测、lint 与设备测例通过，
+不构成「复审通过」，也不等于这 9 条的问题已消失。
 
 ### 3.4 整改后的整树与真机复验
 
-- **JVM 单测 128/128**（`:net` 14、`:roundtable` 26、`:contract-lib` 22、`:hearth` 39、`:app` 27；
-  全部 failures=0 errors=0；结果 XML 时间 2026-10-18 22:14）。
-- **lint（debug）0 error / 0 warning / 1 hint**：`HearthSpace.kt:523` 的 `AutoboxingStateCreation`
-  （纯性能提示），**本包未整改**，如实写出。
+- **JVM 单测 128/128 —— 此口径作废**：这一行取自**过期的结果产物**（`:net` 14、`:roundtable` 26、
+  `:contract-lib` 22、`:hearth` 39、`:app` 27；结果 XML 时间 2026-10-18 22:14），既没有覆盖第二轮整改后的
+  用例，模块名与数字也和现在的门禁表对不上。**不能把它当作第二轮整改后的单测结论**；二轮整改后的真实
+  数字见 3.5 与第十节（**合计 154**：`:app` 27、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、
+  `:net` 15、`:roundtable` 28）。
+- **lint（debug）0 error / 0 warning，「1 hint」的说法作废**：`HearthSpace.kt` 的 `AutoboxingStateCreation`
+  提示早在提交 `5314e34` 就已消掉；此后（含最终门禁）debug/release lint 都是 **0 error / 0 warning**。
+  此前「纯性能提示、本包未整改、如实写出」的写法与实物不符，撤回。
 - **真机四类九例全过**（runner `com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`）：
   `HearthCloudStopDeviceTest` `OK (1 test)` 8.316 s、`HearthCloudReconfirmDeviceTest` `OK (1 test)` 3.537 s、
   `HearthNavigationDuringTurnDeviceTest` `OK (2 tests)` 3.339 s、`HearthTimelineFollowDeviceTest` `OK (5 tests)` 5.804 s。
@@ -134,7 +150,54 @@
   **同样没有把 `dumpsys` 原文落盘归档**：仓库、`p2-2-work` 与正式证据目录里都搜不到任何 P2-2 时点的
   `dumpsys package` 原文，只有 P2-1b 那次走查的 `device-log.txt` 留了同组读数。故本条**只能算当时读数转述，
   不能独立复核**——此前「这次是真的把原文读出来了（第九节里那条据此更新）」的说法撤回，详见 9.1 第 4 项。
-- **提交对应关系**：`313e745`（9 条整改）、`a196aed`（第 5 条补验测例）。
+- **提交对应关系**：`313e745`（9 条整改）、`a196aed`（第 5 条补验测例）；第二轮整改的提交见 3.5。
+
+### 3.5 第二轮整改（复审第 1、2、3、4、7、8、9 条，2026-10-19）
+
+复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条不通过。第二轮逐条整改如下——**每条都按「临时改坏实现 →
+新用例变红 → 还原」验过判别力**；实证原文按提交信息与笔记如实抄录，找不到原文的明确标「未归档、
+无法复核」（见本节末的边界说明）。
+
+| 复审条 | 问题要点（复审原话要点） | 改在哪里 | 提交 | 判别力实证 / 证据 |
+|---|---|---|---|---|
+| 1（P1） | `call.check()` 返回后、`connection.outputStream` 真正建连之前仍可被取消；`disconnect()` 对还没建连的连接是空操作，恢复后照样建连并写完正文 | `:net` `GatewayCall.bodyStream` **把取流本身变成检查点**：取流前读一次开关（已取消就根本不建连），取到流后再读一次；返回的流包成**每次 `write`/`flush` 都复验开关**的写入流，取消后 **`close` 不 flush**，交给 `finally` 的 `disconnect()` 收尾。开关只从 false 变 true，所以任何后续动作都必须重新验证，被挂起期间到达的取消不会被落掉 | `42fee21` | 新增受控用例 `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`（`FrozenPeer` 把 `getOutputStream()` 卡在「已进入取流、尚未建连」处），断言原文 `assertEquals(0, service.bytes, "取消之后假服务收到了正文：${service.body}")`，并断言网关以 `GatewayCancelled` 在 2 秒内返回、连接被断开；同一接线另有放行正向对照（`正常正文` 确实送达）。**判别力实证原文（提交 `42fee21`）**：临时去掉 `bodyStream` 的后置检查与写入流守卫 → 该用例失败：`取消之后假服务收到了正文：{messages:[...]} ==> expected: <0> but was: <64>`，随后还原。`:net:test` 15、`:roundtable:test` 28、`:contract:test` 22，合计 65，**0 失败 0 错误 0 跳过** |
+| 2（P1） | `openConversation(B)` 等 `log.messages(B)` 期间目标仍是旧会话 A，此时发送会把新问题发给并保存到 A；`finishTurn` 第 757–759 行、`replaceTurn` 第 805–808 行在最后一次读取后没有复检令牌 | `openConversation` 在切换开始时**同步把目标定到新会话**并标记 `historyLoading`；历史读取期间 `send`/`regenerate` 一律拒绝；`loadConversation`/`setMode` 复用 `loadHistory`（读取失败也会解除等待，不会把发送键永久禁用）；`finishTurn`/`replaceTurn` 在最后两次读取之后**各复检一次令牌**（`NonCancellable` 收尾不能靠普通协程取消兜底）；`HearthViewModel` 增加可注入的会话开关（生产行为不变），供真机测试把某一次读停住 | `bfa9217` | 新增真机三例：`HearthNavigationDuringTurnDeviceTest.aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected`、`comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere`、`aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened`；`HearthSpace` 的发送键/重新生成在读取期间禁用。**设备输出本轮未归档，无法独立复核**（复跑命令见 4.3/4.4）；判别力的失败原文在提交信息与 `p2-2-work` 笔记里都找不到，**未归档** |
+| 3（P1） | 事务内校验读的 `generationToken` 是未同步的普通字段；且 `AbandonedWriteTest` 的 latch 第一次放行的是 schema 检查事务，**把 `valid()` 移出写入事务该测试仍可能通过** | `:hearth` `ConversationLog` 抽出 `HearthSession.writeTurn(valid, block)`：**`valid()` 固定在写入事务打开之后、写第一行之前**；`append`/`replaceLastAnswer`（**`redo` 走同一条路**）统一走它；KDoc 写明边界规则（事务一旦提交就以提交为准，返回值不再撤回）。`HearthViewModel` 的 `generationToken` 改 **`AtomicInteger`**（`generation.get()` / `incrementAndGet()`），并把「开始先发布新令牌、取消/离页先递增再取消、最后一个递增者赢、已提交的写不回滚」写进注释 | `6fd00c8`（hearth 半边，含 `redo` 路径）+ `c91eaaa`（令牌改原子变量） | 夹具 `GatedWriteSession` **只拦真正的写入事务、放过每次开会话先跑的 schema 检查事务**（正是复审第 3 条要求的阻塞位置），断言原文：`assertNull(writing.get(20, TimeUnit.SECONDS), "作废的一轮不该被存下来")`、`assertTrue(gate.validSawWriteTransaction, "valid() 必须在写入事务内被问到")`、`assertEquals(0, gate.writes, "作废的一轮一行都不该写")`；另补 `redo` 作废/成功、完整内容与时间戳比较、写入次数、提交完成后才取消四类用例。判别力：把 `valid()` 挪到写入事务之前 → 该用例失败（用例 KDoc 记作该轮记录的判别力运行），**但那次失败的终端原文没有归档，无法复核**。`:hearth:test` **46 用例，0 失败 0 错误 0 跳过** |
+| 4（P1） | 确认状态的数据库更新仍可在取消后完成，甚至用旧人物快照覆盖后来编辑的字段 | 新增 `CharacterStore.confirmCloudTarget(id, target, now, valid)`：在**该方法自己的事务边界内**判定 `valid()`，为 false 就**一列不改**并返回 false；只写 `cloud_confirmed_target` 与 `updated_at`，不再整条人物快照 `update`（`update` 语义不变）。`HearthViewModel.confirmSend` 改走它：`characters.confirmCloudTarget(pending.character.id, pending.target, now(), ::stillWanted)` | `6fd00c8`（store 半边）+ `e152472`（接线与设备用例重写） | `hearth/CloudConfirmTargetTest` 四类：取消、窄更新（含 SQL 列断言）、null 目标、人物不存在；真机用例重写为 `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything`（进测试模式 → 用 `GatedHearthSessions` 把确认写事务停住 → 取消弹窗/离页并在停住期间改名字 → 放行 → 断言没有请求、确认字段未被改写、改过的名字仍在、没有建出对话）。**设备输出本轮未归档，无法独立复核** |
+| 7（P2） | JNI 加载已经成功、主线程尚未恢复时点停止：`userStopped=true` 但 `engine.load()` 不一定抛异常，随后仍会 `generate()`，`runNative()` 清掉停止标记后继续生成并入库 | `LocalModelEngine.load`：native 加载「照常成功」返回后**复检停止标记**，命中就抛 `Loading stopped` 并卸掉模型/关掉描述符（别让下一次 `generate` 的 `runNative` 把标记清掉后照常生成）；`HearthViewModel.stream` 本地分支在**加载返回、开始生成之前再问一次本轮停止意图**（`turn.userStopped`），命中即中止这一轮；`startTurn` 同步登记 `activeTurn`，使「发出后、任务第一行之前」按下的停止也落在本轮；`Turn.produced` 记录是否产出过 token，`stillCommittable` 明确「`userStopped` 且没有产出过的本地回答不入库」，已流式产出的部分仍然保留 | `c91eaaa` | 新增 JVM 用例（`:llm`）：`LocalModelEngineTest.aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded`（加载期间停止但加载仍成功 → 加载失败 + 不留已加载模型 + 描述符关闭 + 生成到不了 native）、`aNativeLoadingStoppedFailureReleasesTheModelAndTheFile`（native 抛 `Loading stopped` → 同样清干净并原样上抛）。新增真机用例 `HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（需要已登记模型，否则 `assume` 跳过）→ **设备输出未归档，无法独立复核**。`:llm:testDebugUnitTest` **13 用例** |
+| 8（P2） | 记忆键与手势监听协程的键不一致，换会话后仍操作旧状态；首次保存（会话 ID 从 null 变成真实 ID）被当成切换会话而重置上翻 | `HearthSpace.kt` 新增 **`TimelineFollowState`**：跟随状态由一份跟着「人 + 这一段对话」走的对象持有，手势协程引用的是**对象本身**（状态与键同源），不再抓住上一次组合的局部状态；会话身份用 `claim` 判定——真人 ID → 另一段真人 ID、或真人 ID → null（新对话/清空/切测试模式）才重置，`null -> 真实 ID`（这一段对话第一次落库）**保留上翻位置**；跟滚动的协程按 segment 重跑，条数一样的两段对话之间切换也会跟到新的一段 | `3bfbdc3` | `HearthTimelineFollowDeviceTest` 补三例：`scrollingBackInsideTheSecondConversationKeepsTheViewportStill`、`theFirstSavedAnswerKeepsAnUpScrolledViewport`、`switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail`（**设备输出未归档，无法独立复核**） |
+| 9（P2） | 仍声称「9 条全部整改」；审计原文被错误描述为缺失；`20-testmode-turn.png` 仍含系统通知 | 撤回「9 条已全部整改并通过整树与真机复验」；审计原文按实物更正并归档到 `docs/reviews/2026-10-18-P2-2/evidence/`；`20-testmode-turn.png` 改标「仍含系统『旁路充电』通知，只作进入测试模式的辅助证据」；正式版包信息与设备输出原文改标「未归档，无法复核」；1500 token 测速继续标「无法验证」 | `b9efc1d` | 本报告 3.3、3.4、4.5、第九节与 9.1 的对应改写；`evidence/` 下 `audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md` |
+
+**第二轮整改后的测试真实数字**（最终门禁，见第十节）：`:hearth` **46**（此前 39）、`:net` **15**、
+`:roundtable` **28**、`:app` **27**、`:contract` **22**、`:llm` **13**、`:model-api` **3**，**合计 154 用例 0 失败**。
+
+**判别力实证的边界（如实记）**：本轮每条的整改都在提交信息里记了「改坏 → 用例变红 → 还原」的做法；
+其中**复审第 1 条（取消后假服务仍收到正文）的失败原文可抄录**（见上表），复审第 3 条的断言原文可抄录、
+但那次判别力运行的终端输出**没有归档**，复审第 2、4、7、8 条的失败原文在提交信息与 `p2-2-work` 笔记里
+**都找不到，标「未归档，无法复核」**；本轮新增/改写的真机用例（androidTest）同样**没有归档运行输出**，
+只能按 4.3/4.4 的命令自行复现。
+
+### 3.6 审核状态（截至本报告更新时）
+
+审核链：全量审 `REVIEW.md`（审 `11e92b3`，结论需修改，**9 条＝5 条【P1】+4 条【P2】**）
+→ 第一轮整改（`313e745` 九条整改 + `a196aed` 第 5 条补验测例；其间 `5314e34` 消掉 lint hint）
+→ 复审 `REVIEW-r2.md`（审 `cb6c2db`）：**第 5、6 条通过，第 1、2、3、4、7、8、9 条不通过**
+→ 第二轮整改（3.5 的七条：`42fee21`、`bfa9217`、`6fd00c8`、`e152472`、`c91eaaa`、`3bfbdc3`、`b9efc1d`）
+→ **第三次复审已挂在 2026-10-19 07:06:40（额度重置）后自动执行**：等待任务见
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\review-r3-wait.log`（03:04:29 记「第三次复审等待任务启动，
+目标 2026-10-19 07:06:40（5 小时窗口重置）」），报告将是 **`REVIEW-r3.md`**。
+
+**在第三次复审的结论出来之前，本包仍属「待审」：不得交付、不得推送。** 本报告以及第十节的最终门禁
+只说明「第二轮整改后的提交能构建、154 个 JVM 用例与 lint 通过」，**不构成复审通过**。
+
+另外两点如实记：
+
+- **「并发与升级专项审」因额度限制没有执行。** 它的审核要求早已写好
+  （`docs/reviews/2026-10-18-P2-2/codex-prompt-special-concurrency.md`），`docs/tracks/开发线.md` 第 76 行
+  记的做法是「额度够就补一轮，不够就并进全量审的要求里」；实际是本包**没有跑这一轮专项审**，其要点
+  并进了全量审（`REVIEW.md` 第 5、6、9 条）一起审。
+- 复审第一次尝试（22:11 起跑）撞额度上限、未产出报告；第二次由无人值守任务在 02:07:36–02:15:26
+  产出 `REVIEW-r2.md`（13087 字节，结论需修改），现已随 `e6c1d65` 入库。
 
 ## 四、真机走查
 
@@ -283,11 +346,21 @@
 | `be2e013`、`11e92b3` | 截图与门禁日志归档到正式证据目录 | `.omx/.../2026-10-18-android-P2-2/` |
 | `0f28bd0`、`11e92b3`、`be2e013` | `check-all.sh`（CI 那条）在全新 worktree 上同样通过 | `p2-2-gate-checkall-sh.txt` |
 | `11e92b3` | 全量审（21:05 发出，21:05–21:19 在只读 worktree 跑完） | `REVIEW.md`（需修改，9 条；结束时 5h=59%、每周=41%） |
-| `313e745` | 全量审 9 条整改：网关请求级取消协议、导航时清 busy、校验进事务、确认任务绑定操作、地址与密钥同一快照、升级判定不再静默改模型、加载期停止算停止、按真实视口判定跟随、证据更正 | 整树 JVM 128/128、lint 0 错 0 警告、真机 4 类 9 例全过 |
+| `313e745` | 全量审 9 条整改：网关请求级取消协议、导航时清 busy、校验进事务、确认任务绑定操作、地址与密钥同一快照、升级判定不再静默改模型、加载期停止算停止、按真实视口判定跟随、证据更正 | 当时的整树复验（**「JVM 128/128」一行来自过期产物，已作废**，见 3.4/第十节）与真机 4 类 9 例转述 |
 | `a196aed` | 第 5 条要求的快照测例（两次读取之间配置被改，地址与密钥不得跨版本拼接） | `roundtable/CloudEndpointSnapshotTest` 2 例通过 |
 | （复审第一次） | 22:11 起跑，5.5 分钟 / 131 万 token 后撞上限（5h=99%、每周=47%，02:06 重置） | **未产出** |
-| （复审第二次·无人值守） | 02:07:36 开始（`p2-2-work/review-r2-wait.log`），审核目标 `cb6c2db`，02:15:26 结束、报告 13087 字节 | `REVIEW-r2.md`：**结论需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**（该报告文件当前**未入库**） |
+| （复审第二次·无人值守） | 02:07:36 开始（`p2-2-work/review-r2-wait.log`），审核目标 `cb6c2db`，02:15:26 结束、报告 13087 字节 | `REVIEW-r2.md`：**结论需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**（该报告已随 `e6c1d65` 入库） |
 | （本轮证据更正） | 归档审计原文附件、撤回「9 条全部整改」与「当时没存下来」、更正截图与包信息表述、测速继续标无法验证 | `docs/reviews/2026-10-18-P2-2/evidence/`（`audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md`）、本报告 3.3 / 3.4 / 4.5 / 第八、九节与 9.1 |
+| `6fd00c8` | 复审第 3、4 条的 hearth 半边：`writeTurn` 把 `valid()` 放进写入事务（含 `redo` 路径）、`confirmCloudTarget` 事务内判有效性且只写确认列 | `hearth/AbandonedWriteTest`、`hearth/CloudConfirmTargetTest`；`:hearth:test` 46 用例 0 失败 |
+| `3bfbdc3` | 复审第 8 条：跟随状态与手势协程同键（`TimelineFollowState.claim`），首次保存不再重置上翻 | `HearthTimelineFollowDeviceTest` 补 3 例（设备输出未归档） |
+| `42fee21` | 复审第 1 条：取消状态延续到建连之前（`GatewayCall.bodyStream` 取流检查点 + 写入流每次 write/flush 复验、取消后不 flush） | `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`；判别力原文见 3.5 |
+| `bfa9217` | 复审第 2 条：切历史先固定目标、历史就绪前拒绝发送、收尾刷新复检令牌 | `HearthNavigationDuringTurnDeviceTest` 补 3 例（设备输出未归档） |
+| `e152472` | 复审第 4 条：`confirmSend` 改走 `confirmCloudTarget(id, target, now, ::stillWanted)`，取消后一列不改 | `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 重写（设备输出未归档） |
+| `c91eaaa` | 复审第 3、7 条：`generationToken` 改 `AtomicInteger`；加载返回后先问停止意图、本地回答没产出就不落库 | `llm/LocalModelEngineTest` 新增 2 例；`HearthLocalStopDuringLoadDeviceTest`（设备输出未归档） |
+| `b9efc1d` | 复审第 9 条：证据更正与撤回过头表述（docs only） | 本报告 3.3 / 3.4 / 4.5 / 第九节与 9.1、`evidence/` |
+| `e6c1d65` | 复审报告 `REVIEW-r2.md` 入库（docs only），本分支 tip | `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`（13087 字节） |
+| （第二轮整改后·最终门禁） | 全新 worktree detached `c91eaaa`，`check-all.ps1` 与 `check-all.sh` 均通过 | **154 用例 0 失败**、lint 0 error / 0 warning；`p2-2-work/gate-final-ps1.txt`、`gate-final-sh.txt`（第十节） |
+| （第三次复审·待执行） | 等待任务挂在 2026-10-19 07:06:40（额度重置）后自动执行 | **尚未产出**；预计 `REVIEW-r3.md`（见 3.6） |
 
 ## 九、全量审提出的证据缺口与更正（2026-10-18 21:10 审后）
 
@@ -304,7 +377,8 @@
 
 ### 9.1 复审《REVIEW-r2.md》第 7 条要求的二次更正（2026-10-19，只改文档与归档证据）
 
-复审审的是 `cb6c2db`（本报告所在工作树基线 `3bfbdc3` 在其后还有 `6fd00c8`、`3bfbdc3` 两笔整改）。逐项更正：
+复审审的是 `cb6c2db`（当时本报告所在工作树的基线是 `3bfbdc3`，它后面还有 `6fd00c8` 等整改；到 `c91eaaa`
+共七笔，逐条见 3.5）。逐项更正：
 
 1. **撤回「9 条全部整改」**。3.3 的结论已改写为：「9 条整改已提交（`313e745`、`a196aed`），复审
    `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条仍不通过，正按复审意见二次整改」。3.4 的整树与真机复验
@@ -327,7 +401,38 @@
 6. **测速**：1500 token 测速的 token 数与耗时明细**没有归档文件**，**继续标「无法验证」**（4.5 已写明）。
 
 方法与局限（如实记）：本次只在 Windows 上读文件、跑 `git` / `Select-String` 与一段只读的 Python/Pillow 像素统计，
-**没有连接设备、没有推送、没有跑 Gradle、没有联网、没有改源码**；复审报告 `REVIEW-r2.md` 本身当前仍是
-**未入库文件**（不在任何分支里），本报告只引用其结论与行号，没有把它复制进仓库。
+**没有连接设备、没有推送、没有跑 Gradle、没有联网、没有改源码**；当时复审报告 `REVIEW-r2.md` 还是
+**未入库文件**，本轮（2026-10-19）它已随 `e6c1d65` 入库为 `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`。
 
-另外记一笔：第一轮 `01`–`14` 里的 `09` 号审计附件是**当时**的读数；此后设备上的审计条数已变——本轮我自己复核停止测试时又留了 1 条 `HearthChat`（那是真实出网请求的审计记录，按规矩不去改用户的隐私记录）。
+另外记一笔：第一轮 `01`–`14` 里的 `09` 号审计附件是**当时**的读数；此后设备上的审计条数已变——本报告上一轮更新（见 9.1）复核停止测试时又留了 1 条 `HearthChat`（那是真实出网请求的审计记录，按规矩不去改用户的隐私记录）。
+
+## 十、最终门禁（第二轮整改后，2026-10-19）
+
+在**全新 worktree** 里对**已提交的提交**从零跑两条门禁脚本：工作树
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-final`，detached 在 **`c91eaaa`**（本分支；其后只有一笔文档提交
+`e6c1d65`，故结论对当前 tip 适用），`worktree: clean`。
+
+| 项目 | 结果 |
+|---|---|
+| 提交 | `c91eaaafc7c1c72160b0de064e2e3dc56311e565` |
+| llama.cpp | 校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f` |
+| Gradle | `--offline`；`test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest`，退出码 **0**，**253 个任务实际执行 / 20 个无需执行** |
+| `scripts/check-all.ps1` 结论行（原文） | `**PASS**: 0 failures, 0 warnings, exit code 0.` |
+| `scripts/check-all.sh` 结论行（原文） | `**通过**：0 失败、0 警告，退出码 0。` |
+| 用例 | **154 用例 0 失败**：`:app` 27、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、`:net` 15、`:roundtable` 28 |
+| lint | `:app` debug / release 均 **0 error / 0 warning**（无 hint） |
+| 产物 | `app-debug.apk`、`app-debug-androidTest.apk` 已签名；`app-release-unsigned.apk` 未签名 |
+| 日志 | `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-final-ps1.txt`、`gate-final-sh.txt`（`.sh` 那条跑在 `.ps1` 之后，多数任务显示 `UP-TO-DATE`，复用同一批结果与产物） |
+
+**口径更正（两条旧说法作废）**：
+
+1. 此前 3.4 写的 **「JVM 单测 128/128」来自过期产物，作废**。第二轮整改后的真实数字是上表的
+   **154 用例 0 失败**（`:hearth` 46、`:net` 15、`:roundtable` 28、`:app` 27、`:contract` 22、`:llm` 13、
+   `:model-api` 3）。
+2. 此前「lint 0 error / 0 warning / **1 hint**」的说法**作废**：`HearthSpace.kt` 的 `AutoboxingStateCreation`
+   hint 早在提交 **`5314e34`** 就已消掉，最终门禁是 **0 error / 0 warning**。
+
+**这一节能证明什么、不能证明什么**：它证明第二轮整改后的提交**构建、154 个 JVM 用例、lint 与打包**都通过；
+它**不包含** device/instrumented 测试（两条脚本按任务契约只跑 `assembleDebugAndroidTest`，CI runner 上没有
+设备/模拟器），也**不是复审通过**——第三次复审（`REVIEW-r3.md`）尚未产出，结论出来前本包仍是「待审」
+（见 3.6）。
