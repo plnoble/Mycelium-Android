@@ -2,6 +2,8 @@ package com.xavierxia.mycelium.update
 
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.net.HttpText
+import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /** Status and body of one GET. The app's implementation goes through the outbound gateway. */
@@ -32,30 +34,76 @@ class GitHubReleaseClient(
         )
         return when (response.status) {
             404 -> null
-            200 -> parseRelease(JSONObject(response.body))
-            else -> error("GitHub returned HTTP ${response.status}")
+            200 -> parseRelease(response.body)
+            // 限流和 GitHub 自己出问题是两码事，给用户的话也不一样，所以分开报。
+            403, 429 -> throw UpdateCheckException(UpdateError.RateLimited)
+            else -> throw UpdateCheckException(UpdateError.Server(response.status))
         }
     }
 
-    private fun parseRelease(json: JSONObject): ReleaseInfo {
-        val tag = json.getString("tag_name")
-        val assets = json.getJSONArray("assets")
-        var apkUrl: String? = null
-
-        for (index in 0 until assets.length()) {
-            val asset = assets.getJSONObject(index)
-            val name = asset.optString("name")
-            if (name.endsWith(".apk", ignoreCase = true)) {
-                apkUrl = asset.getString("browser_download_url")
-                break
-            }
+    private fun parseRelease(body: String): ReleaseInfo =
+        try {
+            readRelease(JSONObject(body))
+        } catch (failure: JSONException) {
+            // 缺字段和畸形 JSON 都走这里：都是「GitHub 返回的内容看不懂」，不把原文给用户。
+            throw UpdateCheckException(UpdateError.Malformed, failure)
         }
 
+    private fun readRelease(json: JSONObject): ReleaseInfo {
+        val tag = json.getString("tag_name")
+        val version = tag.removePrefix("v")
+        val assets = json.getJSONArray("assets")
+        // 附件名以发版流程实际产出的名字为准（实施方案 1.1 实测：mycelium-v0.1.1.apk / .apk.sha256）。
+        val apkName = "mycelium-v$version.apk"
+        val checksumName = "$apkName.sha256"
+        val apk = findAsset(assets, apkName) { name -> name.endsWith(".apk", ignoreCase = true) }
+        val checksum = findAsset(assets, checksumName) { name -> name.contains(".sha256", ignoreCase = true) }
+        // 两个附件都在才提供应用内安装；缺任何一个都只留发布页 —— 绝不退回「随便挑一个 .apk」。
+        val installable = apk != null && checksum != null
         return ReleaseInfo(
-            versionName = tag.removePrefix("v"),
+            versionName = version,
             tagName = tag,
             releasePageUrl = json.getString("html_url"),
-            apkDownloadUrl = apkUrl ?: json.getString("html_url")
+            apkUrl = if (installable) apk.getString("browser_download_url") else null,
+            apkSizeBytes = apk?.let { sizeOf(it) },
+            sha256Url = if (installable) checksum.getString("browser_download_url") else null,
+            releaseNotes = json.textOrEmpty("body"),
+            publishedAt = json.textOrNull("published_at"),
         )
     }
+
+    /**
+     * 按名字找资产，不看数组顺序，也不退回「第一个 .apk」。
+     *
+     * 先精确匹配期望的名字（[findAsset] 的调用方给出）；找不到再退化为「名字以期望名字开头」，
+     * 以容忍 GitHub 对附件改名/去空格的处理。名字相近但不是目标的文件（如 `-rc1` 那一版、
+     * 别的命名规则）既不等于期望名字、也不以它开头，因此不会被选中。
+     */
+    private fun findAsset(
+        assets: JSONArray,
+        expectedName: String,
+        isRightKind: (String) -> Boolean,
+    ): JSONObject? {
+        var prefixed: JSONObject? = null
+        for (index in 0 until assets.length()) {
+            val asset = assets.optJSONObject(index) ?: continue
+            val name = asset.optString("name")
+            if (!isRightKind(name)) continue
+            if (name.equals(expectedName, ignoreCase = true)) return asset
+            if (prefixed == null && name.startsWith(expectedName, ignoreCase = true)) prefixed = asset
+        }
+        return prefixed
+    }
+
+    private fun sizeOf(asset: JSONObject): Long? =
+        if (asset.isNull("size")) null else asset.getLong("size")
+
+    /**
+     * org.json 的 `optString` 对 JSON null 的表现和运行时有关：Android 上会返回 "null" 四个字符，
+     * 独立 org.json 上返回空串。先判 null，别让发布说明或时间戳里多出个 `null`。
+     */
+    private fun JSONObject.textOrEmpty(name: String): String = if (isNull(name)) "" else optString(name)
+
+    private fun JSONObject.textOrNull(name: String): String? =
+        if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }
 }

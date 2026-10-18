@@ -12,6 +12,7 @@ import com.xavierxia.mycelium.update.ReleaseSource
 import com.xavierxia.mycelium.update.UpdateManager
 import java.io.IOException
 import java.net.HttpURLConnection
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,7 +46,9 @@ class MyceliumAppTest {
 
         compose.onNodeWithText("检查更新").performClick()
 
-        awaitText("检查更新失败：Network unavailable")
+        // 连不上归到「网络」一类，界面给人话；异常的英文原文不许漏出来。
+        awaitText("检查更新失败：连不上 GitHub，检查网络后再试")
+        assertTrue(compose.onAllNodesWithText("Network unavailable").fetchSemanticsNodes().isEmpty())
         compose.onNodeWithText("检查更新").assertIsEnabled()
     }
 

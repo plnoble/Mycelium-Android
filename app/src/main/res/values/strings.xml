@@ -7,4 +7,12 @@
     <string name="update_open_apk">打开下载页面</string>
     <string name="update_none_published">还没有发布过任何版本。</string>
     <string name="update_failed">检查更新失败：%1$s</string>
+    <!-- 检查更新的失败文案：说清用户下一步能做什么，不出现 HTTP 原文。 -->
+    <string name="update_error_network">连不上 GitHub，检查网络后再试</string>
+    <string name="update_error_rate_limited">检查太频繁，稍后再试</string>
+    <string name="update_error_server">GitHub 暂时不可用（HTTP %1$d），稍后再试</string>
+    <string name="update_error_malformed">GitHub 返回的内容看不懂，稍后再试</string>
+    <!-- 缺 .apk 或缺 .sha256 的发布：只给发布页，不在应用内安装。 -->
+    <string name="update_no_installable_asset">这个版本没有可用的安装包，请到发布页查看。</string>
+    <string name="update_open_release_page">打开发布页</string>
 </resources>

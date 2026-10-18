@@ -69,6 +69,7 @@ import com.xavierxia.mycelium.roundtable.InstalledVersion
 import com.xavierxia.mycelium.roundtable.Roundtable
 import com.xavierxia.mycelium.roundtable.SqlCipherPackDatabase
 import com.xavierxia.mycelium.roundtable.StoredMessage
+import com.xavierxia.mycelium.update.UpdateError
 import com.xavierxia.mycelium.update.UpdateManager
 import com.xavierxia.mycelium.update.UpdateResult
 import kotlinx.coroutines.Dispatchers
@@ -451,16 +452,35 @@ private fun UpdateText(result: UpdateResult?, context: Context) {
         null -> Unit
         is UpdateResult.UpToDate -> Text(stringResource(R.string.update_latest))
         is UpdateResult.NoPublishedRelease -> Text(stringResource(R.string.update_none_published))
-        is UpdateResult.Error -> Text(stringResource(R.string.update_failed, result.message))
+        is UpdateResult.Error -> Text(stringResource(R.string.update_failed, updateErrorText(result.error)))
         is UpdateResult.Available -> {
-            Text(stringResource(R.string.update_new_version, result.release.versionName))
-            Row {
-                Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, result.release.apkDownloadUrl.toUri())) }) {
+            val release = result.release
+            Text(stringResource(R.string.update_new_version, release.versionName))
+            val apkUrl = release.apkUrl
+            if (apkUrl != null) {
+                Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, apkUrl.toUri())) }) {
                     Text(stringResource(R.string.update_open_apk))
+                }
+            } else {
+                // 缺 .apk 或缺 .sha256：应用内不安装，只把人送到发布页。
+                Text(stringResource(R.string.update_no_installable_asset))
+                Button(onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, release.releasePageUrl.toUri()))
+                }) {
+                    Text(stringResource(R.string.update_open_release_page))
                 }
             }
         }
     }
+}
+
+/** 错误类型到文案只在这里对应：界面认类型，改文案不用碰解析逻辑。 */
+@Composable
+private fun updateErrorText(error: UpdateError): String = when (error) {
+    UpdateError.Network -> stringResource(R.string.update_error_network)
+    UpdateError.RateLimited -> stringResource(R.string.update_error_rate_limited)
+    is UpdateError.Server -> stringResource(R.string.update_error_server, error.status)
+    UpdateError.Malformed -> stringResource(R.string.update_error_malformed)
 }
 
 private fun ImportOutcome.notice(): String = when (this) {
