@@ -8,8 +8,13 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.MainActivity
+import com.xavierxia.mycelium.update.CountingReleaseSource
+import com.xavierxia.mycelium.update.UpdatePreferences
+import com.xavierxia.mycelium.update.testCenter
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -17,8 +22,26 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
 class MainActivityTest {
+    private val compose = createAndroidComposeRule<MainActivity>()
+
+    /**
+     * 工厂规则必须包在 Activity 规则**外面**（`RuleChain.outerRule(...)`），否则 Activity 先起来。
+     * 注入的 center 用假源：这个测例只看底栏能不能走通，绝不允许真的发网络请求。
+     * 包名带 `.debug` 的调试包本来就不自动检查，这里照着真机行为注入。
+     */
     @get:Rule
-    val compose = createAndroidComposeRule<MainActivity>()
+    val chain: TestRule = RuleChain
+        .outerRule(
+            UpdateCenterFactoryRule { context ->
+                testCenter(
+                    CountingReleaseSource { null },
+                    UpdatePreferences(context),
+                    clock = { 1_000L },
+                    isDebugPackage = true,
+                )
+            },
+        )
+        .around(compose)
 
     @Test
     fun threeSpacesAreReachableAndTheUpdateCheckStaysOnMine() {

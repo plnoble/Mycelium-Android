@@ -11,7 +11,13 @@ package com.xavierxia.mycelium.update
 object UpdateCheckPolicy {
     const val INTERVAL_MS = 24L * 60 * 60 * 1000
 
-    /** 时钟回拨（now < last）视为到期：宁可多查一次，也不卡死。 */
+    /**
+     * 时钟回拨（now < last）视为到期：宁可多查一次，也不卡死。
+     * `lastAutoAttemptAtMs <= 0` 就是「从来没查过」，也必须到期 —— 不能靠「现在是 1970 年之后
+     * 好几十年」这种巧合：设备时钟不对时，全新安装会永远不查（`nowMs - 0 >= INTERVAL_MS` 这时是假）。
+     */
     fun isDue(nowMs: Long, lastAutoAttemptAtMs: Long): Boolean =
-        nowMs - lastAutoAttemptAtMs >= INTERVAL_MS || nowMs < lastAutoAttemptAtMs
+        lastAutoAttemptAtMs <= 0L ||
+            nowMs - lastAutoAttemptAtMs >= INTERVAL_MS ||
+            nowMs < lastAutoAttemptAtMs
 }

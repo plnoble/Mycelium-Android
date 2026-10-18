@@ -139,6 +139,8 @@ class UpdateCenter(
     fun startDownload() {
         val release = _state.value.release ?: return
         if (!installReady) return
+        // 缺 .apk 或缺 .sha256 的发布不提供应用内安装（工作包第 2 步）。
+        if (release.apkUrl == null || release.sha256Url == null) return
         val call = GatewayCall()
         downloadCall = call
         _state.value = _state.value.copy(download = DownloadUiState.Running(0L, release.apkSizeBytes))

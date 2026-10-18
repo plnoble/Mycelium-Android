@@ -573,8 +573,10 @@ private fun UpdateCard(
                 UpdateNotes(release.releaseNotes)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 下载/校验/安装三件都接线（且非调试包）才画这个按钮：不放按了没用的入口。
-                if (installReady) {
+                // 下载/校验/安装三件都接线（且非调试包、两个附件都在）才画这个按钮：
+                // 不放按了没用的入口，也不给缺附件的发布画一个装不上的按钮。
+                val installable = release.apkUrl != null && release.sha256Url != null
+                if (installReady && installable) {
                     Button(onClick = onDownload) { Text(stringResource(R.string.update_download_install)) }
                 }
                 TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version)) }
