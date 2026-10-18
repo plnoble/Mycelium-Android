@@ -82,6 +82,19 @@ class CharacterStore(private val connect: () -> HearthSession) {
         session.exec("DELETE FROM characters WHERE id = ?", listOf(id))
     }
 
+    /** When each character was last active: the newest conversation time, or its own updated_at. */
+    fun lastActivity(): Map<String, String> = withSession(connect) { session ->
+        session.query(
+            """
+            SELECT c.id, COALESCE(
+                (SELECT MAX(updated_at) FROM conversations WHERE character_id = c.id),
+                c.updated_at
+            )
+            FROM characters c
+            """.trimIndent(),
+        ).associate { row -> row.stringAt(0) to row.stringAt(1) }
+    }
+
     private fun write(session: HearthSession, id: String, draft: CharacterDraft, now: String, insert: Boolean) {
         val name = draft.name.trim()
         require(name.isNotEmpty()) { "请填写名字" }

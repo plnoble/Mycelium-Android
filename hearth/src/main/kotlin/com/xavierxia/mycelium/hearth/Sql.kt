@@ -13,6 +13,8 @@ interface HearthSession : AutoCloseable {
 internal fun List<Any?>.stringAt(index: Int): String =
     requireNotNull(this[index]) { "第 $index 列是空的" } as String
 
+internal fun List<Any?>.textOrNullAt(index: Int): String? = this[index] as String?
+
 internal fun List<Any?>.numberAt(index: Int): Number =
     requireNotNull(this[index]) { "第 $index 列是空的" } as Number
 

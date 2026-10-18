@@ -15,7 +15,7 @@ class CharacterStoreTest {
     fun createEditCopyAndDeleteKeepTheirOwnConversations() {
         val first = store.create(CharacterDraft(name = "老周", personality = "话少"), "2026-10-17T10:00")
         val second = store.create(CharacterDraft(name = "小满", speech = "先笑再说话"), "2026-10-17T11:00")
-        log.append(first.id, null, "今天怎么样", "还行。", "2026-10-17T12:00")
+        log.append(first.id, null, "今天怎么样", "还行。", "本机 · 测试模型", "2026-10-17T12:00")
 
         store.update(first.id, CharacterDraft(name = "老周", personality = "话更少"), "2026-10-17T13:00")
         val edited = store.character(first.id)!!
@@ -42,7 +42,28 @@ class CharacterStoreTest {
         assertFailsWith<IllegalArgumentException> { store.create(CharacterDraft(name = "  "), "t") }
         val quiet = store.create(CharacterDraft(name = "甲"), "2026-10-17T01:00")
         val late = store.create(CharacterDraft(name = "乙"), "2026-10-17T02:00")
-        log.append(quiet.id, null, "早", "早。", "2026-10-17T09:00")
+        log.append(quiet.id, null, "早", "早。", "本机 · 测试模型", "2026-10-17T09:00")
         assertEquals(listOf(quiet.id, late.id), store.characters().map { it.id })
+    }
+
+    @Test
+    fun answersKeepTheirModelAndTheLastAnswerCanBeReplaced() {
+        val row = store.create(CharacterDraft(name = "老周"), "t")
+        val id = log.append(row.id, null, "在吗", "在。", "本机 · Qwen", "t1")
+        assertEquals(null, log.messages(id).first().model)
+        assertEquals("本机 · Qwen", log.messages(id).last().model)
+
+        log.replaceLastAnswer(id, "在的。", "本机 · Qwen", "t2")
+        assertEquals(listOf("在吗", "在的。"), log.messages(id).map { it.text })
+        assertEquals(2, log.messages(id).size)
+    }
+
+    @Test
+    fun lastActivityFollowsTheNewestConversation() {
+        val quiet = store.create(CharacterDraft(name = "甲"), "2026-10-17T01:00")
+        val talked = store.create(CharacterDraft(name = "乙"), "2026-10-17T02:00")
+        log.append(talked.id, null, "早", "早。", "本机 · 测试模型", "2026-10-17T09:00")
+        assertEquals("2026-10-17T01:00", store.lastActivity()[quiet.id])
+        assertEquals("2026-10-17T09:00", store.lastActivity()[talked.id])
     }
 }

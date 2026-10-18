@@ -5,7 +5,7 @@ import com.xavierxia.mycelium.model.ChatRole
 import java.util.UUID
 
 data class HearthConversation(val id: String, val characterId: String, val title: String, val updatedAt: String)
-data class HearthMessage(val role: ChatRole, val text: String)
+data class HearthMessage(val role: ChatRole, val text: String, val model: String?)
 
 class ConversationLog(private val connect: () -> HearthSession) {
     fun conversations(characterId: String): List<HearthConversation> = withSession(connect) { session ->
@@ -19,12 +19,13 @@ class ConversationLog(private val connect: () -> HearthSession) {
 
     fun messages(conversationId: String): List<HearthMessage> = withSession(connect) { session ->
         session.query(
-            "SELECT role, text FROM messages WHERE conversation_id = ? ORDER BY id",
+            "SELECT role, text, model FROM messages WHERE conversation_id = ? ORDER BY id",
             listOf(conversationId),
-        ).map { row -> HearthMessage(ChatRole.valueOf(row.stringAt(0)), row.stringAt(1)) }
+        ).map { row -> HearthMessage(ChatRole.valueOf(row.stringAt(0)), row.stringAt(1), row.textOrNullAt(2)) }
     }
 
-    fun append(characterId: String, conversationId: String?, question: String, answer: String, now: String): String =
+    /** Stores one question and its answer. The answer keeps the model label it was written by. */
+    fun append(characterId: String, conversationId: String?, question: String, answer: String, model: String?, now: String): String =
         withSession(connect) { session ->
             val id = conversationId ?: UUID.randomUUID().toString()
             if (conversationId == null) {
@@ -35,19 +36,25 @@ class ConversationLog(private val connect: () -> HearthSession) {
             } else {
                 session.exec("UPDATE conversations SET updated_at = ? WHERE id = ?", listOf(now, id))
             }
-            session.exec("INSERT INTO messages(conversation_id, role, text) VALUES (?, ?, ?)", listOf(id, "USER", question))
-            session.exec("INSERT INTO messages(conversation_id, role, text) VALUES (?, ?, ?)", listOf(id, "ASSISTANT", answer))
+            session.exec(
+                "INSERT INTO messages(conversation_id, role, text, model) VALUES (?, ?, ?, ?)",
+                listOf(id, "USER", question, null),
+            )
+            session.exec(
+                "INSERT INTO messages(conversation_id, role, text, model) VALUES (?, ?, ?, ?)",
+                listOf(id, "ASSISTANT", answer, model),
+            )
             id
         }
 
     /** Replaces the last assistant message. The question stays. */
-    fun replaceLastAnswer(conversationId: String, answer: String, now: String) = withSession(connect) { session ->
+    fun replaceLastAnswer(conversationId: String, answer: String, model: String?, now: String) = withSession(connect) { session ->
         val last = session.query(
             "SELECT id, role FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1",
             listOf(conversationId),
         ).singleOrNull() ?: error("这段对话还没有回答")
         require(last.stringAt(1) == "ASSISTANT") { "最后一条不是回答" }
-        session.exec("UPDATE messages SET text = ? WHERE id = ?", listOf(answer, last.numberAt(0).toLong()))
+        session.exec("UPDATE messages SET text = ?, model = ? WHERE id = ?", listOf(answer, model, last.numberAt(0).toLong()))
         session.exec("UPDATE conversations SET updated_at = ? WHERE id = ?", listOf(now, conversationId))
     }
 

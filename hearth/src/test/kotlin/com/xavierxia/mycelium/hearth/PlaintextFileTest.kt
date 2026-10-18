@@ -18,7 +18,7 @@ class PlaintextFileTest {
         val dialogue = "明文对话句子也不应出现"
         val session = fileSession(file.path)
         val created = CharacterStore { session }.create(CharacterDraft(name = "老周", personality = sheet), "t")
-        ConversationLog { session }.append(created.id, null, dialogue, "回答也不应出现", "t")
+        ConversationLog { session }.append(created.id, null, dialogue, "回答也不应出现", "本机 · 测试模型", "t")
 
         val latin = String(file.readBytes(), Charsets.ISO_8859_1)
         assertTrue(latin.startsWith("SQLite format 3"))

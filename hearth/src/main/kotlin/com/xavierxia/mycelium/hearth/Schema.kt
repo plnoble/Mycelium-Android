@@ -36,7 +36,8 @@ internal fun HearthSession.ensureHearthTables() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id TEXT NOT NULL,
             role TEXT NOT NULL,
-            text TEXT NOT NULL
+            text TEXT NOT NULL,
+            model TEXT
         )
         """.trimIndent(),
     )
