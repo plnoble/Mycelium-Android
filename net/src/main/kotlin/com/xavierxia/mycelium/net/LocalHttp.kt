@@ -61,16 +61,46 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
             synchronized(calls) { calls += call }
             count.incrementAndGet()
             val reply = handler(call)
-            val bytes = reply.body.toByteArray(StandardCharsets.UTF_8)
-            client.getOutputStream().write(
-                "HTTP/1.1 ${reply.status} OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
-                    .toByteArray(StandardCharsets.UTF_8),
-            )
+            val bytes = reply.body
+            val declared = reply.headers.entries
+                .firstOrNull { (name, _) -> name.equals("Content-Length", ignoreCase = true) }
+                ?.value
+                ?.toIntOrNull()
+            val statusHead = buildString {
+                // The status line must be legal for every status a test returns; anything outside the
+                // codes the download path really needs keeps a generic but valid reason phrase.
+                append("HTTP/1.1 ${reply.status} ${reasonPhrase(reply.status)}\r\n")
+                // Content-Length is written exactly once, even when the reply carries its own.
+                append("Content-Length: ${declared ?: bytes.size}\r\n")
+                reply.headers.forEach { (name, value) ->
+                    if (!name.equals("Content-Length", ignoreCase = true)) append("$name: $value\r\n")
+                }
+                append("Connection: close\r\n\r\n")
+            }
+            client.getOutputStream().write(statusHead.toByteArray(StandardCharsets.UTF_8))
             client.getOutputStream().write(bytes)
         }
     }
 }
 
+/** Only the codes the gateway tests need are spelled out; the rest stay a legal generic phrase. */
+private fun reasonPhrase(status: Int): String = when (status) {
+    200 -> "OK"
+    206 -> "Partial Content"
+    302 -> "Found"
+    303 -> "See Other"
+    307 -> "Temporary Redirect"
+    308 -> "Permanent Redirect"
+    416 -> "Range Not Satisfiable"
+    else -> "Unknown"
+}
+
 data class HttpCall(val method: String, val path: String, val headers: Map<String, String>, val body: String)
 
-data class HttpReply(val status: Int, val body: String)
+/**
+ * One scripted answer. The body is bytes, not text, because the download tests move real binaries;
+ * the [String] overload below keeps every existing test source-compatible.
+ */
+data class HttpReply(val status: Int, val body: ByteArray, val headers: Map<String, String> = emptyMap()) {
+    constructor(status: Int, body: String) : this(status, body.toByteArray(StandardCharsets.UTF_8))
+}

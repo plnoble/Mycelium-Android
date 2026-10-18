@@ -118,10 +118,10 @@ typealias GatewayAbort = GatewayCall
  * the gateway writes that body into the audit log and never writes request headers.
  */
 class OutboundGateway(
-    private val hosts: AllowedHosts,
-    private val audit: AuditLog,
-    private val clock: () -> String,
-    private val open: (URI) -> HttpURLConnection,
+    internal val hosts: HostPolicy,
+    internal val audit: AuditLog,
+    internal val clock: () -> String,
+    internal val open: (URI) -> HttpURLConnection,
 ) {
     fun send(request: GatewayRequest): GatewayResponse {
         val target = parse(request.url)
@@ -208,7 +208,7 @@ class OutboundGateway(
         }
     }
 
-    private fun parse(url: String): URI {
+    internal fun parse(url: String): URI {
         val target = try {
             URI(url)
         } catch (failure: Exception) {
@@ -223,15 +223,24 @@ class OutboundGateway(
     private fun String.codePointCount(): Int = codePointCount(0, length)
 }
 
+/**
+ * Whether one address may be called for one purpose. The gateway only asks this; the rules live in
+ * [AllowedHosts], and the download path takes the same policy so a redirect hop is checked exactly
+ * like a first address.
+ */
+fun interface HostPolicy {
+    fun allows(target: URI, purpose: GatewayPurpose): Boolean
+}
+
 /** Hosts the gateway may call. Localhost is allowed only when the debug build asks for it. */
 class AllowedHosts(
     private val modelBaseUrls: List<String>,
     private val allowCleartextLocalhost: Boolean,
-) {
+) : HostPolicy {
     constructor(modelBaseUrl: String, allowCleartextLocalhost: Boolean) :
         this(listOf(modelBaseUrl), allowCleartextLocalhost)
 
-    fun allows(target: URI, purpose: GatewayPurpose): Boolean {
+    override fun allows(target: URI, purpose: GatewayPurpose): Boolean {
         val host = target.host.orEmpty().lowercase()
         val https = target.scheme == "https"
         return when (purpose) {
@@ -260,7 +269,17 @@ class AllowedHosts(
     }
 
     private companion object {
-        val UPDATE_HOSTS = setOf("api.github.com", "github.com", "objects.githubusercontent.com")
+        /**
+         * `release-assets.githubusercontent.com` is the host the GitHub release download really
+         * redirects to, measured on device; `github-releases.githubusercontent.com` is not added
+         * because it was never measured (fail closed).
+         */
+        val UPDATE_HOSTS = setOf(
+            "api.github.com",
+            "github.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        )
     }
 }
 
