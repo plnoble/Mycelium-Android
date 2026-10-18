@@ -12,6 +12,9 @@ import org.junit.Test
 /**
  * 全部用假响应体，不联网。响应形状照真实 GitHub `releases/latest` 造：
  * 附件名来自发版流程实际产出的 `mycelium-v<版本>.apk` / `mycelium-v<版本>.apk.sha256`（实施方案 1.1 实测）。
+ *
+ * 方案审必须修改项 6：只看忽略大小写的**精确**文件名，前缀/包含匹配已经删掉；
+ * 下面用 `.asc`、`.sig`、备份包、别的后缀和别的版本来证明相近附件一个都选不中。
  */
 class GitHubReleaseClientTest {
     @Test
@@ -74,6 +77,112 @@ class GitHubReleaseClientTest {
 
         val release = client.latestRelease()!!
 
+        assertEquals(CHECKSUM_URL, release.sha256Url)
+    }
+
+    @Test
+    fun wrappedNamesAreNeverTakenAsApkOrChecksum() {
+        // 方案审要求（必须修改项 6）：`.asc`、`.sig`、备份包、别的后缀都只比目标名字长一点，
+        // 收紧成精确匹配后一个都不许被选中 —— 两 URL 一起置空，不提供应用内安装。
+        val client = clientReturning(
+            200,
+            latestReleaseJson(
+                assets = listOf(
+                    asset("mycelium-v0.4.0.apk.asc", "https://example.com/apk-asc"),
+                    asset("mycelium-v0.4.0.apk.sig", "https://example.com/apk-sig"),
+                    asset("mycelium-v0.4.0.apk.sha256.asc", "https://example.com/checksum-asc"),
+                    asset("mycelium-v0.4.0.apk.sha256.sig", "https://example.com/checksum-sig"),
+                    asset("mycelium-v0.4.0.apk.backup.apk", "https://example.com/backup-apk"),
+                    asset("mycelium-v0.4.0.apk.sha256.bak", "https://example.com/checksum-bak"),
+                    asset("mycelium-v0.4.0-checksums.txt", "https://example.com/checksums-txt"),
+                ),
+            ),
+        )
+
+        val release = client.latestRelease()!!
+
+        assertNull(release.apkUrl)
+        assertNull(release.sha256Url)
+        assertNull(release.apkSizeBytes)
+    }
+
+    @Test
+    fun onlyWrappedChecksumKeepsBothUrlsNull() {
+        val client = clientReturning(
+            200,
+            latestReleaseJson(
+                assets = listOf(
+                    asset("mycelium-v0.4.0.apk", APK_URL, size = APK_SIZE),
+                    asset("mycelium-v0.4.0.apk.sha256.asc", "https://example.com/checksum-asc"),
+                ),
+            ),
+        )
+
+        val release = client.latestRelease()!!
+
+        // 精确 APK 在、精确校验文件不在：仍然是「缺校验文件」，两 URL 都留空。
+        assertNull(release.apkUrl)
+        assertNull(release.sha256Url)
+        // 大小照旧是这条发布的事实。
+        assertEquals(APK_SIZE, release.apkSizeBytes)
+    }
+
+    @Test
+    fun onlyWrappedApkKeepsBothUrlsNull() {
+        val client = clientReturning(
+            200,
+            latestReleaseJson(
+                assets = listOf(
+                    asset("mycelium-v0.4.0.apk.asc", "https://example.com/apk-asc"),
+                    asset("mycelium-v0.4.0.apk.sha256", CHECKSUM_URL),
+                ),
+            ),
+        )
+
+        val release = client.latestRelease()!!
+
+        assertNull(release.apkUrl)
+        assertNull(release.sha256Url)
+    }
+
+    @Test
+    fun exactAssetsOfOtherVersionsAreNotSubstituted() {
+        // 多版本附件同时在、还乱序：只认本标签对应版本的那一份，不顶替、不跨版本配对。
+        val client = clientReturning(
+            200,
+            latestReleaseJson(
+                assets = listOf(
+                    asset("mycelium-v0.4.1.apk.sha256", "https://example.com/v041.apk.sha256"),
+                    asset("mycelium-v0.4.0.apk.sha256", CHECKSUM_URL, size = 86L),
+                    asset("mycelium-v0.4.1.apk", "https://example.com/v041.apk"),
+                    asset("mycelium-v0.4.0.apk", APK_URL, size = APK_SIZE),
+                ),
+            ),
+        )
+
+        val release = client.latestRelease()!!
+
+        assertEquals(APK_URL, release.apkUrl)
+        assertEquals(CHECKSUM_URL, release.sha256Url)
+        assertEquals(APK_SIZE, release.apkSizeBytes)
+    }
+
+    @Test
+    fun assetNameCaseIsIgnoredButStillMustBeExact() {
+        val client = clientReturning(
+            200,
+            latestReleaseJson(
+                assets = listOf(
+                    asset("MYCELIUM-V0.4.0.APK", APK_URL, size = APK_SIZE),
+                    asset("Mycelium-V0.4.0.Apk.Sha256", CHECKSUM_URL),
+                ),
+            ),
+        )
+
+        val release = client.latestRelease()!!
+
+        // 忽略大小写，但仍然是整名相等：大小写不会让相近附件变成目标。
+        assertEquals(APK_URL, release.apkUrl)
         assertEquals(CHECKSUM_URL, release.sha256Url)
     }
 

@@ -56,8 +56,9 @@ class GitHubReleaseClient(
         // 附件名以发版流程实际产出的名字为准（实施方案 1.1 实测：mycelium-v0.1.1.apk / .apk.sha256）。
         val apkName = "mycelium-v$version.apk"
         val checksumName = "$apkName.sha256"
-        val apk = findAsset(assets, apkName) { name -> name.endsWith(".apk", ignoreCase = true) }
-        val checksum = findAsset(assets, checksumName) { name -> name.contains(".sha256", ignoreCase = true) }
+        // 只有这两个精确名字算数：别的附件（.asc/.sig/备份包）不能顶替，也不能二选一地配对。
+        val apk = findAssetByName(assets, apkName)
+        val checksum = findAssetByName(assets, checksumName)
         // 两个附件都在才提供应用内安装；缺任何一个都只留发布页 —— 绝不退回「随便挑一个 .apk」。
         val installable = apk != null && checksum != null
         return ReleaseInfo(
@@ -73,26 +74,21 @@ class GitHubReleaseClient(
     }
 
     /**
-     * 按名字找资产，不看数组顺序，也不退回「第一个 .apk」。
+     * 按名字找资产：只认忽略大小写的**精确**文件名，不看数组顺序，不做前缀/包含/后缀匹配。
      *
-     * 先精确匹配期望的名字（[findAsset] 的调用方给出）；找不到再退化为「名字以期望名字开头」，
-     * 以容忍 GitHub 对附件改名/去空格的处理。名字相近但不是目标的文件（如 `-rc1` 那一版、
-     * 别的命名规则）既不等于期望名字、也不以它开头，因此不会被选中。
+     * 精确匹配是有意收紧的：`mycelium-v0.4.0.apk.asc`、`mycelium-v0.4.0.apk.sig`、
+     * `mycelium-v0.4.0.apk.sha256.asc`、`mycelium-v0.4.0.apk.backup.apk` 都只比目标名字长一点，
+     * 前缀或包含匹配会把它们当成 APK/校验文件选中。也不能用「反正后面的解析会失败」兜底：
+     * 带 64 位十六进制文本的其他文件并不一定被 sha256 解析拒绝。
+     *
+     * 名字不完全一样就当这份发布没有该附件，调用方据此不给应用内安装（两 URL 一起置空）。
      */
-    private fun findAsset(
-        assets: JSONArray,
-        expectedName: String,
-        isRightKind: (String) -> Boolean,
-    ): JSONObject? {
-        var prefixed: JSONObject? = null
+    private fun findAssetByName(assets: JSONArray, expectedName: String): JSONObject? {
         for (index in 0 until assets.length()) {
             val asset = assets.optJSONObject(index) ?: continue
-            val name = asset.optString("name")
-            if (!isRightKind(name)) continue
-            if (name.equals(expectedName, ignoreCase = true)) return asset
-            if (prefixed == null && name.startsWith(expectedName, ignoreCase = true)) prefixed = asset
+            if (asset.optString("name").equals(expectedName, ignoreCase = true)) return asset
         }
-        return prefixed
+        return null
     }
 
     private fun sizeOf(asset: JSONObject): Long? =
