@@ -5,6 +5,7 @@ import android.database.Cursor
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import net.zetetic.database.sqlcipher.SQLiteDatabase
 import java.io.File
 import java.security.KeyStore
@@ -35,7 +36,7 @@ class HearthDatabase(context: Context) {
         if (stored != null) return String(keystore.unwrap(stored), Charsets.UTF_8)
         val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val passphrase = bytes.joinToString("") { "%02x".format(it) }
-        preferences.edit().putString("passphrase", keystore.wrap(passphrase.toByteArray(Charsets.UTF_8))).apply()
+        preferences.edit { putString("passphrase", keystore.wrap(passphrase.toByteArray(Charsets.UTF_8))) }
         return passphrase
     }
 }

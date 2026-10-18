@@ -18,8 +18,14 @@ class HearthArchitectureTest {
         assertFalse(build.contains("project(\":net\")"))
         val forbidden = listOf("okhttp", "retrofit", "ktor", "java.net.http", "HttpURLConnection", "http://", "https://")
         forbidden.forEach { assertFalse(build.contains(it), it) }
+        // Only dependency declarations count: a comment that happens to name the driver is not a
+        // dependency, and treating it as one makes the check fail for the wrong reason.
+        val declarations = build.lines().filterNot { line ->
+            val trimmed = line.trimStart()
+            trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")
+        }
         assertFalse(
-            build.lines().any { "sqlite-jdbc" in it && "testImplementation" !in it },
+            declarations.any { "sqlite-jdbc" in it && "testImplementation" !in it },
             "sqlite-jdbc 只能是测试依赖，模块自己不带数据库实现",
         )
         Files.walk(root.resolve("hearth/src/main")).use { files ->
