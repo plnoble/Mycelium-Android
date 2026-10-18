@@ -85,30 +85,47 @@
 
 建议修改 1（测试模式 + 云端常驻告知）已做；建议修改 2、3（审计清空语义、更多失败矩阵）留待下一轮。
 
-### 3.3 全量审（`REVIEW.md`）
+### 3.3 全量审（`REVIEW.md`）与 9 条整改
 
-2026-10-18 17:23 第一轮撞上 Codex 用量上限（消耗 139,068 token、报告 0 字节，空文件已删）；**21:05 在只读
-worktree（检出当时的 HEAD）重跑成功**，产出 `REVIEW.md`：**结论「需修改」，9 条必修**——4 条 P1：1 停止与
-网络取消仍未形成完整协议、2 生成中导航留下永久 busy、3 令牌校验位于写事务之外、4 确认发送可越过取消与离页、
-5 地址与密钥来自两次读取；5 条 P2：6 半升级库把原指定本地模型静默改成默认、7 本地模型加载期停止仍丢问题、
-8 最后一条长消息可见不等于用户在底部、9 补齐交付证据并撤回过头表述。
+2026-10-18 **21:05–21:19** 在只读 worktree 上跑完（Codex），产出 `REVIEW.md`：**结论「需修改」，9 条**
+（4 条 P1 + 5 条 P2）。该轮结束时的额度读数：**5 小时窗口 59%、每周 41%**。第一轮（17:23–17:27）曾撞上
+用量上限（139,068 token、报告 0 字节，空文件已删），本轮是重置后的重跑。
 
-**9 条已全部整改**，提交 `313e745`；另有 `a196aed` 补上第 5 条要求的快照测例（两次读取之间配置被改，地址与
-密钥不得跨版本拼接）。
+**逐条整改状态表**（被验证提交 `313e745`；第 5 条的补验测例在 `a196aed`）
 
-**复审（`REVIEW-r2.md`）没有拿到结论**：另起的 Codex 复审会话运行 30 分钟未产出报告（会话无新事件、报告文件
-未生成），如实记为「未产出」；由统筹决定是再跑一轮还是按现有材料验收。
+| # | 问题（审稿原话要点） | 改在哪里 | 证据 |
+|---|---|---|---|
+| 1 | P1 停止与网络取消协议不完整：`disconnect()` 在连接建立前空转，登记前停止仍会写正文；`invokeOnCompletion` 要等协程结束才触发 | `:net` 新增请求级**永久**取消标记 `GatewayCall`（`cancel` 置标记 + 断开已登记连接，`attach` 登记时若已取消则立刻断开），`exchange()` 在 open 前 / 登记后 / 取输出流前 / 写完正文后四个检查点 `check()`；`:roundtable` 改为 `suspendCancellableCoroutine { invokeOnCancellation { stop() } }`，删掉 `invokeOnCompletion` 与「send 返回即撤注册」 | `net/GatewayTest` 新增 2 例（`aCancelledRequestNeverOpensAConnection`、`aStopInTheRegistrationWindowNeverWritesTheBody`，含正向对照）；`roundtable/HearthCloudModelTest` 新增 2 例（登记窗口前停止不发正文、只 `job.cancel()` 也须 2 秒内断开 5 秒慢服务）。判别力实证：把新守卫改坏后窗口用例报 `expected: <0> but was: <1>`（假服务真收到正文） |
+| 2 | P1 生成中导航留下永久 busy：`abandonTurn()` 不清 `busy`，换会话只换令牌 | `HearthViewModel.abandonTurn()` 收口：bump token、停云端/引擎、取消 operation，并清 `busy/streaming/streamLabel/sendConfirm`；`newConversation()`/`openConversation()` 先调它 | 设备测例 `HearthNavigationDuringTurnDeviceTest`（生成中换会话 / 切测试模式：`busy` 清掉、页面还能继续发、晚到回答不上屏不入库） |
+| 3 | P1 令牌检查在 IO 写库之外：检查完到写库之间还能被作废 | `:hearth` `ConversationLog.append/replaceLastAnswer` 把 `valid()` 放进写事务首行，失败抛 `AbandonedTurn`，`HearthChat.finish/redo` 收敛成 null/false；`HearthViewModel.stillCommittable` 传令牌 + 「云端且用户已停」判定 | `hearth/AbandonedWriteTest` 2 例（写锁被占住期间作废的一轮不落库；仍有效则同一事务里一起提交） |
+| 4 | P1 确认发送任务可越过取消/离页：`confirmSend()` 没绑操作 | `PendingSend(character, question, mode, conversationId, target, token)`；`confirmSend` 每步异步后用 `stillWanted()`（令牌 + `sendConfirm` 实例身份）复检，人物没了就拒发，地址变了重新弹确认 | 设备测例 `HearthNavigationDuringTurnDeviceTest` 第 2 例（先弹确认、期间 0 请求；离页后再跑确认任务不得发请求、不得改写确认状态、不得留测试模式文字） |
+| 5 | P1 地址与密钥来自两次读取 | `CloudStore.endpoint()` 一次读取返回地址+名称+密钥，`:app` 侧 `CloudSettingsStore.service/endpoint` 委托；`stream()` 用它同时做校验与建请求 | `roundtable/CloudEndpointSnapshotTest` 2 例（快照一致；分开读确实会拼出「旧地址 + 新密钥」） |
+| 6 | P2 半升级库把指定本地模型静默改成 default | `:hearth` `Schema.kt` 拆开「加列」与「回填」，新增 `MODEL_KIND_SINCE = 3` 与 `legacyModelKindNeedsRepair`，回填只认 `default` 且 `model_id` 非空 | `:hearth:test` 39 例全绿，含 3 条新例（真实半升级夹具、已打标记库不被覆盖、阈值边界） |
+| 7 | P2 本地加载期间停止，问题仍消失 | `Turn.userStopped` + `stop()` 先置 `activeTurn?.userStopped`；加载期的普通异常按停止收尾（问题回输入框、不入库） | **代码修复，无新增测例**（审稿未要求补验，如实标注） |
+| 8 | P2 最后一条长消息可见 ≠ 用户在底部，流式更新把用户上翻重置 | `HearthSpace.kt` 抽出 `ChatTimeline`；`isAtContentBottom()` 按真实视口（`viewportEndOffset`/`afterContentPadding` + 容差 `min(末项高, 视口/16)`）判定，`DragInteraction` 区分「谁在滚」，`followTail` 只在松手后确实落到底部才恢复 | 设备测例 `HearthTimelineFollowDeviceTest` 5 例；对照实验：换回旧逻辑后「长回答内上翻」必失败（用户停在 691 被拽到 1433） |
+| 9 | P2 证据不足与过头表述 | 见本报告**第九节**（逐条列了缺失的原始附件、撤回的表述与更正后的说法） | 第九节各行的「现在的事实」列 |
 
-**门禁（交付门槛那一条）**：整改后在全新 worktree 从零构建跑 `scripts/check-all.ps1` →
-`**PASS**: 0 failures, 0 warnings, exit code 0.`，用例 **144 / 0 失败 / 0 错误**（`:app` 27、`:contract` 22、
-`:hearth` 39、`:llm` 11、`:model-api` 3、`:net` 14、`:roundtable` 28），`lintDebug`/`lintRelease` 均
-`No issues found.`。**被验证的提交是 tip `5314e34`**。
+**复审状态**：另起的 Codex 复审在 **22:11** 起跑，5.5 分钟 / 131 万 token 后撞上限（**5h=99%、每周=47%**，
+重置 **2026-10-19 02:06**，credits 0），报告未生成。已挂**无人值守任务**：02:06 之后自动重建只读 worktree
+（检出当时的 HEAD）重跑复审，报告写到 `REVIEW-r2.md`；worktree `p2-2-review2` 已备好。按任务书
+「Codex 不可用时交统筹代审」，**是否等 02:06 由统筹定**。
 
-关于 lint 的一处更正：整改后 `HearthSpace.kt` 曾留下 **1 个 lint hint**（`mutableStateOf` → `mutableIntStateOf`）。
-它会让 `check-all.ps1` 的 lint 汇总解析失败——该脚本只认 `N errors, M warnings` 结尾或 `No issues found`，不认
-`, 1 hint`；而 CI 的 `check-all.sh` 用前缀匹配，照样通过：**两条脚本对「只含 hint 的 lint 输出」并不等价**。
-按「不动门禁脚本」的保守做法，从代码侧消掉了这个 hint（`5314e34`），门禁随之 PASS。**这条留给统筹确认**：
-是否要同时放宽 `check-all.ps1` 的解析（我没有动脚本）。
+**因此本包现在的状态是：方案审 12 条与隐私与出网专项审 7 条已按裁定整改（逐条状态见 3.1/3.2），全量审
+9 条已全部整改并通过整树与真机复验（见 3.4），只差复审结论。**
+
+### 3.4 整改后的整树与真机复验
+
+- **JVM 单测 128/128**（`:net` 14、`:roundtable` 26、`:contract-lib` 22、`:hearth` 39、`:app` 27；
+  全部 failures=0 errors=0；结果 XML 时间 2026-10-18 22:14）。
+- **lint（debug）0 error / 0 warning / 1 hint**：`HearthSpace.kt:523` 的 `AutoboxingStateCreation`
+  （纯性能提示），**本包未整改**，如实写出。
+- **真机四类九例全过**（runner `com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`）：
+  `HearthCloudStopDeviceTest` `OK (1 test)` 8.316 s、`HearthCloudReconfirmDeviceTest` `OK (1 test)` 3.537 s、
+  `HearthNavigationDuringTurnDeviceTest` `OK (2 tests)` 3.339 s、`HearthTimelineFollowDeviceTest` `OK (5 tests)` 5.804 s。
+- **正式版对照**：装调试包前后 `dumpsys package com.xavierxia.mycelium` **完全一致**——`versionName=0.1.1`、
+  `versionCode=2`、`lastUpdateTime=2026-10-10 05:23:04`、`firstInstallTime=2026-10-10 05:14:52`。这次是**真的把
+  原文读出来了**（第九节里「本包没有归档 dumpsys 原文」那条据此更新）。
+- **提交对应关系**：`313e745`（9 条整改）、`a196aed`（第 5 条补验测例）。
 
 ## 四、真机走查
 
@@ -219,6 +236,9 @@ worktree（检出当时的 HEAD）重跑成功**，产出 `REVIEW.md`：**结论
 
 ## 七、额度读数
 
+**本轮新增两条**：2026-10-18 **21:19** 全量审结束 **5h=59% / 每周=41%**；**22:30** 复审撞上限
+**5h=99% / 每周=47%**（credits 0，Codex 明确答复「try again at Oct 19th, 2026 2:06 AM」）。
+
 | 时点 | 5 小时窗口 | 每周 |
 |---|---|---|
 | 方案审前（12:12 事件） | 93.0%（重置 15:54） | 14.0% |
@@ -247,11 +267,10 @@ worktree（检出当时的 HEAD）重跑成功**，产出 `REVIEW.md`：**结论
 | `11e92b3` | 交付报告：说明两条 instrumented 测试只在真机跑、不在门禁任务契约内，并记下复验命令 | — |
 | `be2e013`、`11e92b3` | 截图与门禁日志归档到正式证据目录 | `.omx/.../2026-10-18-android-P2-2/` |
 | `0f28bd0`、`11e92b3`、`be2e013` | `check-all.sh`（CI 那条）在全新 worktree 上同样通过 | `p2-2-gate-checkall-sh.txt` |
-| `11e92b3` | 全量审（21:05 发出，只读 worktree 检出当时 HEAD） | `REVIEW.md`（需修改，9 条） |
-| `313e745` | 按全量审 9 条必修整改：网关请求级取消协议、导航时清 busy、校验进事务、确认任务绑定操作、地址与密钥同一快照、升级判定不再静默改模型、加载期停止算停止、按真实视口判定跟随、交付证据更正 | 整树编译 + 四个模块测试 + 设备 4 类 9 例 |
-| `a196aed` | 第 5 条要求的快照测例（两次读取之间配置被改，地址与密钥不得跨版本拼接） | `:roundtable:test` 该 2 例通过 |
-| `5314e34` | 消掉 `HearthSpace.kt` 的 lint hint，`check-all.ps1` 的 lint 汇总解析得以通过 | **PS1 门禁 PASS：144 用例 0 失败 0 错误、0 警告、退出码 0**；lint debug/release 均 `No issues found.` |
-| （复审 `REVIEW-r2.md`） | 另起 Codex 复审，会话运行 30 分钟无产出 | **未产出**（报告文件未生成），留给统筹决定 |
+| `11e92b3` | 全量审（21:05 发出，21:05–21:19 在只读 worktree 跑完） | `REVIEW.md`（需修改，9 条；结束时 5h=59%、每周=41%） |
+| `313e745` | 全量审 9 条整改：网关请求级取消协议、导航时清 busy、校验进事务、确认任务绑定操作、地址与密钥同一快照、升级判定不再静默改模型、加载期停止算停止、按真实视口判定跟随、证据更正 | 整树 JVM 128/128、lint 0 错 0 警告、真机 4 类 9 例全过 |
+| `a196aed` | 第 5 条要求的快照测例（两次读取之间配置被改，地址与密钥不得跨版本拼接） | `roundtable/CloudEndpointSnapshotTest` 2 例通过 |
+| （复审 `REVIEW-r2.md`） | 22:11 起跑，5.5 分钟 / 131 万 token 后撞上限（5h=99%、每周=47%，02:06 重置） | **未产出**；已挂无人值守任务在 02:06 后重跑 |
 
 ## 九、全量审提出的证据缺口与更正（2026-10-18 21:10 审后）
 
@@ -262,7 +281,7 @@ worktree（检出当时的 HEAD）重跑成功**，产出 `REVIEW.md`：**结论
 | 正式审计目录里找不到测试模式的记录 | `09-audit-hearth-entries.txt` 只归档了 1 条沉浸 `HearthChat`；测试模式那条（`HearthChatTest`，正文 0）当时没存下来，只有当场读数（本轮开始时设备总 9 条：`HearthChat` 2、`HearthChatTest` 1） | 标**原始附件缺失、无法复核**，不拿转述当证据 |
 | 仅凭 `speed-run3.txt` 的 `OK (1 test)` 复核不了三次测速 | 确实只有测例返回码，没有 token 数/耗时明细文件 | 撤回「1500 token 测速通过」的写法，标**无法复核** |
 | 找不到两个 Compose 设备测试的原始成功输出 | 运行输出只留在会话里，没有归档成文件 | 标**原始输出未归档**；给出复跑命令（4.3），复核者可自行复现 |
-| 正式版前后包信息缺本包原文 | P2-2 两次走查只读了值、没存 `dumpsys` 原文 | 标**按当时读数转述**；最近的原始凭据是 P2-1b 的 `device-log.txt` |
+| 正式版前后包信息缺本包原文 | P2-2 两次走查只读了值、没存 `dumpsys` 原文 | **本轮补上了装前/装后原文**（读数见 3.4「正式版对照」，前后完全一致）；此前两次走查仍是按当时读数转述 |
 | `20`–`22` 保留状态栏、`20` 含系统通知，「状态栏已裁」不实 | 第二轮三张当时确实没裁 | 已按第一轮同一规则裁掉顶部 160 像素（1216×2528）；逐行均色佐证状态栏占 y=0–110（含图标行 y=40–60），y=120 起即应用内容，所以 160 像素把状态栏和其中的通知一并裁掉。**本轮会话的模型没有图像输入能力，无法再逐张目视复核**，这条以尺寸与均色为依据 |
 | 「12 条 + 7 条全部整改」「成功/失败/超时/取消另有测例」过头 | 12 条与 7 条是**逐条状态**（3.1/3.2 有表），不是笼统「全部通过」；超时/取消矩阵确实没有单独成例 | 已按事实改写（3.1 第 8 条、本节、3.3） |
 
