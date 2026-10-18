@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P2-1b 占位图标的前景：单色矢量（一支火苗），没有用任何图片文件。
+  正式图标由用户以后决定。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,26 C63,37 75,45 75,59 C75,71 65,80 54,80 C43,80 33,71 33,59 C33,45 45,37 54,26 Z" />
+    <path
+        android:fillColor="#FF3B4A3F"
+        android:pathData="M54,48 C58,53 63,57 63,63 C63,68 59,72 54,72 C49,72 45,68 45,63 C45,57 50,53 54,48 Z" />
+</vector>

@@ -2,7 +2,6 @@ package com.xavierxia.mycelium.ui
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import com.xavierxia.mycelium.localmodels.LocalModelsScreen
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.R
@@ -463,7 +463,7 @@ private fun UpdateText(result: UpdateResult?, context: Context) {
         is UpdateResult.Available -> {
             Text(stringResource(R.string.update_new_version, result.release.versionName))
             Row {
-                Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.release.apkDownloadUrl))) }) {
+                Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, result.release.apkDownloadUrl.toUri())) }) {
                     Text(stringResource(R.string.update_open_apk))
                 }
             }

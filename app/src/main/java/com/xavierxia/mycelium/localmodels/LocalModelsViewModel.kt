@@ -2,6 +2,7 @@ package com.xavierxia.mycelium.localmodels
 
 import android.app.Application
 import android.net.Uri
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xavierxia.mycelium.llm.*
@@ -62,7 +63,10 @@ class LocalModelsViewModel(application: Application) : AndroidViewModel(applicat
         val config = EngineOptions(threads.toIntOrNull() ?: 0, context.toIntOrNull() ?: 0)
         val started = android.os.SystemClock.elapsedRealtime()
         engine.load(record.info, config) { store.open(record) }
-        prefs.edit().putInt("threads", config.threads).putInt("context", config.contextLength).apply()
+        prefs.edit {
+            putInt("threads", config.threads)
+            putInt("context", config.contextLength)
+        }
         mutable.update { it.copy(notice = "已加载（${android.os.SystemClock.elapsedRealtime() - started} 毫秒）") }
     }
     fun remove(record: LocalModelRecord) = task {
