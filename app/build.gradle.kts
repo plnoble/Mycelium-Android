@@ -77,6 +77,13 @@ android {
         }
         release {
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "false")
+            // P2-2b 步骤 7：正式包只带 arm64-v8a 的原生库。
+            // 本地模型引擎（:llm）本来就只编 arm64-v8a；SQLCipher 的 armeabi-v7a / x86 / x86_64
+            // 库在正式包里是纯浪费（约 13.58 MiB），正式包只给真机装。
+            // 只加在 release：debug 与 androidTest 包保持全 ABI，模拟器还要用。
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
