@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -520,7 +521,7 @@ internal fun ChatTimeline(
     var followTail by remember(listState, character.id, conversationId) { mutableStateOf(true) }
     var userDragging by remember(listState, character.id, conversationId) { mutableStateOf(false) }
     // 用户松手过几次，用来区分「第一次组合」和「用户真的滚过」。
-    var dragSessions by remember(listState, character.id, conversationId) { mutableStateOf(0) }
+    var dragSessions by remember(listState, character.id, conversationId) { mutableIntStateOf(0) }
     // isScrollInProgress 连程序自己的滚动动画也算，所以「谁在滚」只看列表收到的拖拽手势。
     LaunchedEffect(listState) {
         listState.interactionSource.interactions.collect { interaction ->
