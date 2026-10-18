@@ -109,7 +109,7 @@ class CloudChatTest {
     }
 
     @Test
-    fun manyAnswersInARowAreNeverBlockedForBudgetReasons() {
+    fun manyAnswersInARowAreNeverBlocked() {
         scripted(200, completion("""{"statements":[{"text":"先转走定投金额","kind":"evidence","citation_ids":["C1"]}],"refusal_reason":null}""")).use { server ->
             repeat(3) {
                 val reply = runBlocking { chat(server).ask("记账", AnswerMode.ThoughtInference, emptyList()) }
