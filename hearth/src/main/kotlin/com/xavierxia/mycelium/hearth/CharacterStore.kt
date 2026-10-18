@@ -5,6 +5,7 @@ import java.util.UUID
 data class HearthCharacter(
     val id: String,
     val name: String,
+    val avatarChar: String,
     val personality: String,
     val speech: String,
     val background: String,
@@ -20,6 +21,7 @@ data class HearthCharacter(
 
 data class CharacterDraft(
     val name: String,
+    val avatarChar: String = "",
     val personality: String = "",
     val speech: String = "",
     val background: String = "",
@@ -104,15 +106,15 @@ class CharacterStore(private val connect: () -> HearthSession) {
         val values = listOf(
             name, draft.personality.trim(), draft.speech.trim(), draft.background.trim(),
             draft.relationship.trim(), draft.greeting.trim(), draft.modelId.trim(), draft.modelName.trim(),
-            draft.temperature.toString(), draft.maxTokens, draft.color, now,
+            draft.temperature.toString(), draft.maxTokens, draft.color, now, draft.avatarChar.trim().take(1),
         )
         if (insert) {
             session.exec(
                 """
                 INSERT INTO characters(
                     id, name, personality, speech, background, relationship, greeting,
-                    model_id, model_name, temperature, max_tokens, color, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_id, model_name, temperature, max_tokens, color, updated_at, avatar_char
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
                 listOf(id) + values,
             )
@@ -120,7 +122,8 @@ class CharacterStore(private val connect: () -> HearthSession) {
             session.exec(
                 """
                 UPDATE characters SET name = ?, personality = ?, speech = ?, background = ?, relationship = ?,
-                    greeting = ?, model_id = ?, model_name = ?, temperature = ?, max_tokens = ?, color = ?, updated_at = ?
+                    greeting = ?, model_id = ?, model_name = ?, temperature = ?, max_tokens = ?, color = ?,
+                    updated_at = ?, avatar_char = ?
                 WHERE id = ?
                 """.trimIndent(),
                 values + id,
@@ -131,13 +134,14 @@ class CharacterStore(private val connect: () -> HearthSession) {
     private companion object {
         const val COLUMNS =
             "id, name, personality, speech, background, relationship, greeting, " +
-                "model_id, model_name, temperature, max_tokens, color, updated_at"
+                "model_id, model_name, temperature, max_tokens, color, updated_at, avatar_char"
     }
 }
 
 internal fun character(row: List<Any?>) = HearthCharacter(
     id = row.stringAt(0),
     name = row.stringAt(1),
+    avatarChar = row.stringAt(13),
     personality = row.stringAt(2),
     speech = row.stringAt(3),
     background = row.stringAt(4),
@@ -151,8 +155,11 @@ internal fun character(row: List<Any?>) = HearthCharacter(
     updatedAt = row.stringAt(12),
 )
 
-internal fun draftOf(character: HearthCharacter) = CharacterDraft(
+/** The editable form of a stored character; used by the editor screen. */
+/** The editable form of a stored character; used by the editor screen. */
+fun draftOf(character: HearthCharacter) = CharacterDraft(
     name = character.name,
+    avatarChar = character.avatarChar,
     personality = character.personality,
     speech = character.speech,
     background = character.background,

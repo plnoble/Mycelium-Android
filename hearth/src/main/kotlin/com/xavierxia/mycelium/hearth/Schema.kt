@@ -16,7 +16,8 @@ internal fun HearthSession.ensureHearthTables() {
             temperature TEXT NOT NULL,
             max_tokens INTEGER NOT NULL,
             color INTEGER NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            avatar_char TEXT NOT NULL
         )
         """.trimIndent(),
     )

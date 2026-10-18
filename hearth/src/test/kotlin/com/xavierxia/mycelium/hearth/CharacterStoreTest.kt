@@ -13,19 +13,21 @@ class CharacterStoreTest {
 
     @Test
     fun createEditCopyAndDeleteKeepTheirOwnConversations() {
-        val first = store.create(CharacterDraft(name = "老周", personality = "话少"), "2026-10-17T10:00")
+        val first = store.create(CharacterDraft(name = "老周", personality = "话少", avatarChar = "周"), "2026-10-17T10:00")
         val second = store.create(CharacterDraft(name = "小满", speech = "先笑再说话"), "2026-10-17T11:00")
         log.append(first.id, null, "今天怎么样", "还行。", "本机 · 测试模型", "2026-10-17T12:00")
 
-        store.update(first.id, CharacterDraft(name = "老周", personality = "话更少"), "2026-10-17T13:00")
+        store.update(first.id, CharacterDraft(name = "老周", personality = "话更少", avatarChar = "周"), "2026-10-17T13:00")
         val edited = store.character(first.id)!!
         assertEquals("话更少", edited.personality)
+        assertEquals("周", edited.avatarChar)
         assertEquals(0.7f, edited.temperature)
         assertEquals(256, edited.maxTokens)
 
         val copied = store.copy(first.id, "2026-10-17T14:00")
         assertEquals("老周 的副本", copied.name)
         assertEquals("话更少", copied.personality)
+        assertEquals("周", copied.avatarChar)
         assertTrue(copied.id != first.id)
         assertEquals(emptyList(), log.conversations(copied.id))
         assertEquals(1, log.conversations(first.id).size)
