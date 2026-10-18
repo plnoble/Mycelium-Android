@@ -21,3 +21,14 @@
 
 - 没有。交统筹代审。
 - 只在本分支提交。不推送、不打标签、不发布、不合并 `main`。`:llm` 和 `:model-api` 不许有联网代码。手机上的原模型文件只读。
+
+## P2-2 炉边：创建自己的人物，用本地模型对话
+
+- 2026-10-18：开工。分支 `wp/P2-2-hearth-chat`（起点 `1143dc4`，含 P1-6a 改名与 P2-1）。五个提交：
+  - `6b4863c`：`:hearth` 模块——人物与对话仓储、提示拼装。数据库接口是模块自己的 `HearthSession`（不引 JDBC；测试用普通 sqlite，真机由宿主传 SQLCipher 会话）。架构测试另压两条：`sqlite-jdbc` 只能是测试依赖，`src/main` 里不许出现 `java.sql`。
+  - `d2f63c0`：llm/README 真机复验步骤改成实际用的 `adb install -r` 加 `am instrument`（P2-1 审核建议）。
+  - `fe7b70f`：对话窗口助手 `HearthChat`、消息上的模型标记、最近活跃时间。
+  - `c09f3e8`：人物头像字字段。
+  - `136e279`：炉边三页（人物列表、编辑、对话）接入炉边标签；SQLCipher 加密库（Keystore 包装口令，与圆桌库分开）；本地模型流式对话、停止保留已写出的部分、重新生成；真机加密测例 `DeviceHearthTest`（按字节比较，防空转）。
+- 电脑上（hearth worktree，离线）：`:hearth:test` 13 个、`:app:testDebugUnitTest` 27 个、`:contract:test` 14 个、`:llm:testDebugUnitTest` 11 个、`:model-api:test` 3 个，0 失败；lint 0 error；调试包和真机测试包都编出。`MainActivityTest` 的炉边占位断言已换成新页面；Robolectric 下加密库加载失败会显示提示而不是崩溃。
+- 未做：真机走查（手机已从电脑断开）。走查项：新建虚构人物「老周」、Qwen3.5-4B 聊 3 轮、生成中停止一次、重新生成一次、杀掉重开、飞行模式重复；另按 P2-1 审核建议用约 1500 token 的提示测 3 次并记录读提示与生成速度。手机上的调试包没有本地模型登记（P1-7 走查收尾清过数据），走查前要重新导入 Qwen3.5-4B。
