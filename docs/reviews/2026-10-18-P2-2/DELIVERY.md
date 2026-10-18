@@ -149,7 +149,23 @@
 现在只咽「来自 `com.xavierxia.mycelium.net.LocalHttp` 栈帧且非主线程的 `IOException`」，其余异常照旧交给系统处理器。
 另外该测试不断言「已停止，还没有回答」的文案（取消分支与干净返回分支是竞态、文案会不同），只断实质。
 
-### 4.3 1500 token 测速（第一轮，设备测例）
+### 4.4 整改后的设备测试（2026-10-18 22:35 复跑，逐类单跑）
+
+全量审 9 条整改之后，设备上共 4 个类 9 例。**必须逐类分开跑**：被中止的连接会让进程内假服务在
+`LocalHttp.serve` 抛 `SocketException: Broken pipe`，非主线程未捕获会杀掉进程——这是既有脚手架问题
+（一次跑多类时在第 3 例崩过），不是产品缺陷；分开跑等于每类一个全新进程。
+
+| 测试类 | 覆盖 | 结果 |
+|---|---|---|
+| `HearthCloudStopDeviceTest` | 云端停止后晚到的回答不上屏、不入库，审计仍留这次请求 | `OK (1 test)` 8.235 s |
+| `HearthCloudReconfirmDeviceTest` | 改地址后发送先弹确认框、期间 0 请求，取消后仍 0 请求且确认状态不被改写 | `OK (1 test)` 3.478 s |
+| `HearthNavigationDuringTurnDeviceTest`（本包新增） | 生成中换会话 / 切测试模式：旧任务停下、`busy` 清掉、页面还能继续发；晚到回答不上屏不入库 | `OK (2 tests)` 3.386 s |
+| `HearthTimelineFollowDeviceTest`（本包新增） | 长回答内部上翻、跨消息上翻、手动回到底部、换对话、底部时自动跟随 | `OK (5 tests)` 5.84 s |
+
+新加的两个类**直接驱动 `HearthViewModel` / `ChatTimeline`**，不点屏幕（不受输入法影响）；假服务是进程内的
+`LocalHttp`，只监听 `127.0.0.1`、密钥是假值。
+
+### 4.5 1500 token 测速（第一轮，设备测例）
 
 30 条消息、估算 1576 token；Qwen3.5-4B-Q4_K_M 只读打开；线程 6、上下文 8192：
 
