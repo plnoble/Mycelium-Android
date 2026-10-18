@@ -128,6 +128,12 @@ lastUpdateTime `2026-10-10 05:23:04` / firstInstallTime `2026-10-10 05:14:52`。
 
 我的复核：在手机上重跑两条 → `OK (2 tests)`（11.797 s）。子代理侧另有三次重复（8.1–8.2 s / 3.5 s 各三次）与两条一次跑 `OK (2 tests)`。
 
+**这两条测试只在真机上跑，不在门禁里**：`check-all.ps1` / `check-all.sh` 按任务契约只编译 androidTest
+（`assembleDebugAndroidTest`）并跑 JVM 单测与 lint，不跑 instrumented 测试（CI runner 上没有设备/模拟器）。
+运行方式记在这里，方便以后复验：
+`adb install -r app/build/outputs/apk/debug/app-debug.apk` 与 `…/androidTest/debug/app-debug-androidTest.apk`，
+然后 `adb shell "am instrument -w -e class com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest,com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner"`。
+
 **构建改动（如实记）**：`app/build.gradle.kts` 的 `androidTestImplementation` 加了三行——`composeBom`、
 `androidx.compose.ui:ui-test-junit4`（这两行经用户同意）、`androidx.test.espresso:espresso-idling-resource:3.7.0`
 （`ui-test-junit4` 的传递依赖，本机离线缓存只有 3.7.0，不显式写会解析不到）。三行都是**已缓存制品**，
