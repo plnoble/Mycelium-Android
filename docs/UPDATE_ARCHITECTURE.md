@@ -88,4 +88,4 @@
 
 - GitHub Release 的正文就是仓库里的中文文件 `docs/releases/v<版本>.md`——也正是 App 更新卡片里显示的「更新说明」，两边同一份，不重复写。
 - 签名证书的 SHA-256 固定在 `docs/releases/signing-cert-sha256.txt`；CI 在签名之后比对，不一致不发。
-- `scripts/release-guard.sh` 的四项闸门（标签与 versionName、发布说明、versionCode 增长、签名指纹）和完整发版顺序见 `docs/RELEASING.md`。
+- `scripts/release-guard.sh` 的四项闸门（标签与 versionName、发布说明、versionCode 增长、签名指纹）和完整发版顺序见 `docs/RELEASING.md`。versionCode 增长这一项跟**本仓所有正式版本标签里最高的那个**比，取不到前序版本时**中止**，不跳过。

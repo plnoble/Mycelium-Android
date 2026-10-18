@@ -351,7 +351,7 @@
 - 四项检查，任一不过就 `exit 1` 并打印中文原因：
   1. **tag 与 versionName 一致**（把现在 YAML 里那段搬进来）；
   2. **发布说明存在**：`docs/releases/<tag>.md` 必须是普通文件且非空，否则「发布说明缺失，发布中止」；
-  3. **versionCode 严格大于上一个标签**：`prev=$(git tag --list 'v*' --merged HEAD^ --sort=-v:refname | head -1)`；没有上一个标签（首个发布）就跳过；`git show "$prev:app/build.gradle.kts"` 取旧 `versionCode`；
+  3. **versionCode 严格大于已发布的最高值**：`git tag --list 'v[0-9]*'` 排除本次发布的标签后逐个 `git show "<tag>:app/build.gradle.kts"` 读 `versionCode`，取其中最大值——**不看 `HEAD^` 祖先集合**（浅克隆、前序标签只在别的分支、标签被删都会让它为空，而发布确实发生过）；找不到任何前序标签、或前序标签的版本号都读不出来 → **中止，不跳过**（本仓已有正式标签，不适用「首个发布」例外）；只有已知基线标签 `v0.1.1` 在仓里但读不出文件时用内置 `versionCode=2` 兜底并打警告；
   4. **签名指纹**：`apksigner verify --print-certs "$apk"` 取 `Signer #1 certificate SHA-256 digest`，与期望值比对，不一致 →「签名指纹不一致，发布中止」。
      - 找 apksigner：`$ANDROID_HOME/build-tools/*/apksigner`（Linux/CI）→ 找不到再用 `apksigner.bat`（本机 Git Bash 实测只有这个）→ 都没有就报「找不到 apksigner」，**不要静默跳过**。
 - 期望指纹文件 `docs/releases/signing-cert-sha256.txt`（新建，内容为公开信息）：
@@ -380,6 +380,7 @@
 2. **签名指纹 中止**：不覆盖期望文件（用仓库里那份真实指纹）跑同一个 APK → 期望 exit 1 +「签名指纹不一致」。
 3. **versionCode 通过**：`--previous-tag v0.1.1 --version-code 4` → exit 0（4 > 2）。
 4. **versionCode 中止**：`--previous-tag v0.1.1 --version-code 2` → exit 1 +「versionCode 没有增长」。
+4b. **没有前序标签 中止**（方案审必须修改项 7）：在浅克隆里跑（`git clone --depth 1 --no-tags`，仓库里标签数为 0）→ exit 1 +「找不到任何前序版本标签」；同一场景跑修复前那份脚本作对照 → 只 warn「跳过 versionCode 增长检查」后 exit 0，这正是要修掉的静默放行。
 5. **缺发布说明 中止**：`--release-notes docs/releases/v9.9.9.md` → exit 1 +「发布说明缺失」。
 6. **缺发布说明 通过**：`--release-notes docs/releases/v0.4.0.md`（步骤 8 写完后再跑）→ exit 0。
 7. `bash -n scripts/release-guard.sh` 语法检查；再加一条「`grep -c $'\r'` = 0」（不能有 CRLF，否则 Linux 上会炸）。
@@ -389,7 +390,7 @@ CI：本轮**不能**验证（不推送、不发版）；只保证 YAML 语法�
 
 - **指纹固定会拦住合法换签名**：这是目的（防「签名不对的包发出去」），代价是以后真要换签名必须同步改这个文件并让所有用户重装。写进 `docs/RELEASING.md`。
 - **`--expected-cert-file` 覆盖开关**：为了本地能演示「通过」。用 `CI=true` 时禁用作为闸门；请在方案审时确认这个闸门够不够（还有别的绕过路径吗）。
-- **`git tag --merged HEAD^`**：依赖 `fetch-depth: 0`；浅克隆会静默取不到上一个标签 → 所以 `fetch-depth: 0` 和一条「取不到上一个标签时打印警告」的日志都要有。
+- **前序版本取不到时不能静默放行**（方案审必须修改项 7）：`git tag --merged HEAD^` 在浅克隆、标签缺失、前序标签不在祖先集合里时都会给出空集，旧写法只 warn 一句就跳过检查，最后仍报「全部检查通过」。现在改成「与本仓所有正式标签里最高的 `versionCode` 比，取不到就中止」。`fetch-depth: 0` 与 `git fetch --tags --force` 照旧保留——它们是让闸门能拿到标签的手段，不是可以跳过检查的理由。
 - 试跑模式不建 Release（任务书要求），意味着它**不能**验证「附件齐全」；附件齐全要等真正打标签那次。
 
 ---

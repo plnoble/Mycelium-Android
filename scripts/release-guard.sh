@@ -6,7 +6,9 @@
 #
 #   1. the release tag matches versionName in app/build.gradle.kts;
 #   2. docs/releases/<tag>.md exists and is not empty (the Chinese release notes);
-#   3. versionCode is strictly greater than the previous release tag's versionCode;
+#   3. versionCode is strictly greater than the highest versionCode already published by any formal
+#      release tag in this repository (the current tag excluded). There is no "first release"
+#      exception: when no previous tag can be resolved, the gate aborts instead of skipping;
 #   4. the APK's signing certificate SHA-256 fingerprint equals the pinned value in
 #      docs/releases/signing-cert-sha256.txt.
 #
@@ -22,7 +24,7 @@
 #   --apk <path>                 required: the signed release APK
 #   --release-notes <path>       default: docs/releases/<tag>.md
 #   --expected-cert-file <path>  default: docs/releases/signing-cert-sha256.txt
-#   --previous-tag <tag>         default: newest v* tag reachable from HEAD^
+#   --previous-tag <tag>         default: the v* tag with the highest versionCode in this repo
 #   --version-code <n>           default: versionCode read from app/build.gradle.kts
 #   --apksigner <path>           default: autodetected (Android SDK build-tools, then PATH)
 #   -h, --help                   print this header
@@ -44,6 +46,10 @@ PREV_TAG=""
 VERSION_CODE=""
 APKSIGNER=""
 OVERRIDES=""
+PREV_CODE=""
+PREV_TAG_FOUND=""
+UNREADABLE_TAGS=""
+CANDIDATE_TAGS=""
 
 info() { printf '[release-guard] %s\n' "$*"; }
 pass() { printf '[release-guard] 通过：%s\n' "$*"; }
@@ -175,7 +181,7 @@ pass "发布说明存在且非空：$NOTES（$(wc -c < "$NOTES" | tr -d '[:space
 
 # ---------------------------------------------------------------- check 3: versionCode growth
 
-info "检查 3/4：versionCode 比上一个标签大"
+info "检查 3/4：versionCode 比已发布的最高版本大"
 if [ -z "$VERSION_CODE" ]; then
   VERSION_CODE="$(read_version_code "$GRADLE_FILE")"
 fi
@@ -186,24 +192,75 @@ case "$VERSION_CODE" in
   *[!0-9]*) abort "versionCode 不是数字：$VERSION_CODE" ;;
 esac
 
-if [ -z "$PREV_TAG" ]; then
-  if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
-    warn "当前是浅克隆，可能取不到上一个版本标签（CI 需要 checkout 的 fetch-depth: 0）"
+# The published upper bound must not depend on "reachable from HEAD^": on a shallow clone, when the
+# previous tag exists only on another branch, or after a tag was deleted, that ancestry set is empty
+# while releases did happen -- and a regressed versionCode would slip through. So compare every
+# formal release tag in this repository (the tag being released excluded) and take the highest code.
+BASELINE_TAG="v0.1.1"
+BASELINE_VERSION_CODE=2
+
+version_code_of_tag() {
+  local code
+  code="$(git show "$1:$GRADLE_FILE" 2>/dev/null | read_version_code -)"
+  case "$code" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$code"
+}
+
+# Fold one formal release tag into the "highest published versionCode" comparison. When its code
+# cannot be read, the known baseline tag falls back to the pinned code below while every other tag
+# is collected into the unreadable list and reported (the gate aborts afterwards).
+consider_tag() {
+  local tag="$1" code
+  if code="$(version_code_of_tag "$tag")"; then
+    :
+  elif [ "$tag" = "$BASELINE_TAG" ]; then
+    code="$BASELINE_VERSION_CODE"
+    warn "读不到 $tag 里的 $GRADLE_FILE，改用内置基线 versionCode=$BASELINE_VERSION_CODE（$tag 是已知的正式发布）"
+  else
+    UNREADABLE_TAGS="$UNREADABLE_TAGS $tag"
+    return 0
   fi
-  PREV_TAG="$(git tag --list 'v*' --merged HEAD^ --sort=-v:refname 2>/dev/null | head -1)"
-fi
-if [ -z "$PREV_TAG" ]; then
-  warn "没有找到上一个版本标签，跳过 versionCode 增长检查（首个发布？）"
-else
-  PREV_CODE="$(git show "$PREV_TAG:$GRADLE_FILE" 2>/dev/null | read_version_code -)"
+  if [ -z "$PREV_CODE" ] || [ "$code" -gt "$PREV_CODE" ]; then
+    PREV_CODE="$code"
+    PREV_TAG_FOUND="$tag"
+  fi
+}
+
+if [ -n "$PREV_TAG" ]; then
+  # --previous-tag is an explicit local-demo override (CI rejects the override switches), so the
+  # comparison follows it directly.
+  if [ "$PREV_TAG" = "$TAG" ]; then
+    abort "--previous-tag 与本次发布标签相同（$TAG）：版本增长要跟别的已发布版本比"
+  fi
+  consider_tag "$PREV_TAG"
   if [ -z "$PREV_CODE" ]; then
     abort "读不到 $PREV_TAG 的 versionCode，无法确认版本号增长（历史不完整？）"
   fi
-  if [ "$VERSION_CODE" -le "$PREV_CODE" ]; then
-    abort "versionCode 没有增长：本版 $VERSION_CODE 不大于 $PREV_TAG 的 $PREV_CODE"
-  fi
-  pass "versionCode $VERSION_CODE 大于 $PREV_TAG 的 $PREV_CODE"
+else
+  CANDIDATE_TAGS="$(git tag --list 'v[0-9]*' 2>/dev/null | grep -vxF -- "$TAG" || true)"
+  for candidate in $CANDIDATE_TAGS; do
+    consider_tag "$candidate"
+  done
 fi
+
+if [ -z "$PREV_CODE" ]; then
+  if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+    warn "当前是浅克隆：CI 需要 actions/checkout 的 fetch-depth: 0，并且 git fetch --tags --force"
+  fi
+  if [ -z "${CANDIDATE_TAGS:-}" ]; then
+    abort "找不到任何前序版本标签，无法确认 versionCode 增长；本仓已知基线 $BASELINE_TAG 的 versionCode=$BASELINE_VERSION_CODE，本仓不适用「首个发布」例外，因此不跳过检查（补标签历史，或本地用 --previous-tag 指定）"
+  fi
+  abort "前序标签的 versionCode 都读不到（${UNREADABLE_TAGS# }），无法确认版本号增长（历史不完整？）"
+fi
+if [ "$PREV_TAG_FOUND" = "$TAG" ]; then
+  abort "前序版本只能取到本次发布的标签本身（$TAG）：拿不到已发布的上界"
+fi
+if [ "$VERSION_CODE" -le "$PREV_CODE" ]; then
+  abort "versionCode 没有增长：本版 $VERSION_CODE 不大于 $PREV_TAG_FOUND 的 $PREV_CODE"
+fi
+pass "versionCode $VERSION_CODE 大于已发布最高 $PREV_TAG_FOUND 的 $PREV_CODE"
 
 # ---------------------------------------------------------------- check 4: signing fingerprint
 

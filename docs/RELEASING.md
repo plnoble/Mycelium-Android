@@ -75,7 +75,7 @@
 
 1. **标签与 versionName 一致**；
 2. **发布说明存在**：`docs/releases/<标签>.md` 是普通文件且非空；
-3. **versionCode 严格大于上一个版本标签里的值**（依赖完整历史，所以 CI 的 `actions/checkout` 必须 `fetch-depth: 0`，工作流里还会 `git fetch --tags --force`）；
+3. **versionCode 严格大于已发布的最高值**：闸门把本仓里所有正式版本标签（本次发布的标签除外）都比一遍，取其中最大的 `versionCode`——不只看 `HEAD^` 能不能走到，所以浅克隆、前序标签只在别的分支、标签被删的情况都不会被当成「没有前序版本」而放行。**找不到任何前序标签、或前序标签的 `versionCode` 读不出来时，闸门直接中止，没有「首个发布」例外。** 依赖完整历史与标签，所以 CI 的 `actions/checkout` 必须 `fetch-depth: 0`，工作流里还会 `git fetch --tags --force`；本地已知基线是 `v0.1.1`（`versionCode=2`），仅在基线标签存在但读不出文件时作为兜底，绝不用来跳过检查；
 4. **签名证书 SHA-256 指纹一致**：用 `apksigner verify --print-certs` 读出的指纹与固定值比对，签名者数量不是 1 也中止。
 
 CI 里的用法（不带任何覆盖参数）：
@@ -96,6 +96,7 @@ bash scripts/release-guard.sh --tag "$RELEASE_TAG" --apk "mycelium-$RELEASE_TAG.
 ## 出错时怎么办
 
 - **闸门中止**：照中文原因改——版本号没涨就改 `versionCode`；发布说明缺失就补 `docs/releases/v<版本>.md`；签名指纹不一致就查 CI 里的 keystore secrets 是不是正式签名那份。
+- **闸门说「找不到任何前序版本标签」**：说明这次 checkout 里没有标签历史（浅克隆最常见）。先按上面的 `fetch-depth: 0` + `git fetch --tags --force` 补全，再重跑闸门；**不要去改闸门来跳过这项检查**，也不要手工传 `--previous-tag` 顶过去（CI 里本就会被拒）。
 - **标签已推、发布不对**：不要删标签重推（会造成混乱）。先定位并修好问题，发一个补丁版本（0.4.1）。
 - **CI 里编不出带 llama.cpp 的包**：先看「Prepare pinned llama.cpp source」与 NDK 安装两步的日志；本地离线构建能过不代表联网 runner 能过。
 - **0.1.1 上的用户收不到更新提示**：0.1.1 的「检查更新」只会用浏览器打开发布页，这是预期行为，不是故障。
