@@ -229,7 +229,9 @@ $stderrPath = Join-Path $logDir "gradle-stderr.log"
 $combinedPath = Join-Path $logDir "gradle.log"
 $summaryPath = Join-Path $logDir "summary.md"
 
-$arguments = @("/c", "gradlew.bat", "--console=plain", "--warning-mode", "all")
+# ".\" is required: with NoDefaultCurrentDirectoryInExePath set (hardened shells, some sandboxes and
+# CI images) cmd.exe does not look in the working directory for a bare "gradlew.bat".
+$arguments = @("/c", ".\gradlew.bat", "--console=plain", "--warning-mode", "all")
 if (!$AllowNetwork) { $arguments += "--offline" }
 $arguments += $Tasks
 
