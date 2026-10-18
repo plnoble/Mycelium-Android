@@ -101,7 +101,8 @@
 设备：红魔 NX809J（Android 16，SDK 36，1216×2688）。只装 `com.xavierxia.mycelium.debug`；
 正式版 `com.xavierxia.mycelium` 两次走查前后一致：0.1.1 / versionCode 2 /
 lastUpdateTime `2026-10-10 05:23:04` / firstInstallTime `2026-10-10 05:14:52`。
-截图在 Windows 仓库 `.omx/development/reviews/2026-10-18-android-P2-2/`（状态栏已裁；只在知衍（调试）前台截）。
+截图在 Windows 仓库 `.omx/development/reviews/2026-10-18-android-P2-2/`（状态栏已裁；只在知衍（调试）前台截），
+本轮的门禁日志也归档在同一目录：`p2-2-gate-summary-freshworktree.md`、`p2-2-gate-checkall-ps1.txt`、`p2-2-gate-checkall-sh.txt`。
 
 ### 4.1 第一轮（改动前的提交，`01`–`14`）
 
