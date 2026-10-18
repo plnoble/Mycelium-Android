@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xavierxia.mycelium.model.ChatRole
+import kotlinx.coroutines.flow.first
 
 private val presetColors = listOf(0xFF7EB6A4, 0xFF8D4A2B, 0xFF5B7DB1, 0xFFB18BC4, 0xFFC9A227, 0xFF6FA36F).map { it.toInt() }
 
@@ -353,8 +356,6 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
     val setText: (String) -> Unit = { value -> if (inTest) testText = value else immersiveText = value }
     var historyOpen by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<HearthConversation?>(null) }
-    val listState = rememberLazyListState()
-    var followTail by remember { mutableStateOf(true) }
     // Leaving test mode takes its draft with it.
     LaunchedEffect(state.mode) { if (state.mode != HearthMode.TEST) testText = "" }
     // A turn that produced nothing puts its question back here, so stopping early loses nothing.
@@ -362,19 +363,6 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
         val pending = state.pendingQuestion ?: return@LaunchedEffect
         setText(pending)
         vm.consumePendingQuestion()
-    }
-    // Follow the newest message while the user is at the bottom; leave them alone once they scroll up.
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
-            .collect { (scrolling, _) -> if (scrolling) followTail = false }
-    }
-    LaunchedEffect(listState, state.messages.size, state.streaming) {
-        val newest = state.messages.size + if (state.streaming != null) 1 else 0
-        if (newest == 0) return@LaunchedEffect
-        val info = listState.layoutInfo
-        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-        if (lastVisible >= info.totalItemsCount - 1) followTail = true
-        if (followTail) listState.animateScrollToItem(newest)
     }
     BackHandler(onBack = vm::closeCharacter)
     Column(Modifier.fillMaxSize().padding(padding)) {
@@ -426,18 +414,15 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             }
         }
         HorizontalDivider()
-        LazyColumn(
-            Modifier.weight(1f).fillMaxWidth(),
-            state = listState,
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (state.messages.isEmpty() && state.streaming == null) {
-                item { Text(character.greeting.ifBlank { "说点什么吧。" }) }
-            }
-            items(state.messages) { message -> MessageRow(message, character) }
-            state.streaming?.let { partial -> item { StreamingRow(partial, state.streamLabel) } }
-        }
+        ChatTimeline(
+            messages = state.messages,
+            streaming = state.streaming,
+            streamLabel = state.streamLabel,
+            greeting = character.greeting,
+            character = character,
+            conversationId = state.openConversation,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
         if (!state.busy && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = vm::regenerate) { Text("重新生成") }
@@ -494,6 +479,89 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } },
         )
+    }
+}
+
+/**
+ * 视口是不是真的到了内容底部（P2-2 审稿第 8 条）。不能用「最后可见的是不是末项」代替：最后一条
+ * 回答超过一屏时，最后可见项一直是它，用户却可能停在它的中间或开头。
+ */
+internal fun LazyListState.isAtContentBottom(): Boolean {
+    val info = layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull() ?: return true
+    // 末项下面还有别的内容，那一定不在底部。
+    if (last.index < info.totalItemsCount - 1) return false
+    // 一点都滚不动了（内容比一屏短时也算），就是到了底部。
+    if (!canScrollForward) return true
+    // 内容底边已经进到视口里才算到底，容差留一项高度、最多不超过视口的十六分之一：
+    // 最后一条回答比一屏还长时，拿整条的高度当容差会把「停在它中间」也判成到底。
+    val viewport = info.viewportEndOffset - info.viewportStartOffset
+    val tolerance = minOf(last.size, viewport / 16)
+    val contentBottom = last.offset + last.size
+    return contentBottom <= info.viewportEndOffset - info.afterContentPadding + tolerance
+}
+
+/**
+ * 对话列表。内容变长（流式输出）时跟着最新一条走，但用户主动回看以后就不再抢滚动：用户上翻的
+ * 状态一直粘着，只有用户自己回到底部才恢复跟随，流式追加新内容不会把它改回去。
+ */
+@Composable
+internal fun ChatTimeline(
+    messages: List<HearthMessage>,
+    streaming: String?,
+    streamLabel: String?,
+    greeting: String,
+    character: HearthCharacter,
+    conversationId: String?,
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+) {
+    // 换人物或换一段对话就是重新开始：跟不跟随跟着这段对话走，上一段的上翻不带过来。
+    var followTail by remember(listState, character.id, conversationId) { mutableStateOf(true) }
+    var userDragging by remember(listState, character.id, conversationId) { mutableStateOf(false) }
+    // 用户松手过几次，用来区分「第一次组合」和「用户真的滚过」。
+    var dragSessions by remember(listState, character.id, conversationId) { mutableStateOf(0) }
+    // isScrollInProgress 连程序自己的滚动动画也算，所以「谁在滚」只看列表收到的拖拽手势。
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> {
+                    userDragging = true
+                    // 手指一按住就停止跟随：流式更新不能在手指底下抢滚动。
+                    followTail = false
+                }
+                is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                    userDragging = false
+                    dragSessions++
+                }
+                else -> Unit
+            }
+        }
+    }
+    // 松手后还有惯性滚动，等它停下来再按真实视口判断用户停在哪：只有还在底部才恢复跟随。
+    // 这里也是 followTail 唯一会变回 true 的地方，所以流式更新改不了用户上翻的决定。
+    LaunchedEffect(listState, dragSessions, character.id, conversationId) {
+        if (dragSessions == 0) return@LaunchedEffect
+        snapshotFlow { listState.isScrollInProgress }.first { !it }
+        if (userDragging) return@LaunchedEffect
+        followTail = listState.isAtContentBottom()
+    }
+    // 内容变长时只有想跟随才滚；用户回看期间一个滚动都不发。
+    LaunchedEffect(listState, character.id, conversationId, messages.size, streaming) {
+        if (!followTail) return@LaunchedEffect
+        val newest = messages.size + if (streaming != null) 1 else 0
+        if (newest == 0) return@LaunchedEffect
+        listState.animateScrollToItem(newest)
+    }
+    LazyColumn(
+        modifier = modifier,
+        state = listState,
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (messages.isEmpty() && streaming == null) item { Text(greeting.ifBlank { "说点什么吧。" }) }
+        items(messages) { message -> MessageRow(message, character) }
+        streaming?.let { partial -> item { StreamingRow(partial, streamLabel) } }
     }
 }
 

@@ -53,7 +53,8 @@ class HearthChat(private val log: ConversationLog) {
 
     /**
      * Stores one finished turn. Test mode writes nothing and returns null, so nothing about it can
-     * be found later.
+     * be found later. [valid] is asked inside the write transaction; a turn that was abandoned while
+     * the write waited is dropped whole and also returns null.
      */
     fun finish(
         character: HearthCharacter,
@@ -63,17 +64,30 @@ class HearthChat(private val log: ConversationLog) {
         label: String?,
         now: String,
         mode: HearthMode,
+        valid: () -> Boolean = { true },
     ): String? = when (mode) {
         HearthMode.TEST -> null
-        HearthMode.IMMERSIVE -> log.append(character.id, conversationId, question, answer, label, now)
+        HearthMode.IMMERSIVE -> try {
+            log.append(character.id, conversationId, question, answer, label, now, valid)
+        } catch (_: AbandonedTurn) {
+            null
+        }
     }
 
     /** Replaces the last answer. Test mode writes nothing and returns false. */
-    fun redo(conversationId: String, answer: String, label: String?, now: String, mode: HearthMode): Boolean = when (mode) {
+    fun redo(
+        conversationId: String,
+        answer: String,
+        label: String?,
+        now: String,
+        mode: HearthMode,
+        valid: () -> Boolean = { true },
+    ): Boolean = when (mode) {
         HearthMode.TEST -> false
-        HearthMode.IMMERSIVE -> {
-            log.replaceLastAnswer(conversationId, answer, label, now)
-            true
+        HearthMode.IMMERSIVE -> try {
+            log.replaceLastAnswer(conversationId, answer, label, now, valid)
+        } catch (_: AbandonedTurn) {
+            false
         }
     }
 

@@ -2,6 +2,7 @@ package com.xavierxia.mycelium.net
 
 import java.net.HttpURLConnection
 import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Why a request leaves the phone. The audit log stores this, never the credentials.
@@ -35,10 +36,19 @@ data class GatewayRequest(
      */
     val omitAuditBody: Boolean = false,
     /**
-     * Hands the caller an abort handle for the request that just went out, so a long call can be
-     * stopped from outside. The gateway still closes the connection either way.
+     * This request's cancel switch. It exists before the socket does, which is the whole point:
+     * `disconnect()` on a connection that never connected returns without doing anything, so it
+     * cannot be the cancel marker. Whoever may need to stop the request holds this and calls
+     * [GatewayCall.cancel] whenever the stop arrives — before the body is written, while it is being
+     * written, or while the answer is being read.
      */
-    val onOpen: ((GatewayAbort) -> Unit)? = null,
+    val call: GatewayCall = GatewayCall(),
+    /**
+     * Hands the same [call] to the caller once the connection exists, for callers that only learn
+     * about the request at that point. A stop that arrived before this call is not lost: the gateway
+     * asks [GatewayCall.isCancelled] at every point where it could still send something.
+     */
+    val onOpen: ((GatewayCall) -> Unit)? = null,
 )
 
 data class GatewayResponse(
@@ -50,13 +60,58 @@ data class GatewayResponse(
 class GatewayRejected(message: String) : Exception(message)
 
 /**
- * Lets a caller abort a request that is already on the wire. The gateway is still the only place
- * that touches HTTP types; the caller only gets this handle, and calling it makes the blocking read
- * return at once.
+ * Thrown by a cancel checkpoint instead of sending anything else, and reported for a request whose
+ * bytes were already on the wire when the stop arrived — there the closed socket's own failure is
+ * translated into this one, so a stopped request always ends with the same clear exception. The
+ * audit log records it as a failed request, exactly as it records a stopped request in flight.
  */
-fun interface GatewayAbort {
-    fun abort()
+class GatewayCancelled(message: String) : Exception(message)
+
+/**
+ * One request's cancel switch, and the only thing here that remembers a stop.
+ *
+ * `HttpURLConnection.disconnect()` is not a cancellation marker: on a connection that has not been
+ * established it can return immediately and the writing would go on. This object pairs that
+ * disconnect with a flag that never goes back, so:
+ *
+ *  * a stop that lands before the socket is opened means no connection is opened at all;
+ *  * a stop that lands while the socket is being opened is seen by [attach] and by the gateway's
+ *    checkpoints, so not one request byte goes out;
+ *  * a stop that lands while the blocking read is waiting closes the connection at once, which is
+ *    the only thing that ends that read.
+ *
+ * [cancel] and [attach] each write their own field and then read the other's, and both fields are
+ * volatile, so whichever of the two runs second observes the other one.
+ */
+class GatewayCall {
+    private val cancelled = AtomicBoolean(false)
+
+    @Volatile
+    private var connection: HttpURLConnection? = null
+
+    /** True from the first [cancel] on: a stop is never forgotten, whatever the connection does. */
+    val isCancelled: Boolean get() = cancelled.get()
+
+    /** Marks this request cancelled and closes the connection when one is already in use. */
+    fun cancel() {
+        cancelled.set(true)
+        connection?.let { open -> runCatching { open.disconnect() } }
+    }
+
+    /** Remembers the connection for a later [cancel]; a stop that already happened closes it now. */
+    internal fun attach(open: HttpURLConnection) {
+        connection = open
+        if (cancelled.get()) runCatching { open.disconnect() }
+    }
+
+    /** The gateway's checkpoint: a cancelled request throws instead of sending the next byte. */
+    internal fun check() {
+        if (cancelled.get()) throw GatewayCancelled("请求已被取消")
+    }
 }
+
+/** Source-compatible name for the old abort handle; the gateway now hands out the whole call. */
+typealias GatewayAbort = GatewayCall
 
 /**
  * The only place HTTP leaves the app. Callers hand over the body they are willing to have stored;
@@ -115,22 +170,39 @@ class OutboundGateway(
     }
 
     private fun exchange(target: URI, request: GatewayRequest): GatewayResponse {
+        val call = request.call
+        // A stop that landed before this point, even before the request started: nothing is opened.
+        call.check()
         val connection = open(target)
-        request.onOpen?.invoke(GatewayAbort { connection.disconnect() })
+        call.attach(connection)
+        request.onOpen?.invoke(call)
         return try {
             connection.requestMethod = request.method
             connection.connectTimeout = request.connectTimeoutMs
             connection.readTimeout = request.readTimeoutMs
             connection.instanceFollowRedirects = false
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+            // A stop that landed while the socket was being opened, or while the switch was being
+            // handed over: no request byte has gone out yet, and none may.
+            call.check()
             if (request.body != null) {
                 connection.doOutput = true
+                // The checkpoint sits after `doOutput` and before the stream itself, so a cancelled
+                // request never opens an output stream to write its body into.
+                call.check()
                 connection.outputStream.use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
+                // The body is on the wire; a stop must still catch whatever comes back.
+                call.check()
             }
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             GatewayResponse(status, body, request.body?.codePointCount() ?: 0)
+        } catch (failure: Exception) {
+            // The disconnect that cut off a blocking read shows up as the socket's own failure; the
+            // caller still gets the one clear cancellation exception for a request it stopped.
+            if (call.isCancelled) throw GatewayCancelled("请求已被取消")
+            throw failure
         } finally {
             connection.disconnect()
         }

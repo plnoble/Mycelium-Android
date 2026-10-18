@@ -42,6 +42,12 @@ class CloudSettingsStore(context: Context, secrets: SecretBox) {
 
     fun apiKey(serviceId: String): String? = store.apiKey(serviceId)
 
+    /** 一次读取里的这一个服务（不含密钥）：发送前的确认判定用它。 */
+    fun service(serviceId: String): CloudService? = store.service(serviceId)
+
+    /** 一次读取里的地址、名称与密钥：发请求与地址校验必须用同一份快照。 */
+    fun endpoint(serviceId: String): CloudEndpoint? = store.endpoint(serviceId)
+
     fun keyHint(serviceId: String): String? = store.keyHint(serviceId)
 
     fun models(serviceId: String): List<String> = store.models(serviceId)

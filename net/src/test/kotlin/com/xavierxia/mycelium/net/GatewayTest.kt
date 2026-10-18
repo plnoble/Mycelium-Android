@@ -9,6 +9,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.net.URI
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 class GatewayTest {
     @TempDir
@@ -201,6 +205,112 @@ class GatewayTest {
         val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
         assertEquals(GatewayPurpose.HearthChat, entry.purpose)
         assertTrue(entry.sentBody.contains("今天很累"))
+    }
+
+    @Test
+    fun aCancelledRequestNeverOpensAConnection() {
+        // The switch outlives the connection: cancelling before the gateway is even called must stop
+        // the request there, not after a socket that would have gone out anyway.
+        val call = GatewayCall()
+        var opened = false
+        val gateway = OutboundGateway(
+            hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
+            audit = AuditLog(File(directory, "privacy/audit.json")),
+            clock = { "2026-10-18T00:00:00Z" },
+            open = { opened = true; throw IllegalStateException("取消的请求不该打开连接") },
+        )
+        call.cancel()
+        val failure = assertThrows(GatewayCancelled::class.java) {
+            gateway.send(
+                GatewayRequest(
+                    url = "https://api.deepseek.com/chat/completions",
+                    purpose = GatewayPurpose.RoundtableChat,
+                    method = "POST",
+                    body = "这句不该发出去",
+                    call = call,
+                ),
+            )
+        }
+        assertTrue(failure.message!!.contains("取消"), failure.message!!)
+        assertFalse(opened, "取消的请求打开了连接")
+        // The audit follows its existing rules: the request was attempted, so it is recorded as a
+        // failure with its purpose, its size and the body the caller was willing to have stored.
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertEquals(GatewayPurpose.RoundtableChat, entry.purpose)
+        assertFalse(entry.succeeded)
+        assertNull(entry.status)
+        assertTrue(entry.sentCharacters > 0)
+        assertEquals("这句不该发出去", entry.sentBody)
+    }
+
+    @Test
+    fun aStopInTheRegistrationWindowNeverWritesTheBody() {
+        // The window the review named: the request is already inside the gateway and the connection
+        // object exists, but `open` has not returned, so no handle has been handed over and not one
+        // byte has been written. A stop here must still stop the body: the switch, not the handle,
+        // is what the writer checks, and `disconnect()` on a connection that never connected does
+        // nothing at all.
+        val insideOpen = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val call = GatewayCall()
+        LocalHttp { HttpReply(200, """{"choices":[{"message":{"content":"{}"}}]}""") }.use { server ->
+            val gateway = OutboundGateway(
+                hosts = AllowedHosts("http://127.0.0.1:${server.port}", allowCleartextLocalhost = true),
+                audit = AuditLog(File(directory, "privacy/audit.json")),
+                clock = { "2026-10-18T00:00:00Z" },
+                open = { uri ->
+                    val connection = openHttp(uri)
+                    insideOpen.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                    connection
+                },
+            )
+            val outcome = AtomicReference<Result<GatewayResponse>?>(null)
+            val worker = thread(name = "gateway-registration-window") {
+                outcome.set(
+                    runCatching {
+                        gateway.send(
+                            GatewayRequest(
+                                url = "http://127.0.0.1:${server.port}/chat/completions",
+                                purpose = GatewayPurpose.RoundtableChat,
+                                method = "POST",
+                                body = """{"messages":[{"role":"user","content":"这句不该发出去"}]}""",
+                                call = call,
+                            ),
+                        )
+                    },
+                )
+            }
+            assertTrue(insideOpen.await(5, TimeUnit.SECONDS), "网关没有走到 open")
+            call.cancel()
+            release.countDown()
+            worker.join(5_000)
+            assertFalse(worker.isAlive, "取消之后网关没有返回")
+            val failure = outcome.get()?.exceptionOrNull()
+            assertTrue(failure is GatewayCancelled, "期望取消异常，实际是 $failure")
+            assertEquals(0, server.count.get(), "取消之后还是把正文写出去了")
+            assertTrue(server.calls().isEmpty(), "假服务收到了 ${server.calls()}")
+
+            // Positive control: the same gateway with a fresh switch does deliver the body, so the
+            // zero above is the cancel and not a harness that never delivers anything.
+            val delivered = gateway.send(
+                GatewayRequest(
+                    url = "http://127.0.0.1:${server.port}/chat/completions",
+                    purpose = GatewayPurpose.RoundtableChat,
+                    method = "POST",
+                    body = """{"messages":[{"role":"user","content":"正常正文"}]}""",
+                    call = GatewayCall(),
+                ),
+            )
+            assertEquals(200, delivered.status)
+            assertEquals(1, server.count.get())
+            assertTrue(server.calls().single().body.contains("正常正文"))
+        }
+        val entries = AuditLog(File(directory, "privacy/audit.json")).read()
+        assertEquals(2, entries.size, "被取消的和被放行的各留一条记录")
+        assertFalse(entries.first().succeeded, "被取消的请求不该记成成功")
+        assertNull(entries.first().status)
+        assertTrue(entries.first().sentCharacters > 0)
     }
 
     private fun gateway(base: String, cleartext: Boolean = false) = OutboundGateway(

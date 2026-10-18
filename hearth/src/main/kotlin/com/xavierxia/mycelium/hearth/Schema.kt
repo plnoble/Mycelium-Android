@@ -16,6 +16,16 @@ private const val SCHEMA_VERSION = 3
 private const val SCHEMA_KEY = "schema-version"
 
 /**
+ * The first version that wrote [SCHEMA_KEY] in the same transaction as `model_kind`. A stored marker
+ * at least this high vouches for the column: the backfill below committed with it. A missing marker,
+ * or one lower than this, vouches for nothing — the build before it added the column and could be
+ * interrupted before the update, leaving every row on the column default. This constant describes
+ * history, so it stays at 3 when [SCHEMA_VERSION] grows: a later upgrade must never rewrite a
+ * `default` the user chose in an already marked database.
+ */
+private const val MODEL_KIND_SINCE = 3
+
+/**
  * Serializes the upgrade inside this process. Two ViewModels can open sessions at the same moment;
  * `BEGIN IMMEDIATE` already protects the file, this keeps them from both starting the work.
  */
@@ -78,11 +88,18 @@ private fun HearthSession.upgradeIfNeeded() {
             .singleOrNull()?.stringAt(0)?.toIntOrNull() ?: 0
         if (stored >= SCHEMA_VERSION) return@transaction
         val columns = query("PRAGMA table_info(characters)").map { it.stringAt(1) }.toSet()
-        if ("model_kind" !in columns) {
+        val modelKindPresent = "model_kind" in columns
+        if (!modelKindPresent) {
             exec("ALTER TABLE characters ADD COLUMN model_kind TEXT NOT NULL DEFAULT 'default'")
-            // Before the three-way choice a character pointed at one specific local model, and it
-            // keeps doing that. Rows with no model id keep the default choice.
-            exec("UPDATE characters SET model_kind = 'local' WHERE model_id <> ''")
+        }
+        // Before the three-way choice a character pointed at one specific local model, and it keeps
+        // doing that. Rows with no model id keep the default choice. This also repairs the state the
+        // pre-marker build left when it added the column and stopped before the update: the row is
+        // still `default` only because that is the column default, not because anyone chose it. Once
+        // the marker says the upgrade committed, `default` on a row is the user's own choice even
+        // though an old model id is still sitting next to it, and it is left alone.
+        if (legacyModelKindNeedsRepair(stored, modelKindPresent)) {
+            exec("UPDATE characters SET model_kind = 'local' WHERE model_kind = 'default' AND model_id <> ''")
         }
         if ("service_id" !in columns) exec("ALTER TABLE characters ADD COLUMN service_id TEXT NOT NULL DEFAULT ''")
         if ("service_name" !in columns) exec("ALTER TABLE characters ADD COLUMN service_name TEXT NOT NULL DEFAULT ''")
@@ -101,3 +118,13 @@ private fun HearthSession.upgradeIfNeeded() {
         )
     }
 }
+
+/**
+ * Whether a `default` on a row has to be read back as the local model the user had picked. True for
+ * a column this run just added — no row could hold a choice in it — and for a database whose marker
+ * does not vouch for the backfill, which is the state the interrupted migration left behind. False
+ * once [SCHEMA_KEY] is at least [MODEL_KIND_SINCE]: there the column was written by the finished
+ * upgrade, so `default` is what the user chose and an old model id next to it is just a leftover.
+ */
+internal fun legacyModelKindNeedsRepair(storedVersion: Int, modelKindPresent: Boolean): Boolean =
+    !modelKindPresent || storedVersion < MODEL_KIND_SINCE
