@@ -4,7 +4,7 @@
 - 被验证的提交：`41b1ace`（SHA_A）。本报告和交接文件的更新在它之后的提交里，**除了 `docs/` 之外与被验证的树逐文件一致**。
 - 对照基准：`main` @ `9009878`。本分支就是从它拉出来的，main 之后没有新提交，所以不需要再并一次。
 - 日期：2026-10-18
-- 一句话结论：**电脑上的验收标准全部达成**（全新 worktree 对已提交版本跑 `check-all.ps1`：0 失败、0 警告、退出码 0；无签名环境变量时出未签名 release 包；签名配置 diff 为空）。**真机（红魔）的图标走查还没做**（要用户同意用手机）；**GitHub 上的 CI 未验证**（没有推送，推送由用户决定）。
+- 一句话结论：**验收标准全部达成**：全新 worktree 对已提交版本跑 `check-all.ps1` 0 失败、0 警告、退出码 0；无签名环境变量时出未签名 release 包；签名配置 diff 为空；真机上桌面出现新图标、正式版 0.1.1 一行没动。**唯一未验证的是 GitHub 上的 CI**（没有推送，推送由用户决定）。
 
 ## 一、做了什么
 
@@ -57,7 +57,7 @@
 | 全新 worktree 对已提交版本跑 `check-all.ps1`：0 失败、0 警告、退出码 0 | **已通过** | 第三节的汇总表（`41b1ace`，249 个任务实际执行） |
 | 故意制造一个警告，脚本能报出来并以非零退出码结束，演示后撤掉 | **已通过** | 第四节（4 个负向验证，全部退出码 1，探针已撤、未提交） |
 | 无签名环境变量时出未签名包；签名配置 diff 为空 | **已通过** | 第五节（`app-release-unsigned.apk`，apksigner 判定 unsigned；签名相关 diff 为空） |
-| 真机（红魔）：桌面能看到新图标；正式版 0.1.1 不动 | **未验证** | 需要用户同意用手机，见第六节 |
+| 真机（红魔）：桌面能看到新图标；正式版 0.1.1 不动 | **已通过** | 第六节（3 张裁剪截图 + `device-log.txt` 里的 `dumpsys` 前后对照） |
 | CI 改动在本地能验证的部分都验证过；远端 CI 记为未验证 | **部分已通过** | 第七节（脚本和准备逻辑本地验证过；GitHub 上的 CI 未验证） |
 
 ## 三、全新 worktree 全套检查（验收 1）
@@ -109,11 +109,29 @@
 - 汇总表里 `app-release-unsigned.apk`（52.0 MiB）的签名状态是 **unsigned**（用 SDK 的 `apksigner verify` 判定，不是看文件名）；同一次运行里 `app-debug.apk` 和 `app-debug-androidTest.apk` 是 **signed**，说明判定方法本身有效。
 - 签名配置 diff 为空：`git diff main...HEAD -- app/build.gradle.kts` 里与 `signingConfig`、`keystore`、`storePassword`、`keyAlias`、`keyPassword`、`MYCELIUM_ANDROID_KEYSTORE*` 相关的行**一条都没有**；这个文件实际只多了 lint 配置、测试 JVM 参数和 Kotlin 编译选项。
 
-## 六、真机（红魔）（验收 4）—— 未验证
+## 六、真机（红魔）（验收 4）—— 已通过
 
-还没做。要做的：装 `com.xavierxia.mycelium.debug`（`adb install -r` 调试包，再装测试包），确认桌面上出现新的火苗占位图标，并核对正式版 `com.xavierxia.mycelium`（0.1.1 / versionCode 2）的版本号和最后更新时间前后不变。截图放 Windows 仓库 `.omx/development/reviews/2026-10-18-android-P2-1b/`。
+用户同意后用手机走查（2026-10-18 13:38–13:45），只装调试包，正式版一行没动：
 
-**需要用户先同意用手机。** 另外 P1-7 遗留的 `DeviceConversationTest` 真机补跑也在这次手机窗口里一起做（结果补进 `docs/reviews/2026-10-17-P1-7/DELIVERY.md`）。
+| 项 | 结果 |
+|---|---|
+| 桌面图标 | **已通过**。桌面上能看到「知衍（调试）」的新图标（深绿底 + 白色火苗占位图标）；同一屏上正式版的旧图标还在 |
+| 应用能起来 | **已通过**。`topResumedActivity=com.xavierxia.mycelium.debug/com.xavierxia.mycelium.MainActivity`，截图见下 |
+| 正式版不动 | **已通过**。走查前后 `com.xavierxia.mycelium` 都是 versionName `0.1.1`、versionCode `2`、`lastUpdateTime=2026-10-10 05:23:04`、`firstInstallTime=2026-10-10 05:14:52`（`dumpsys` 原文在 `device-log.txt`）；没有卸载、没有覆盖、没有清数据 |
+| 调试包 | `com.xavierxia.mycelium.debug` 0.3.0（versionCode 4），`lastUpdateTime=2026-10-18 13:38:14` |
+| P1-7 遗留的设备测例 | **已通过**。`DeviceConversationTest.plaintextDialogueIsAbsentFromTheDatabaseFile` → `OK (1 test)`，Time 0.161；原始输出在 P1-7 的评审目录 |
+
+设备：红魔 NX809J（Android 16，SDK 36），屏幕 1216×2688。序列号没有写进仓库、日志和截图。
+
+截图（都在 `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\`，已逐张核对）：
+
+- `01-app-foreground-cropped.png`：知衍（调试）在前台，顶部状态栏已裁掉。
+- `02-home-icon-strip.png`：桌面横条，只含两个知衍图标和壁纸（无状态栏、无通知、无其他应用）。
+- `03-home-icon-debug-only.png`：只截「知衍（调试）」图标和它的名字。
+
+关于截图的一条说明：任务书要求「桌面图标的截图」，而通用截图规矩是「只在知衍（调试）处于前台时截图」。桌面截图必然包含启动器界面，所以我的做法是——先看整屏，再**只裁出图标那一小块**（连壁纸都只保留图标周围），确认里面没有通知、没有其他应用、没有个人内容，然后**把整屏原图删掉**，只留裁剪图。原始整屏截图没有进任何仓库或评审目录。
+
+原始设备记录：同目录 `device-log.txt`（型号、屏幕、走查前后两个包的 `dumpsys` 原文、安装与截图步骤、收尾检查）。手机上的临时文件（`/sdcard/p2-1b-*.png`、`/data/local/tmp/app-debug.apk`）已删除。
 
 ## 七、CI（验收 5）—— 部分验证
 
@@ -162,9 +180,8 @@
 
 ## 十一、没做的事 / 未验证
 
-- 真机（红魔）图标走查、正式版 0.1.1 不变核对：**未验证**（等用户同意用手机）。
-- P1-7 遗留的 `DeviceConversationTest` 真机补跑：**未做**（同上）。
-- GitHub 上的 CI：**未验证**（没推送）。
+- **交付审（REVIEW.md）**：Codex 5 小时额度到线，交统筹代审（第九节）。
+- GitHub 上的 CI：**未验证**（没推送；推送由用户决定）。首次推送后要专门看一次：装 NDK/CMake、`--online` 拉依赖、JDK 17 下跑全套、`prepare-llama.sh` 从 github.com 取固定提交。
 - JDK 17 下跑全套：**未验证**（本机只有 JBR 25）。
 - Robolectric 的 `android-all` jar：本地是它自己的缓存里已有的（离线跑通）；CI 首次运行会联网下载，这一点没有本地证据。
-- 截图：**没有**（真机走查还没做，所以 Windows 仓库的评审目录还没建）。
+- 本包没有单独发起 STEP 增量审（额度到线、包不大），设计风险和实现细节都在方案审和交付审两轮里（第九节）。
