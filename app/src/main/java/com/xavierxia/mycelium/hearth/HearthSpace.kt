@@ -424,7 +424,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             conversationId = state.openConversation,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
-        if (!state.busy && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
+        if (!state.busy && !state.historyLoading && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = vm::regenerate) { Text("重新生成") }
             }
@@ -450,7 +450,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                         setText("")
                         vm.send(question)
                     },
-                    enabled = text.isNotBlank(),
+                    enabled = text.isNotBlank() && !state.historyLoading,
                 ) { Text("发送") }
             }
         }

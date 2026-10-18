@@ -60,6 +60,12 @@ data class HearthState(
     val streamLabel: String? = null,
     val droppedTurns: Int = 0,
     val busy: Boolean = false,
+    /**
+     * True from the moment a conversation switch (or a return to the page) fixed its new target
+     * until that conversation's own history is on screen. A send during that wait would be captured
+     * against the conversation the page is leaving, so it is refused until this is false.
+     */
+    val historyLoading: Boolean = false,
     val mode: HearthMode = HearthMode.IMMERSIVE,
     /** A question that produced nothing (stopped before the first word) and goes back to the box. */
     val pendingQuestion: String? = null,
@@ -74,6 +80,13 @@ private data class Snapshot(
     val models: List<LocalModelRecord>,
     val services: List<CloudService>,
     val cloudModels: Map<String, List<String>>,
+)
+
+/** One character's conversations plus the newest one's messages, read as one unit. */
+private data class History(
+    val conversations: List<HearthConversation>,
+    val conversationId: String?,
+    val messages: List<HearthMessage>,
 )
 
 /** What a character's answer will come from, once the stored choice is resolved. */
@@ -115,11 +128,20 @@ private data class Turn(
     var userStopped = false
 }
 
-class HearthViewModel(application: Application) : AndroidViewModel(application) {
+class HearthViewModel @JvmOverloads constructor(
+    application: Application,
+    /**
+     * How database sessions are opened. The app leaves it out and uses the encrypted hearth file; a
+     * device test passes a wrapper so it can hold one read or write still and drive the timing by
+     * hand instead of racing it. It changes nothing else about the view model.
+     */
+    sessions: (() -> HearthSession)? = null,
+) : AndroidViewModel(application) {
     private val database = HearthDatabase(application)
-    private val characters = CharacterStore { database.session() }
-    private val log = ConversationLog { database.session() }
-    private val seeder = PresetSeeder(characters, HearthMeta { database.session() })
+    private val connect: () -> HearthSession = sessions ?: { database.session() }
+    private val characters = CharacterStore(connect)
+    private val log = ConversationLog(connect)
+    private val seeder = PresetSeeder(characters, HearthMeta(connect))
     private val chat = HearthChat(log)
     private val store = AndroidModelStore(application)
     private val engine = LocalModelEngine.shared
@@ -147,6 +169,18 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
      * token are late: they may finish the turn but never touch the screen again.
      */
     private var generationToken = 0
+
+    /**
+     * Takes the page over for a new turn or a move: everything that still carries an older token is
+     * late from this line on, and the page is no longer waiting for history, because whatever
+     * happened next owns what is on screen now (a history read that was still out will see the new
+     * token and drop its result instead of clearing the flag).
+     */
+    private fun beginGeneration(): Int {
+        val token = ++generationToken
+        if (mutable.value.historyLoading) mutable.update { it.copy(historyLoading = false) }
+        return token
+    }
 
     init {
         viewModelScope.launch { reload() }
@@ -198,24 +232,46 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Reads one character's conversations and the newest one's messages. */
-    private suspend fun loadConversation(character: HearthCharacter) {
+    /**
+     * Reads one character's conversations and the newest one's messages. While it runs the page is
+     * marked as still loading history: the target conversation is already fixed, but the page must
+     * not accept a send until that conversation's own history is here. A newer generation (a send,
+     * a switch, leaving the page) owns the state from its first line, so a read that comes back late
+     * changes nothing — its token no longer matches. A read that fails clears the wait instead of
+     * leaving the send button disabled for good.
+     */
+    private suspend fun loadHistory(character: HearthCharacter?, show: (HearthState, History) -> HearthState) {
         val token = generationToken
-        val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
-        if (token != generationToken) return
-        val first = conversations.firstOrNull()?.id
-        val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
-        if (token != generationToken) return
-        mutable.update {
-            it.copy(
-                conversations = conversations,
-                openConversation = first,
-                messages = messages,
-                streaming = null,
-                streamLabel = null,
-                droppedTurns = 0,
-            )
+        mutable.update { it.copy(historyLoading = true) }
+        try {
+            val conversations = if (character == null) {
+                emptyList()
+            } else {
+                withContext(Dispatchers.IO) { log.conversations(character.id) }
+            }
+            if (token != generationToken) return
+            val first = conversations.firstOrNull()?.id
+            val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
+            if (token != generationToken) return
+            mutable.update { show(it, History(conversations, first, messages)) }
+        } catch (failure: Exception) {
+            if (token == generationToken) {
+                mutable.update { it.copy(historyLoading = false, notice = failure.message ?: "历史读不出来") }
+            }
         }
+    }
+
+    /** Reads one character's conversations and the newest one's messages. */
+    private suspend fun loadConversation(character: HearthCharacter) = loadHistory(character) { state, history ->
+        state.copy(
+            conversations = history.conversations,
+            openConversation = history.conversationId,
+            messages = history.messages,
+            streaming = null,
+            streamLabel = null,
+            droppedTurns = 0,
+            historyLoading = false,
+        )
     }
 
     // --- characters ----------------------------------------------------------
@@ -361,7 +417,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Stops the running turn (if any) and makes sure its later callbacks are ignored. */
     private fun abandonTurn() {
-        generationToken++
+        beginGeneration()
         cloudModel?.stop()
         cloudModel = null
         currentChosen = null
@@ -429,15 +485,20 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             }
             return@launch
         }
-        val character = mutable.value.openCharacter
-        val token = generationToken
-        val conversations = if (character == null) emptyList() else withContext(Dispatchers.IO) { log.conversations(character.id) }
-        if (token != generationToken) return@launch
-        val first = conversations.firstOrNull()?.id
-        val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
-        if (token != generationToken) return@launch
-        mutable.update {
-            it.copy(mode = mode, conversations = conversations, openConversation = first, messages = messages, streaming = null, streamLabel = null, droppedTurns = 0, pendingQuestion = null, notice = null)
+        // Back from test mode: read the stored history again, and refuse a send until it is here.
+        loadHistory(mutable.value.openCharacter) { state, history ->
+            state.copy(
+                mode = mode,
+                conversations = history.conversations,
+                openConversation = history.conversationId,
+                messages = history.messages,
+                streaming = null,
+                streamLabel = null,
+                droppedTurns = 0,
+                pendingQuestion = null,
+                notice = null,
+                historyLoading = false,
+            )
         }
     }
 
@@ -450,12 +511,28 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun openConversation(id: String) = viewModelScope.launch {
+    /**
+     * Switches to another conversation. The new target is fixed before the read starts, so a send
+     * that comes in while its history is still being read is refused instead of being captured
+     * against the conversation the page is leaving; the question can then go to the conversation
+     * that is actually on screen once its history is there.
+     */
+    fun openConversation(id: String) {
         abandonTurn()
-        val token = generationToken
-        val messages = withContext(Dispatchers.IO) { log.messages(id) }
-        if (token != generationToken) return@launch
-        mutable.update { it.copy(openConversation = id, messages = messages, droppedTurns = 0) }
+        mutable.update { it.copy(openConversation = id, messages = emptyList(), droppedTurns = 0, historyLoading = true) }
+        viewModelScope.launch {
+            val token = generationToken
+            val messages = try {
+                withContext(Dispatchers.IO) { log.messages(id) }
+            } catch (failure: Exception) {
+                if (token == generationToken) {
+                    mutable.update { it.copy(historyLoading = false, notice = failure.message ?: "这段对话读不出来") }
+                }
+                return@launch
+            }
+            if (token != generationToken) return@launch
+            mutable.update { it.copy(openConversation = id, messages = messages, droppedTurns = 0, historyLoading = false) }
+        }
     }
 
     fun deleteConversation(id: String) = viewModelScope.launch {
@@ -473,7 +550,13 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
     // --- generation ----------------------------------------------------------
 
     /** Streams an answer for [text]. Stopping keeps whatever was written so far. */
-    fun send(text: String) = startTurn(text, mutable.value.mode, mutable.value.openConversation)
+    fun send(text: String) {
+        // Until the conversation that is open now has its own history, a send would be captured
+        // against the one the page is leaving (and its read would be thrown away). Refused, not
+        // redirected: the question stays in the box for the user to send when the page is ready.
+        if (mutable.value.historyLoading) return
+        startTurn(text, mutable.value.mode, mutable.value.openConversation)
+    }
 
     /**
      * Starts a turn in [mode] inside [conversationId]. A confirmed cloud question passes the mode and
@@ -503,7 +586,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
         val chosen = choose(character) ?: return
         val turn = Turn(character, mode, conversationId, question, chosen)
-        val token = ++generationToken
+        val token = beginGeneration()
         val buffer = StringBuilder()
         operation = viewModelScope.launch {
             activeTurn = turn
@@ -551,8 +634,10 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         val current = mutable.value
         val character = current.openCharacter ?: return
         if (operation?.isActive == true) return
+        // Same rule as send: redoing an answer needs the history the page is showing to be there.
+        if (current.historyLoading) return
         val chosen = choose(character) ?: return
-        val token = ++generationToken
+        val token = beginGeneration()
         val buffer = StringBuilder()
         operation = viewModelScope.launch {
             var turn: Turn? = null
@@ -755,7 +840,12 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (token != generationToken) return
         val conversations = withContext(Dispatchers.IO) { log.conversations(turn.character.id) }
+        if (token != generationToken) return
         val messages = withContext(Dispatchers.IO) { log.messages(conversationId) }
+        // The refresh itself is a read like any other: the page can move on while it is out (this
+        // path also runs under NonCancellable, where coroutine cancellation cannot stop it), so the
+        // token is asked again after every read before anything is put on screen.
+        if (token != generationToken) return
         mutable.update {
             it.copy(
                 openConversation = conversationId,
@@ -803,7 +893,11 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         val conversations = withContext(Dispatchers.IO) { log.conversations(turn.character.id) }
+        if (token != generationToken) return
         val messages = withContext(Dispatchers.IO) { log.messages(stored) }
+        // Same as finishTurn: this refresh also runs under NonCancellable, so only the token can
+        // stop it from writing the old turn's history over the page the user is looking at now.
+        if (token != generationToken) return
         mutable.update {
             it.copy(conversations = conversations, messages = messages, streaming = null, notice = if (wasStopped) "已停止" else null)
         }
