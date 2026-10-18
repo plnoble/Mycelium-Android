@@ -128,6 +128,10 @@ class HearthTimelineFollowDeviceTest {
             last.offset + last.size <= info.viewportEndOffset - info.afterContentPadding + 1
     }
 
+    /** 视口第一项的实测位置：用 layoutInfo，不依赖 ScrollPosition 里可能滞后的记录。 */
+    private fun measuredFirst(): Pair<Int, Int>? =
+        listState.layoutInfo.visibleItemsInfo.firstOrNull()?.let { it.index to it.offset }
+
     /** 失败时能直接看出视口数字，不用靠猜。 */
     private fun viewport(): String {
         val info = listState.layoutInfo
@@ -243,6 +247,101 @@ class HearthTimelineFollowDeviceTest {
         settle()
         assertTrue("换对话以后应该看到新那段的最新一条：${viewport()}", tailVisible())
         rule.onNodeWithText("B 里最后一条").assertIsDisplayed()
+    }
+
+    /**
+     * P2-2 复审 r2 第 6 条第一个窗口：换到 B 以后，手势监听必须改 B 的状态。改前它只以 listState
+     * 为键、一直抓着 A 的那份状态，所以在 B 里上翻会被记到 A 上，B 的 followTail 保持 true，
+     * 下一次追加内容又把视口拉回底部。
+     */
+    @Test
+    fun scrollingBackInsideTheSecondConversationKeepsTheViewportStill() {
+        conversationId = "a"
+        messages = longHistory(30)
+        setContent()
+        assertTrue("一开始应该跟到底部：${viewport()}", atBottom())
+
+        // 在 A 里上翻：这时候手势改的是 A 的状态。
+        userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
+        assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
+
+        // 换到 B：状态按新的一段重建，先跟到底部。
+        conversationId = "b"
+        messages = longHistory(20) + assistantMessage("B 里最后一条")
+        settle()
+        assertTrue("换对话以后应该跟到新那段的最新一条：${viewport()}", tailVisible())
+
+        // 在 B 里上翻：这一次必须记在 B 的状态上。
+        userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
+        val firstBefore = measuredFirst()
+        assertFalse("用户在 B 里上翻以后不该还算在底部：${viewport()}", atBottom())
+
+        // B 里继续追加内容：视口一点都不许动。
+        messages = messages + assistantMessage("B 里新到的一条")
+        streaming = "B 里正在变长的回答"
+        settle()
+        assertEquals("B 里上翻后视口被新内容改了：${viewport()}", firstBefore, measuredFirst())
+        assertFalse("新内容把用户拉回了底部：${viewport()}", atBottom())
+    }
+
+    /**
+     * P2-2 复审 r2 第 6 条第二个窗口：第一次回答落库时，会话 ID 从 null 变成数据库 ID，那不是
+     * 换会话。改前会被当成切换，把用户在这条长回答里的上翻状态重置掉，视口又被拉回底部。
+     */
+    @Test
+    fun theFirstSavedAnswerKeepsAnUpScrolledViewport() {
+        conversationId = null
+        messages = emptyList()
+        streaming = longAnswer(60)
+        setContent()
+
+        // 摆成「用户跟着这条长回答到了末尾」的样子：新对话里用户在落库前就已经在回答里上翻。
+        rule.runOnIdle { listState.requestScrollToItem(0, 100_000) }
+        settle()
+        assertTrue("应该先停在长回答的末尾：${viewport()}", atBottom())
+        userScrollsBack(pixels = 700f, durationMillis = 5_000)
+        assertTrue("用户应该停在长回答中间：${viewport()}", listState.firstVisibleItemScrollOffset > 0)
+        assertFalse("用户上翻以后不该还算在底部：${viewport()}", atBottom())
+
+        // 第一次落库：会话 ID 从 null 变成真实 ID，回答同时也进了消息列表。这不是换会话。
+        conversationId = "saved-1"
+        messages = listOf(userMessage("第一问"), assistantMessage(longAnswer(60)))
+        streaming = null
+        settle()
+
+        assertFalse("首次落库把用户的上翻状态重置了：${viewport()}", atBottom())
+        assertFalse("首次落库以后视口被拉到了最新一条：${viewport()}", tailVisible())
+
+        // 落库之后用户还在上翻：下一轮的内容一样不许把视口拉走。
+        val firstAfter = measuredFirst()
+        streaming = longAnswer(30, prefix = "第二轮在写")
+        settle()
+        assertEquals("首次落库后上翻状态没保持住：${viewport()}", firstAfter, measuredFirst())
+    }
+
+    /**
+     * 换会话要重置，跟消息条数无关：改后跟滚动的协程按「这一段对话的身份」重新跑，条数一样也得
+     * 跟到 B 的最新一条。
+     */
+    @Test
+    fun switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail() {
+        conversationId = "a"
+        messages = longHistory(20) + assistantMessage("A 的最后一条")
+        setContent()
+        assertTrue("一开始应该跟到底部：${viewport()}", atBottom())
+
+        userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
+        val indexBefore = listState.firstVisibleItemIndex
+        assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
+
+        // 换成另一段对话，消息条数一模一样。
+        conversationId = "b"
+        messages = longHistory(20) + assistantMessage("B 的最后一条")
+        settle()
+
+        assertNotEquals("换会话以后视口还停在 A 的位置：${viewport()}", indexBefore, listState.firstVisibleItemIndex)
+        assertTrue("换会话以后应该跟到 B 的最新一条：${viewport()}", tailVisible())
+        rule.onNodeWithText("B 的最后一条").assertIsDisplayed()
     }
 
     @Test

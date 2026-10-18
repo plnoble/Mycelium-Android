@@ -503,8 +503,55 @@ internal fun LazyListState.isAtContentBottom(): Boolean {
 }
 
 /**
+ * 一段对话的跟随状态（P2-2 复审 r2 第 6 条）。状态和「谁在改它」绑在同一份对象上：手势协程引用
+ * 的是这个对象本身，而不是某一次组合里的局部变量，所以换会话以后不会再写到上一段对话的状态里。
+ */
+private class TimelineFollowState {
+    /** 这一段对话的身份序号：真的换了一段才 +1，让跟滚动的协程按新的一段重新跑一次。 */
+    var segment by mutableIntStateOf(0)
+        private set
+    var followTail by mutableStateOf(true)
+    var userDragging by mutableStateOf(false)
+    var dragSessions by mutableIntStateOf(0)
+    // 上一次认到的会话 ID，以及那一段屏幕上有没有消息。普通字段：它们只是认领时的依据，
+    // 不该因为写入而触发重组。
+    private var knownConversationId: String? = null
+    private var knownHadMessages = false
+
+    /**
+     * 按当前这一帧的参数认领这段对话。判定依据：
+     * - ID 没变：还是同一段对话（包括它落库前后的 null 与真实 ID 两种写法），状态照旧。
+     * - null → 真实 ID：这是这一段对话第一次落库。沉浸模式下它还没存过任何一轮，屏幕上也只有
+     *   这一条正在写的回答，用户上翻的位置必须保留，所以不重置。屏幕上已经有消息却还挂在 null 上
+     *   的，是「测试模式 · 不留记录」的临时内容（沉浸模式下 null 时消息列表一定是空的），它换成
+     *   真实会话时算换了一段。
+     * - 真实 ID → 另一段真实 ID，或真实 ID → null（新对话、清空、切测试模式）：真的换了，重置。
+     */
+    fun claim(conversationId: String?, hasMessages: Boolean) {
+        val previousId = knownConversationId
+        val previousHadMessages = knownHadMessages
+        knownConversationId = conversationId
+        knownHadMessages = hasMessages
+        if (previousId == conversationId) return
+        if (previousId == null && conversationId != null && !previousHadMessages) return
+        reset()
+    }
+
+    /** 回到「跟着最新一条走」的起点。 */
+    fun reset() {
+        segment++
+        followTail = true
+        userDragging = false
+        dragSessions = 0
+    }
+}
+
+/**
  * 对话列表。内容变长（流式输出）时跟着最新一条走，但用户主动回看以后就不再抢滚动：用户上翻的
  * 状态一直粘着，只有用户自己回到底部才恢复跟随，流式追加新内容不会把它改回去。
+ *
+ * 跟随状态属于「这一段对话」，不属于会话 ID：会话 ID 会在第一次回答落库时从 null 变成真实值
+ * （P2-2 复审 r2 第 6 条），那不是换会话。判断和重置都交给 [TimelineFollowState.claim]。
  */
 @Composable
 internal fun ChatTimeline(
@@ -517,39 +564,44 @@ internal fun ChatTimeline(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    // 换人物或换一段对话就是重新开始：跟不跟随跟着这段对话走，上一段的上翻不带过来。
-    var followTail by remember(listState, character.id, conversationId) { mutableStateOf(true) }
-    var userDragging by remember(listState, character.id, conversationId) { mutableStateOf(false) }
-    // 用户松手过几次，用来区分「第一次组合」和「用户真的滚过」。
-    var dragSessions by remember(listState, character.id, conversationId) { mutableIntStateOf(0) }
+    // 换人物就换一份状态；会话身份真的变了由 claim 就地重置（首次落库不算）。手势协程引用的是
+    // 这份对象本身，所以它改的永远是当前这一段对话的状态，不会像过去那样抓住上一段的旧状态。
+    val follow = remember(listState, character.id) { TimelineFollowState() }
+    // 认领这一段对话：会话 ID、或者「这一段屏幕上有没有消息」变了就重新认一次。它放在最前面，
+    // 换会话时状态先重置好，后面的协程再按新的一段跑。
+    LaunchedEffect(follow, conversationId, messages.isNotEmpty()) {
+        follow.claim(conversationId, messages.isNotEmpty())
+    }
     // isScrollInProgress 连程序自己的滚动动画也算，所以「谁在滚」只看列表收到的拖拽手势。
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, follow) {
         listState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is DragInteraction.Start -> {
-                    userDragging = true
+                    follow.userDragging = true
                     // 手指一按住就停止跟随：流式更新不能在手指底下抢滚动。
-                    followTail = false
+                    follow.followTail = false
                 }
                 is DragInteraction.Stop, is DragInteraction.Cancel -> {
-                    userDragging = false
-                    dragSessions++
+                    follow.userDragging = false
+                    follow.dragSessions++
                 }
                 else -> Unit
             }
         }
     }
     // 松手后还有惯性滚动，等它停下来再按真实视口判断用户停在哪：只有还在底部才恢复跟随。
-    // 这里也是 followTail 唯一会变回 true 的地方，所以流式更新改不了用户上翻的决定。
-    LaunchedEffect(listState, dragSessions, character.id, conversationId) {
-        if (dragSessions == 0) return@LaunchedEffect
+    // 这里也是 followTail 唯一会变回 true 的地方（换会话的重置除外），所以流式更新改不了用户上翻的决定。
+    LaunchedEffect(listState, follow, follow.segment, follow.dragSessions) {
+        if (follow.dragSessions == 0) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }.first { !it }
-        if (userDragging) return@LaunchedEffect
-        followTail = listState.isAtContentBottom()
+        if (follow.userDragging) return@LaunchedEffect
+        follow.followTail = listState.isAtContentBottom()
     }
-    // 内容变长时只有想跟随才滚；用户回看期间一个滚动都不发。
-    LaunchedEffect(listState, character.id, conversationId, messages.size, streaming) {
-        if (!followTail) return@LaunchedEffect
+    // 内容变长时只有想跟随才滚；换了一段对话（segment 变了）也要按新的一段重新滚一次。
+    // 这里不能把 followTail 当键：用户手翻回底部时它会变 true，重跑一次会把长回答的视口
+    // 拉到这一条的开头（animateScrollToItem 对齐的是条目起点），而用户明明已经在末尾了。
+    LaunchedEffect(listState, follow, follow.segment, messages.size, streaming) {
+        if (!follow.followTail) return@LaunchedEffect
         val newest = messages.size + if (streaming != null) 1 else 0
         if (newest == 0) return@LaunchedEffect
         listState.animateScrollToItem(newest)
