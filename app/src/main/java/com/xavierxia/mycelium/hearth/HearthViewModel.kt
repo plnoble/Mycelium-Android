@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** A cloud turn that is waiting for the user to agree to the service that would receive it. */
 data class PendingSend(
@@ -126,6 +127,14 @@ private data class Turn(
      */
     @Volatile
     var userStopped = false
+
+    /**
+     * Whether this turn ever produced a token. A stopped turn stores an answer only if it did: a
+     * local turn stopped before its first token has nothing to keep, and a turn stopped while the
+     * model was still loading must not turn into an answer at all.
+     */
+    @Volatile
+    var produced = false
 }
 
 class HearthViewModel @JvmOverloads constructor(
@@ -165,10 +174,24 @@ class HearthViewModel @JvmOverloads constructor(
     private var activeTurn: Turn? = null
 
     /**
-     * Bumped whenever a turn starts or the page moves on. Callbacks that come back with an older
-     * token are late: they may finish the turn but never touch the screen again.
+     * Which turn owns the screen. It is bumped when a turn starts and when the page moves on; any
+     * callback that comes back with an older token is late and may touch neither the screen nor the
+     * database.
+     *
+     * Two threads touch it: the page (send, stop, switch, leave — the main thread) and the IO write
+     * that re-asks inside its transaction whether its turn is still the current one. It is therefore
+     * an atomic rather than a plain field: reading a stale value on the IO thread would let a turn
+     * that was already abandoned write into a page that moved on.
+     *
+     * Ordering rule: a start publishes its new token **before** any of its work (the IO reads and
+     * the write that will re-ask), and a move bumps the token **before** it cancels the job, so an IO
+     * thread that sees a cancel can never see the cancelled turn as current. The last bump wins;
+     * once a write has read a token that is still current inside its transaction, that write commits
+     * and a later bump does not take it back.
      */
-    private var generationToken = 0
+    private val generation = AtomicInteger(0)
+
+    private val generationToken: Int get() = generation.get()
 
     /**
      * Takes the page over for a new turn or a move: everything that still carries an older token is
@@ -177,7 +200,7 @@ class HearthViewModel @JvmOverloads constructor(
      * token and drop its result instead of clearing the flag).
      */
     private fun beginGeneration(): Int {
-        val token = ++generationToken
+        val token = generation.incrementAndGet()
         if (mutable.value.historyLoading) mutable.update { it.copy(historyLoading = false) }
         return token
     }
@@ -602,8 +625,11 @@ class HearthViewModel @JvmOverloads constructor(
         val turn = Turn(character, mode, conversationId, question, chosen)
         val token = beginGeneration()
         val buffer = StringBuilder()
+        // The running turn is recorded here, not inside the coroutine: a stop pressed between the
+        // send and the first line of the task still has to land on this turn, or the engine's stop
+        // flag (which the load's own runNative clears) would be the only place the intent could live.
+        activeTurn = turn
         operation = viewModelScope.launch {
-            activeTurn = turn
             try {
                 val window = withContext(Dispatchers.IO) {
                     chat.window(turn.character, turn.conversationId, turn.question, budgetFor(turn.character), turn.mode, current.messages)
@@ -732,6 +758,13 @@ class HearthViewModel @JvmOverloads constructor(
                 if (engine.loadedModel.value?.id != chosen.record.sha256) {
                     mutable.update { it.copy(notice = "正在加载 ${chosen.record.name} …") }
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
+                    // The load came back. That is not proof that nobody pressed stop while the page
+                    // still said "loading": a stop that arrived before the engine's own flag was
+                    // cleared (or before the load even started) leaves no trace there, and the very
+                    // next runNative would clear whatever was left. So this turn's intent is asked
+                    // here, at the last moment before generating: a stopped turn produces nothing,
+                    // and a turn that produced nothing is never stored (see stillCommittable).
+                    if (turn.userStopped) throw CancellationException("这一轮已经停止")
                     mutable.update { it.copy(notice = null) }
                 }
                 engine
@@ -767,7 +800,14 @@ class HearthViewModel @JvmOverloads constructor(
         }
         // The cloud model keeps its request on the caller's dispatcher, so the collection runs on IO;
         // the local engine switches by itself, so this is harmless for it.
-        withContext(Dispatchers.IO) { model.generate(messages, turn.character.parameters()).collect(onDelta) }
+        withContext(Dispatchers.IO) {
+            model.generate(messages, turn.character.parameters()).collect { delta ->
+                // Marked before the delta reaches the screen or the buffer: from this point the turn
+                // has something to keep, which is what a stop is allowed to preserve.
+                turn.produced = true
+                onDelta(delta)
+            }
+        }
     }
 
     /** Resolves the character's stored choice; a missing model or service is reported, not guessed. */
@@ -808,11 +848,15 @@ class HearthViewModel @JvmOverloads constructor(
     /**
      * Whether this turn may still be written. It is asked **inside** the write transaction: opening
      * the database or waiting for its write lock can take a while, and the user may stop, switch
-     * conversation or leave the page while that happens. A stopped cloud answer is dropped whole; a
-     * stopped local answer keeps whatever it had already produced.
+     * conversation or leave the page while that happens.
+     *
+     * A stopped cloud answer is dropped whole. A stopped local answer keeps what it had already
+     * produced — but only what it had already produced: a local turn stopped before its first token
+     * has nothing to keep and is never stored, which is what makes "stop while the model is loading"
+     * produce no answer at all.
      */
-    private fun stillCommittable(turn: Turn, token: Int): Boolean =
-        token == generationToken && !(turn.chosen.isCloud && turn.userStopped)
+    private fun stillCommittable(turn: Turn, token: Int): Boolean = token == generationToken &&
+        !(turn.userStopped && (turn.chosen.isCloud || !turn.produced))
 
     private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
         // A turn from a page the user has already left is dropped whole: nothing is shown and

@@ -69,6 +69,12 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     clear()
                     descriptor = open()
                     native.load(descriptor!!.fd, options.threads, options.contextLength)
+                    // The native load can return successfully even though a stop landed while it was
+                    // working: its flag is only read at its own checkpoints, and the very next
+                    // runNative (the generate that would follow) starts by clearing it. Honour the
+                    // stop here — the last moment before anybody can generate — so a stopped load
+                    // becomes no loaded model and no answer, instead of one that silently continues.
+                    check(!stopRequested.get()) { "Loading stopped" }
                     loaded.value = model
                 }
             } catch (failure: Throwable) {
