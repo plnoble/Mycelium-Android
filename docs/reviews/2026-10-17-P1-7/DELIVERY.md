@@ -86,6 +86,15 @@ JVM 假服务不是 MockWebServer（离线缓存没有），是 JDK 的 `ServerS
 - 手机在收尾复查时已断开，修正后的 `DeviceConversationTest` 未能在真机复跑；它的输入（真机库文件）和断言逻辑已在上一条里用真件验证。手机可用时补跑一次。
 - 对 `66e3a5a` 的全套检查：`:roundtable:test` 18 个和重新编译的 androidTest 包是本次执行；其余模块与 `:app` 单测、lint 的输入与 `f3e4db0` 相同，沿用同一 worktree 当天早上的执行结果（81 + 1 = 82 个，0 失败；lint 0 error）。
 
+## 补记二（2026-10-18）：修正后的设备测例已在真机补跑通过
+
+- 手机接上后（做 P2-1b 真机走查的同一个窗口）补跑，命令：
+  `adb shell am instrument -w -r -e class com.xavierxia.mycelium.roundtable.DeviceConversationTest com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`
+- 结果：**OK (1 test)**，`Time: 0.161`，0 失败。装的是本次重新构建的 `app-debug.apk`（62,081,072 字节，2026-10-18 12:06）和 `app-debug-androidTest.apk`（982,552 字节），所以跑的就是 `66e3a5a` 修正后的断言。
+- 原始输出：Windows 评审目录 `.omx/development/reviews/2026-10-17-android-P1-7/device-instrumented-rerun-2026-10-18.txt`。
+- 设备：红魔 NX809J（Android 16，SDK 36）。正式版 `com.xavierxia.mycelium` 走查前后都是 0.1.1（versionCode 2），没卸载、没覆盖、没清数据。
+- 上一条里「手机可用时补跑一次」这项到此完成。
+
 ## 审核
 
 - 最近一次可读的 Codex 额度读数：5 小时窗口 99%、周额度 29%（2026-10-17 11:48）。超过 70% 停审线，本线没有发起 Codex；该 5 小时窗口此后已重置，但没有更新的读数。
