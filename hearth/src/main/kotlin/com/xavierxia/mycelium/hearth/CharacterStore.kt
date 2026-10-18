@@ -33,8 +33,12 @@ data class HearthCharacter(
     val modelName: String,
     val serviceId: String,
     val serviceName: String,
-    /** The cloud service the user confirmed sending this character's chats to; empty when never asked. */
-    val cloudConfirmedService: String,
+    /**
+     * What the user agreed to send this character's chats to: see [cloudTarget]. Empty means never
+     * asked, and a different target — another service, or the same service at another address —
+     * means asked again before anything leaves the phone.
+     */
+    val cloudConfirmedTarget: String,
     val temperature: Float,
     val maxTokens: Int,
     val color: Int,
@@ -54,7 +58,7 @@ data class CharacterDraft(
     val modelName: String = "",
     val serviceId: String = "",
     val serviceName: String = "",
-    val cloudConfirmedService: String = "",
+    val cloudConfirmedTarget: String = "",
     val temperature: Float = 0.7f,
     val maxTokens: Int = 256,
     val color: Int = 0xFF7EB6A4.toInt(),
@@ -91,16 +95,31 @@ class CharacterStore(private val connect: () -> HearthSession) {
             requireNotNull(session.query("SELECT $COLUMNS FROM characters WHERE id = ?", listOf(id)).singleOrNull()?.let(::character))
         }
 
+    /**
+     * Runs [block] as one transaction over a single session. The preset seeder needs the five rows
+     * and the "already seeded" marker to land together, so it cannot use one session per row.
+     */
+    fun <T> withTransaction(block: (HearthSession) -> T): T =
+        withSession(connect) { session -> session.transaction { block(session) } }
+
+    /** Inserts under [id] inside a caller-provided session; false when that id is already there. */
+    fun createIfAbsent(session: HearthSession, id: String, draft: CharacterDraft, now: String): Boolean {
+        if (session.query("SELECT id FROM characters WHERE id = ?", listOf(id)).isNotEmpty()) return false
+        write(session, id, draft, now, insert = true, ignoreExisting = false)
+        return true
+    }
+
     fun update(id: String, draft: CharacterDraft, now: String) = withSession(connect) { session ->
         require(session.query("SELECT id FROM characters WHERE id = ?", listOf(id)).isNotEmpty()) { "这个人物已经删掉了" }
         write(session, id, draft, now, insert = false, ignoreExisting = false)
     }
 
+    /** A copy is a new character: it never inherits the cloud agreement of the one it came from. */
     fun copy(id: String, now: String): HearthCharacter = withSession(connect) { session ->
         val source = session.query("SELECT $COLUMNS FROM characters WHERE id = ?", listOf(id)).singleOrNull()
             ?: error("这个人物已经删掉了")
         val original = character(source)
-        val draft = draftOf(original).copy(name = "${original.name} 的副本")
+        val draft = draftOf(original).copy(name = "${original.name} 的副本", cloudConfirmedTarget = "")
         val copyId = UUID.randomUUID().toString()
         write(session, copyId, draft, now, insert = true, ignoreExisting = false)
         requireNotNull(session.query("SELECT $COLUMNS FROM characters WHERE id = ?", listOf(copyId)).singleOrNull()?.let(::character))
@@ -144,7 +163,7 @@ class CharacterStore(private val connect: () -> HearthSession) {
             name, draft.personality.trim(), draft.speech.trim(), draft.background.trim(),
             draft.relationship.trim(), draft.greeting.trim(), draft.modelId.trim(), draft.modelName.trim(),
             draft.temperature.toString(), draft.maxTokens, draft.color, now, draft.avatarChar.trim().take(1),
-            draft.modelKind.stored, draft.serviceId.trim(), draft.serviceName.trim(), draft.cloudConfirmedService.trim(),
+            draft.modelKind.stored, draft.serviceId.trim(), draft.serviceName.trim(), draft.cloudConfirmedTarget.trim(),
         )
         if (insert) {
             val verb = if (ignoreExisting) "INSERT OR IGNORE" else "INSERT"
@@ -153,7 +172,7 @@ class CharacterStore(private val connect: () -> HearthSession) {
                 $verb INTO characters(
                     id, name, personality, speech, background, relationship, greeting,
                     model_id, model_name, temperature, max_tokens, color, updated_at, avatar_char,
-                    model_kind, service_id, service_name, cloud_confirmed_service
+                    model_kind, service_id, service_name, cloud_confirmed_target
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
                 listOf(id) + values,
@@ -164,7 +183,7 @@ class CharacterStore(private val connect: () -> HearthSession) {
                 UPDATE characters SET name = ?, personality = ?, speech = ?, background = ?, relationship = ?,
                     greeting = ?, model_id = ?, model_name = ?, temperature = ?, max_tokens = ?, color = ?,
                     updated_at = ?, avatar_char = ?, model_kind = ?, service_id = ?, service_name = ?,
-                    cloud_confirmed_service = ?
+                    cloud_confirmed_target = ?
                 WHERE id = ?
                 """.trimIndent(),
                 values + id,
@@ -176,7 +195,7 @@ class CharacterStore(private val connect: () -> HearthSession) {
         const val COLUMNS =
             "id, name, personality, speech, background, relationship, greeting, " +
                 "model_id, model_name, temperature, max_tokens, color, updated_at, avatar_char, " +
-                "model_kind, service_id, service_name, cloud_confirmed_service"
+                "model_kind, service_id, service_name, cloud_confirmed_target"
     }
 }
 
@@ -198,7 +217,7 @@ internal fun character(row: List<Any?>) = HearthCharacter(
     modelKind = ModelKind.of(row.stringAt(14)),
     serviceId = row.stringAt(15),
     serviceName = row.stringAt(16),
-    cloudConfirmedService = row.stringAt(17),
+    cloudConfirmedTarget = row.stringAt(17),
 )
 
 /** The editable form of a stored character; used by the editor screen. */
@@ -215,22 +234,48 @@ fun draftOf(character: HearthCharacter) = CharacterDraft(
     modelName = character.modelName,
     serviceId = character.serviceId,
     serviceName = character.serviceName,
-    cloudConfirmedService = character.cloudConfirmedService,
+    cloudConfirmedTarget = character.cloudConfirmedTarget,
     temperature = character.temperature,
     maxTokens = character.maxTokens,
     color = character.color,
 )
 
-/** Small key/value table that lives next to the characters (used for the one-time preset seeding). */
-class HearthMeta(private val connect: () -> HearthSession) {
-    fun flag(key: String): String? = withSession(connect) { session ->
-        session.query("SELECT value FROM meta WHERE key = ?", listOf(key)).singleOrNull()?.stringAt(0)
-    }
+/**
+ * The identity of a cloud receiver: the saved service plus its normalized endpoint. Only edits that
+ * really move the data somewhere else (another service, another host, another port or path) change
+ * it, so tidying up a trailing slash does not ask the user again.
+ */
+fun cloudTarget(serviceId: String, baseUrl: String): String = "$serviceId|${normalizeEndpoint(baseUrl)}"
 
-    fun setFlag(key: String, value: String) = withSession(connect) { session ->
-        session.exec(
-            "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            listOf(key, value),
-        )
-    }
+/** Lower-case scheme and host, default port and trailing slashes dropped. No network parsing here. */
+fun normalizeEndpoint(baseUrl: String): String {
+    val value = baseUrl.trim()
+    val schemeEnd = value.indexOf("://")
+    val scheme = if (schemeEnd > 0) value.substring(0, schemeEnd).lowercase() else "https"
+    val rest = (if (schemeEnd > 0) value.substring(schemeEnd + 3) else value).trimEnd('/')
+    val slash = rest.indexOf('/')
+    val authority = if (slash >= 0) rest.substring(0, slash) else rest
+    val path = if (slash >= 0) rest.substring(slash).trimEnd('/') else ""
+    val host = authority.substringBefore(':').lowercase()
+    val port = authority.substringAfter(':', "")
+    val defaultPort = (scheme == "https" && port == "443") || (scheme == "http" && port == "80")
+    val keptPort = if (port.isEmpty() || defaultPort) "" else ":$port"
+    return "$scheme://$host$keptPort$path"
+}
+
+/** Small key/value table that lives next to the characters (preset marker, schema version). */
+class HearthMeta(private val connect: () -> HearthSession) {
+    fun flag(key: String): String? = withSession(connect) { session -> flag(session, key) }
+
+    fun setFlag(key: String, value: String) = withSession(connect) { session -> setFlag(session, key, value) }
+
+    /** Reads the flag inside a caller-provided session, so it can share one transaction. */
+    fun flag(session: HearthSession, key: String): String? =
+        session.query("SELECT value FROM meta WHERE key = ?", listOf(key)).singleOrNull()?.stringAt(0)
+
+    /** Writes the flag inside a caller-provided session, so it can share one transaction. */
+    fun setFlag(session: HearthSession, key: String, value: String) = session.exec(
+        "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        listOf(key, value),
+    )
 }

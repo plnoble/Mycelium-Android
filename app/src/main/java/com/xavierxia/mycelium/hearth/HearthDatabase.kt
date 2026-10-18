@@ -31,13 +31,21 @@ class HearthDatabase(context: Context) {
         return SqlCipherHearthSession(database)
     }
 
-    private fun passphrase(): String {
+    private fun passphrase(): String = synchronized(passphraseLock) {
         val stored = preferences.getString("passphrase", null)
         if (stored != null) return String(keystore.unwrap(stored), Charsets.UTF_8)
         val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val passphrase = bytes.joinToString("") { "%02x".format(it) }
         preferences.edit { putString("passphrase", keystore.wrap(passphrase.toByteArray(Charsets.UTF_8))) }
-        return passphrase
+        passphrase
+    }
+
+    private companion object {
+        /**
+         * One lock for the whole process, not one per instance: two of them must never invent two
+         * different passphrases, or the file ends up encrypted with a phrase that was not saved.
+         */
+        val passphraseLock = Any()
     }
 }
 

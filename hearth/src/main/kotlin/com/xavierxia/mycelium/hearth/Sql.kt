@@ -8,6 +8,23 @@ interface HearthSession : AutoCloseable {
     fun exec(sql: String, args: List<Any?> = emptyList())
 
     fun query(sql: String, args: List<Any?> = emptyList()): List<List<Any?>>
+
+    /**
+     * Runs [block] as one transaction. `BEGIN IMMEDIATE` takes the write lock straight away, so two
+     * sessions opening the same file at the same time cannot both decide they need the same schema
+     * change. Anything thrown rolls the whole block back, leaving no half-applied change behind.
+     */
+    fun <T> transaction(block: () -> T): T {
+        exec("BEGIN IMMEDIATE")
+        return try {
+            val result = block()
+            exec("COMMIT")
+            result
+        } catch (failure: Throwable) {
+            runCatching { exec("ROLLBACK") }
+            throw failure
+        }
+    }
 }
 
 internal fun List<Any?>.stringAt(index: Int): String =

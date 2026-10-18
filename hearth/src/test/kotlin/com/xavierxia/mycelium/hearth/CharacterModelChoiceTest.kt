@@ -10,6 +10,35 @@ class CharacterModelChoiceTest {
     private val store = CharacterStore { session }
 
     @Test
+    fun aHalfUpgradedDatabaseFinishesTheUpgradeOnTheNextOpen() {
+        // A database that got the first new column but not the rest: opening it must end up with
+        // all of them, and the characters already in it must survive.
+        session.exec(
+            """
+            CREATE TABLE characters (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, personality TEXT NOT NULL, speech TEXT NOT NULL,
+                background TEXT NOT NULL, relationship TEXT NOT NULL, greeting TEXT NOT NULL,
+                model_id TEXT NOT NULL, model_name TEXT NOT NULL, temperature TEXT NOT NULL,
+                max_tokens INTEGER NOT NULL, color INTEGER NOT NULL, updated_at TEXT NOT NULL,
+                avatar_char TEXT NOT NULL, model_kind TEXT NOT NULL DEFAULT 'default'
+            )
+            """.trimIndent(),
+        )
+        session.exec(
+            "INSERT INTO characters (id, name, personality, speech, background, relationship, greeting, " +
+                "model_id, model_name, temperature, max_tokens, color, updated_at, avatar_char, model_kind) " +
+                "VALUES ('half-1', '半升级', '', '', '', '', '', 'sha-half', 'Qwen', '0.7', 256, 0, 't', '半', 'local')",
+        )
+        val upgraded = requireNotNull(store.character("half-1"))
+        assertEquals("半升级", upgraded.name)
+        assertEquals(ModelKind.LOCAL, upgraded.modelKind)
+        assertEquals("sha-half", upgraded.modelId)
+        assertEquals("", upgraded.cloudConfirmedTarget)
+        // Opening again changes nothing.
+        assertEquals("半升级", requireNotNull(store.character("half-1")).name)
+    }
+
+    @Test
     fun theThreeModelChoicesRoundTrip() {
         val byDefault = store.create(CharacterDraft(name = "甲"), "t")
         assertEquals(ModelKind.DEFAULT, requireNotNull(store.character(byDefault.id)).modelKind)
@@ -30,7 +59,7 @@ class CharacterModelChoiceTest {
                 serviceId = "svc-1",
                 serviceName = "测试服务",
                 modelName = "deepseek-flash",
-                cloudConfirmedService = "svc-1",
+                cloudConfirmedTarget = cloudTarget("svc-1", "https://api.example.net/v1/"),
             ),
             "t",
         )
@@ -39,7 +68,36 @@ class CharacterModelChoiceTest {
         assertEquals("svc-1", readCloud.serviceId)
         assertEquals("测试服务", readCloud.serviceName)
         assertEquals("deepseek-flash", readCloud.modelName)
-        assertEquals("svc-1", readCloud.cloudConfirmedService)
+        // The agreement is stored normalized, so a trailing slash never asks the user again.
+        assertEquals(cloudTarget("svc-1", "https://api.example.net/v1"), readCloud.cloudConfirmedTarget)
+    }
+
+    @Test
+    fun aCopyNeverInheritsTheCloudAgreement() {
+        val source = store.create(
+            CharacterDraft(
+                name = "甲",
+                modelKind = ModelKind.CLOUD,
+                serviceId = "svc-1",
+                serviceName = "测试服务",
+                modelName = "deepseek-flash",
+                cloudConfirmedTarget = cloudTarget("svc-1", "https://api.example.net"),
+            ),
+            "t",
+        )
+        val copied = store.copy(source.id, "t2")
+        assertEquals("", copied.cloudConfirmedTarget)
+    }
+
+    @Test
+    fun onlyARealMoveChangesTheCloudTarget() {
+        assertEquals(cloudTarget("a", "https://api.example.net"), cloudTarget("a", "HTTPS://API.example.net:443/"))
+        assertEquals(cloudTarget("a", "http://127.0.0.1:80"), cloudTarget("a", "http://127.0.0.1/"))
+        // Another service, another host, another port or another path all count as a new receiver.
+        assertTrue(cloudTarget("a", "https://api.example.net") != cloudTarget("b", "https://api.example.net"))
+        assertTrue(cloudTarget("a", "https://api.example.net") != cloudTarget("a", "https://api.example.org"))
+        assertTrue(cloudTarget("a", "https://api.example.net:8443") != cloudTarget("a", "https://api.example.net"))
+        assertTrue(cloudTarget("a", "https://api.example.net/v2") != cloudTarget("a", "https://api.example.net/v1"))
     }
 
     @Test
@@ -79,7 +137,7 @@ class CharacterModelChoiceTest {
         // It used to point at one specific local model, so it keeps doing that.
         assertEquals(ModelKind.LOCAL, upgraded.modelKind)
         assertEquals("", upgraded.serviceId)
-        assertEquals("", upgraded.cloudConfirmedService)
+        assertEquals("", upgraded.cloudConfirmedTarget)
         assertTrue(store.characters().isNotEmpty())
     }
 }

@@ -11,6 +11,7 @@ import com.xavierxia.mycelium.model.ChatRole
 import com.xavierxia.mycelium.model.GenerationParameters
 import com.xavierxia.mycelium.model.ModelInfo
 import com.xavierxia.mycelium.model.ModelLocation
+import com.xavierxia.mycelium.net.GatewayAbort
 import com.xavierxia.mycelium.net.GatewayPurpose
 import com.xavierxia.mycelium.net.GatewayRequest
 import com.xavierxia.mycelium.net.OutboundGateway
@@ -66,14 +67,27 @@ class CloudChatModel(
     private val naturalChat: Boolean = false,
     private val readTimeoutMs: Int = 60_000,
 ) : ChatModel {
+    private val connection = java.util.concurrent.atomic.AtomicReference<GatewayAbort?>(null)
+
+    @Volatile
+    private var aborted = false
+
     override val info = ModelInfo(
         id = model,
         displayName = "$serviceName · $model",
         location = ModelLocation.CLOUD,
     )
 
-    /** One request, no stream: there is nothing in flight to abort between deltas. */
-    override fun stop() = Unit
+    /**
+     * The answer arrives in one piece, but the request itself can be stopped: the caller gets the
+     * open connection and disconnects it, which makes the blocking read return immediately. A
+     * stopped request produces no answer and no error, so nothing late can reach the screen or the
+     * database.
+     */
+    override fun stop() {
+        aborted = true
+        connection.getAndSet(null)?.abort()
+    }
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> = flow {
         val key = apiKey ?: throw IllegalStateException("这个服务还没有填写 API key")
@@ -100,21 +114,31 @@ class CloudChatModel(
         payload
             // Official thinking-mode guide: thinking is on by default. extra_body carries this object.
             .put("thinking", JSONObject().put("type", "disabled"))
-        val response = gateway.send(
-            GatewayRequest(
-                url = baseUrl.trimEnd('/') + "/chat/completions",
-                purpose = purpose,
-                method = "POST",
-                headers = mapOf(
-                    "Authorization" to "Bearer $key",
-                    "Content-Type" to "application/json",
-                    "Accept" to "application/json",
+        val response = try {
+            gateway.send(
+                GatewayRequest(
+                    url = baseUrl.trimEnd('/') + "/chat/completions",
+                    purpose = purpose,
+                    method = "POST",
+                    headers = mapOf(
+                        "Authorization" to "Bearer $key",
+                        "Content-Type" to "application/json",
+                        "Accept" to "application/json",
+                    ),
+                    body = payload.toString(),
+                    readTimeoutMs = readTimeoutMs,
+                    omitAuditBody = omitAuditBody,
+                    onOpen = { open -> connection.set(open) },
                 ),
-                body = payload.toString(),
-                readTimeoutMs = readTimeoutMs,
-                omitAuditBody = omitAuditBody,
-            ),
-        )
+            )
+        } catch (failure: Exception) {
+            // Stopping the turn is not a failure: it just has no answer.
+            if (aborted) return@flow
+            throw failure
+        } finally {
+            connection.set(null)
+        }
+        if (aborted) return@flow
         if (response.status !in 200..299) {
             throw IllegalStateException(failureMessage(response.status))
         }

@@ -2,6 +2,7 @@ package com.xavierxia.mycelium.hearth
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -21,6 +22,35 @@ class PresetSeederTest {
         assertEquals(0, seeder.seedOnce("2026-10-18T10:02"))
         assertNull(store.character("preset-ayuan"), "删掉的预设不该被自动加回来")
         assertEquals(4, store.characters().size)
+    }
+
+    @Test
+    fun aFailureHalfwayThroughSeedingLeavesNothingBehind() {
+        // The marker and the five rows must land together: if the third insert blows up, the first
+        // two must not survive either, and a later attempt must still seed all five.
+        val delegate = memorySession()
+        var inserts = 0
+        val flaky = object : HearthSession {
+            override fun exec(sql: String, args: List<Any?>) {
+                if (sql.contains("INSERT INTO characters")) {
+                    inserts++
+                    if (inserts == 3) throw IllegalStateException("第三次插入失败")
+                }
+                delegate.exec(sql, args)
+            }
+
+            override fun query(sql: String, args: List<Any?>): List<List<Any?>> = delegate.query(sql, args)
+
+            override fun close() = Unit
+        }
+        val flakyStore = CharacterStore { flaky }
+        val flakySeeder = PresetSeeder(flakyStore, HearthMeta { flaky })
+
+        assertFailsWith<IllegalStateException> { flakySeeder.seedOnce("t1") }
+        assertEquals(0, flakyStore.characters().size, "失败的那次不该留下半成品")
+        assertNull(HearthMeta { flaky }.flag(PresetSeeder.SEEDED), "失败的那次不该落下标记")
+        assertEquals(5, flakySeeder.seedOnce("t2"))
+        assertEquals(5, flakyStore.characters().size)
     }
 
     @Test

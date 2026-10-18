@@ -34,6 +34,11 @@ data class GatewayRequest(
      * changes what is written down: the service still receives the real body.
      */
     val omitAuditBody: Boolean = false,
+    /**
+     * Hands the caller an abort handle for the request that just went out, so a long call can be
+     * stopped from outside. The gateway still closes the connection either way.
+     */
+    val onOpen: ((GatewayAbort) -> Unit)? = null,
 )
 
 data class GatewayResponse(
@@ -43,6 +48,15 @@ data class GatewayResponse(
 )
 
 class GatewayRejected(message: String) : Exception(message)
+
+/**
+ * Lets a caller abort a request that is already on the wire. The gateway is still the only place
+ * that touches HTTP types; the caller only gets this handle, and calling it makes the blocking read
+ * return at once.
+ */
+fun interface GatewayAbort {
+    fun abort()
+}
 
 /**
  * The only place HTTP leaves the app. Callers hand over the body they are willing to have stored;
@@ -102,6 +116,7 @@ class OutboundGateway(
 
     private fun exchange(target: URI, request: GatewayRequest): GatewayResponse {
         val connection = open(target)
+        request.onOpen?.invoke(GatewayAbort { connection.disconnect() })
         return try {
             connection.requestMethod = request.method
             connection.connectTimeout = request.connectTimeoutMs

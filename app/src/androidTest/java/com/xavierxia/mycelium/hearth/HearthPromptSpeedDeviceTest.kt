@@ -45,7 +45,7 @@ class HearthPromptSpeedDeviceTest {
             modelName = model.name,
             serviceId = "",
             serviceName = "",
-            cloudConfirmedService = "",
+            cloudConfirmedTarget = "",
             temperature = 0.7f,
             maxTokens = 256,
             color = 0,

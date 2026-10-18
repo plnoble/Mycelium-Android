@@ -66,22 +66,20 @@ fun presetCharacters(): List<Pair<String, CharacterDraft>> = listOf(
 )
 
 /**
- * Writes the presets the first time the hearth space is opened. The flag is only written after all
- * five are in, so a failed first attempt is retried on the next open; once it is set, a preset the
- * user deleted stays deleted.
+ * Writes the presets the first time the hearth space is opened. The five rows and the "already
+ * seeded" marker go into one transaction, so a failure leaves nothing behind and a second attempt
+ * starts from the same place; once the marker is in, a preset the user deleted stays deleted.
  */
 class PresetSeeder(private val store: CharacterStore, private val meta: HearthMeta) {
     /** Returns how many presets this call actually added. */
-    fun seedOnce(now: String): Int {
-        if (meta.flag(SEEDED) != null) return 0
+    fun seedOnce(now: String): Int = store.withTransaction { session ->
+        if (meta.flag(session, SEEDED) != null) return@withTransaction 0
         var created = 0
         presetCharacters().forEach { (id, draft) ->
-            val existed = store.character(id) != null
-            store.create(id, draft, now, ignoreExisting = true)
-            if (!existed) created++
+            if (store.createIfAbsent(session, id, draft, now)) created++
         }
-        meta.setFlag(SEEDED, now)
-        return created
+        meta.setFlag(session, SEEDED, now)
+        created
     }
 
     companion object {

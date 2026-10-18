@@ -48,6 +48,8 @@ data class HearthState(
     val droppedTurns: Int = 0,
     val busy: Boolean = false,
     val mode: HearthMode = HearthMode.IMMERSIVE,
+    /** A question that produced nothing (stopped before the first word) and goes back to the box. */
+    val pendingQuestion: String? = null,
     val notice: String? = null,
 )
 
@@ -107,6 +109,15 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     /** The model of the turn that is being generated right now, so stop knows what to abort. */
     private var currentChosen: Chosen? = null
+
+    /** The cloud model of that turn, so stop can disconnect the request that is in flight. */
+    private var cloudModel: CloudChatModel? = null
+
+    /**
+     * Bumped whenever a turn starts or the page moves on. Callbacks that come back with an older
+     * token are late: they may finish the turn but never touch the screen again.
+     */
+    private var generationToken = 0
 
     init {
         viewModelScope.launch { reload() }
@@ -178,7 +189,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             modelId = "",
             modelName = model,
         )
-        if (draft.cloudConfirmedService == service.id) {
+        if (draft.cloudConfirmedTarget == cloudTarget(service.id, service.baseUrl)) {
             current.copy(editing = picked, cloudConfirm = null, notice = null)
         } else {
             current.copy(cloudConfirm = picked, notice = null)
@@ -187,8 +198,11 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     fun confirmCloud() = mutable.update { current ->
         val pending = current.cloudConfirm ?: return@update current
+        val service = current.services.firstOrNull { it.id == pending.serviceId }
+        // The agreement is for this service at this address, so it is stored as that pair.
+        val target = if (service == null) "" else cloudTarget(service.id, service.baseUrl)
         current.copy(
-            editing = pending.copy(cloudConfirmedService = pending.serviceId),
+            editing = pending.copy(cloudConfirmedTarget = target),
             cloudConfirm = null,
             notice = null,
         )
@@ -233,6 +247,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
     // --- conversations -------------------------------------------------------
 
     fun openChat(character: HearthCharacter) = viewModelScope.launch {
+        abandonTurn()
         val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
         val first = conversations.firstOrNull()?.id
         val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
@@ -253,16 +268,67 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun closeCharacter() = mutable.update {
-        it.copy(openCharacter = null, editing = null, streaming = null, streamLabel = null, notice = null)
+    fun closeCharacter() {
+        abandonTurn()
+        mutable.update {
+            it.copy(openCharacter = null, editing = null, streaming = null, streamLabel = null, messages = emptyList(), notice = null)
+        }
     }
+
+    /**
+     * Leaving the hearth space (bottom bar, back, whatever moves the page away). The running turn is
+     * stopped and the temporary test session is dropped, so "leaving means it is gone" holds.
+     */
+    fun leaveHearth() {
+        abandonTurn()
+        mutable.update { current ->
+            if (current.mode == HearthMode.TEST) {
+                // The temporary session only lives while the page is here.
+                current.copy(
+                    mode = HearthMode.IMMERSIVE,
+                    openConversation = null,
+                    messages = emptyList(),
+                    conversations = emptyList(),
+                    droppedTurns = 0,
+                    streaming = null,
+                    streamLabel = null,
+                    busy = false,
+                    pendingQuestion = null,
+                    notice = null,
+                )
+            } else {
+                // Immersive history stays where it is; only the running turn is dropped.
+                current.copy(
+                    streaming = null,
+                    streamLabel = null,
+                    busy = false,
+                    pendingQuestion = null,
+                    notice = null,
+                )
+            }
+        }
+    }
+
+    /** Stops the running turn (if any) and makes sure its later callbacks are ignored. */
+    private fun abandonTurn() {
+        generationToken++
+        cloudModel?.stop()
+        cloudModel = null
+        currentChosen = null
+        engine.stop()
+        operation?.cancel()
+        operation = null
+    }
+
+    fun consumePendingQuestion() = mutable.update { it.copy(pendingQuestion = null) }
 
     /** Test mode starts from a clean page and keeps everything in memory only. */
     fun setMode(mode: HearthMode) = viewModelScope.launch {
         if (mutable.value.mode == mode) return@launch
+        abandonTurn()
         if (mode == HearthMode.TEST) {
             mutable.update {
-                it.copy(mode = mode, openConversation = null, messages = emptyList(), streaming = null, streamLabel = null, droppedTurns = 0, notice = null)
+                it.copy(mode = mode, openConversation = null, messages = emptyList(), streaming = null, streamLabel = null, droppedTurns = 0, pendingQuestion = null, notice = null)
             }
             return@launch
         }
@@ -271,7 +337,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         val first = conversations.firstOrNull()?.id
         val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
         mutable.update {
-            it.copy(mode = mode, conversations = conversations, openConversation = first, messages = messages, streaming = null, streamLabel = null, droppedTurns = 0, notice = null)
+            it.copy(mode = mode, conversations = conversations, openConversation = first, messages = messages, streaming = null, streamLabel = null, droppedTurns = 0, pendingQuestion = null, notice = null)
         }
     }
 
@@ -303,27 +369,33 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         if (question.isEmpty() || operation?.isActive == true) return
         val chosen = choose(character) ?: return
         val turn = Turn(character, current.mode, current.openConversation, question, chosen)
+        val token = ++generationToken
         val buffer = StringBuilder()
         operation = viewModelScope.launch {
             try {
                 val window = withContext(Dispatchers.IO) {
                     chat.window(turn.character, turn.conversationId, turn.question, budgetFor(turn.character), turn.mode, current.messages)
                 }
-                mutable.update {
-                    it.copy(busy = true, streaming = "", streamLabel = turn.chosen.label, droppedTurns = window.droppedTurns, notice = null)
+                if (token == generationToken) {
+                    mutable.update {
+                        it.copy(busy = true, streaming = "", streamLabel = turn.chosen.label, droppedTurns = window.droppedTurns, notice = null)
+                    }
                 }
                 stream(turn, window.messages) { delta ->
                     buffer.append(delta)
-                    mutable.update { it.copy(streaming = buffer.toString()) }
+                    if (token == generationToken) mutable.update { it.copy(streaming = buffer.toString()) }
                 }
-                finishTurn(turn, buffer.toString())
+                finishTurn(turn, buffer.toString(), token = token)
             } catch (cancelled: CancellationException) {
-                withContext(NonCancellable) { finishTurn(turn, buffer.toString(), stopped = true) }
+                withContext(NonCancellable) { finishTurn(turn, buffer.toString(), stopped = true, token = token) }
                 throw cancelled
             } catch (failure: Exception) {
-                mutable.update { it.copy(notice = failure.message ?: "生成失败") }
+                if (token == generationToken) mutable.update { it.copy(notice = failure.message ?: "生成失败") }
             } finally {
-                currentChosen = null
+                if (token == generationToken) {
+                    cloudModel = null
+                    currentChosen = null
+                }
                 mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
             }
         }
@@ -335,6 +407,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         val character = current.openCharacter ?: return
         if (operation?.isActive == true) return
         val chosen = choose(character) ?: return
+        val token = ++generationToken
         val buffer = StringBuilder()
         operation = viewModelScope.launch {
             var turn: Turn? = null
@@ -342,31 +415,39 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 val prepared = withContext(Dispatchers.IO) { regeneration(character) } ?: return@launch
                 val (question, window) = prepared
                 turn = Turn(character, current.mode, current.openConversation, question, chosen)
-                mutable.update {
-                    it.copy(busy = true, streaming = "", streamLabel = chosen.label, droppedTurns = window.droppedTurns, notice = null)
+                if (token == generationToken) {
+                    mutable.update {
+                        it.copy(busy = true, streaming = "", streamLabel = chosen.label, droppedTurns = window.droppedTurns, notice = null)
+                    }
                 }
                 stream(requireNotNull(turn), window.messages) { delta ->
                     buffer.append(delta)
-                    mutable.update { it.copy(streaming = buffer.toString()) }
+                    if (token == generationToken) mutable.update { it.copy(streaming = buffer.toString()) }
                 }
-                replaceTurn(requireNotNull(turn), buffer.toString())
+                replaceTurn(requireNotNull(turn), buffer.toString(), token = token)
             } catch (cancelled: CancellationException) {
-                turn?.let { withContext(NonCancellable) { replaceTurn(it, buffer.toString(), stopped = true) } }
+                turn?.let { withContext(NonCancellable) { replaceTurn(it, buffer.toString(), stopped = true, token = token) } }
                 throw cancelled
             } catch (failure: Exception) {
-                mutable.update { it.copy(notice = failure.message ?: "生成失败") }
+                if (token == generationToken) mutable.update { it.copy(notice = failure.message ?: "生成失败") }
             } finally {
-                currentChosen = null
+                if (token == generationToken) {
+                    cloudModel = null
+                    currentChosen = null
+                }
                 mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
             }
         }
     }
 
     fun stop() {
-        // Only the local engine has something to abort inside it; a cloud request is cancelled with
-        // the coroutine that is waiting for it.
         when (currentChosen?.isCloud) {
-            true -> operation?.cancel()
+            // A cloud request is aborted where it is: disconnect the connection, then cancel the job
+            // so nothing that already arrived is shown or stored.
+            true -> {
+                cloudModel?.stop()
+                operation?.cancel()
+            }
             else -> engine.stop()
         }
     }
@@ -399,7 +480,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             }
             is Chosen.Cloud -> {
                 val test = turn.mode == HearthMode.TEST
-                CloudChatModel(
+                val built = CloudChatModel(
                     gateway = gateway().gateway,
                     serviceName = chosen.service.name,
                     baseUrl = chosen.service.baseUrl,
@@ -411,6 +492,8 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                     omitAuditBody = test,
                     naturalChat = true,
                 )
+                cloudModel = built
+                built
             }
         }
         // The cloud model keeps its request on the caller's dispatcher, so the collection runs on IO;
@@ -430,6 +513,12 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 if (character.modelName.isBlank()) {
                     mutable.update { it.copy(notice = "这个人物还没有选云端模型，请在人物编辑里选一个") }
+                    return null
+                }
+                if (character.cloudConfirmedTarget != cloudTarget(service.id, service.baseUrl)) {
+                    // Checked before every send: another service, or the same one at another
+                    // address, has to be agreed to again.
+                    mutable.update { it.copy(notice = "这个人物要发的云端服务或地址变了，请在人物编辑里重新确认一次") }
                     return null
                 }
                 Chosen.Cloud(service, "云端 · ${service.name} ${character.modelName}")
@@ -453,17 +542,25 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false) {
+    private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, token: Int) {
         // The turn is only written when something was actually produced. The mode and the
         // conversation come from the snapshot, so a page change mid-generation cannot move it.
-        if (answer.isBlank()) return
         val byEngine = !turn.chosen.isCloud && engine.lastStats?.stopped == true
         val wasStopped = stopped || byEngine
+        if (answer.isBlank()) {
+            // Nothing came out at all: nothing is stored, and the question goes back to the box so
+            // stopping early does not make it vanish.
+            if (wasStopped && token == generationToken) {
+                mutable.update { it.copy(streaming = null, pendingQuestion = turn.question, notice = "已停止，还没有回答") }
+            }
+            return
+        }
         val conversationId = withContext(Dispatchers.IO) {
             chat.finish(turn.character, turn.conversationId, turn.question, answer, turn.chosen.label, now(), turn.mode)
         }
         if (conversationId == null) {
-            // Test mode: the turn only lives on this screen.
+            // Test mode: the turn only lives on this screen, and only while it is still this turn.
+            if (token != generationToken) return
             mutable.update {
                 it.copy(
                     messages = it.messages + HearthMessage(ChatRole.USER, turn.question, null) +
@@ -474,6 +571,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+        if (token != generationToken) return
         val conversations = withContext(Dispatchers.IO) { log.conversations(turn.character.id) }
         val messages = withContext(Dispatchers.IO) { log.messages(conversationId) }
         mutable.update {
@@ -487,9 +585,15 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun replaceTurn(turn: Turn, answer: String, stopped: Boolean = false) {
-        if (answer.isBlank()) return
+    private suspend fun replaceTurn(turn: Turn, answer: String, stopped: Boolean = false, token: Int) {
+        if (token != generationToken) return
         val wasStopped = stopped || (!turn.chosen.isCloud && engine.lastStats?.stopped == true)
+        if (answer.isBlank()) {
+            if (wasStopped) {
+                mutable.update { it.copy(streaming = null, pendingQuestion = turn.question, notice = "已停止，还没有回答") }
+            }
+            return
+        }
         val stored = turn.conversationId?.let { id ->
             if (withContext(Dispatchers.IO) { chat.redo(id, answer, turn.chosen.label, now(), turn.mode) }) id else null
         }

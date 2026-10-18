@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -30,12 +31,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +55,8 @@ fun HearthSpace(padding: PaddingValues, vm: HearthViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     // Services, models and characters can change on the other tabs, so refresh on every entry.
     LaunchedEffect(Unit) { vm.refresh() }
+    // Leaving the hearth space stops whatever is running and drops the temporary test session.
+    DisposableEffect(vm) { onDispose { vm.leaveHearth() } }
     val editing = state.editing
     val character = state.openCharacter
     when {
@@ -312,8 +317,9 @@ private fun CharacterEditor(vm: HearthViewModel, state: HearthState, draft: Char
             title = { Text("这个人物改用云端模型？") },
             text = {
                 Text(
-                    "这个人物的聊天内容（以后还有它对你的记忆）会发给「${pending.serviceName}」。" +
-                        "确认后才会生效，你在对话页可以随时改回本地模型。",
+                    "这个人物以后发给「${pending.serviceName}」的内容包括：人物设定、你这轮问的话、" +
+                        "以前的对话（P2-3 以后还有它对你的记忆）。确认后才会生效，你在对话页可以随时改回本地模型。\n\n" +
+                        "「测试模式 · 不留记录」只管手机上的记录：内容照样会发给这家服务。",
                 )
             },
             confirmButton = { TextButton(onClick = vm::confirmCloud) { Text("知道了，用云端") } },
@@ -341,6 +347,27 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
     var text by rememberSaveable { mutableStateOf("") }
     var historyOpen by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<HearthConversation?>(null) }
+    val listState = rememberLazyListState()
+    var followTail by remember { mutableStateOf(true) }
+    // A turn that produced nothing puts its question back here, so stopping early loses nothing.
+    LaunchedEffect(state.pendingQuestion) {
+        val pending = state.pendingQuestion ?: return@LaunchedEffect
+        text = pending
+        vm.consumePendingQuestion()
+    }
+    // Follow the newest message while the user is at the bottom; leave them alone once they scroll up.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
+            .collect { (scrolling, _) -> if (scrolling) followTail = false }
+    }
+    LaunchedEffect(listState, state.messages.size, state.streaming) {
+        val newest = state.messages.size + if (state.streaming != null) 1 else 0
+        if (newest == 0) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (lastVisible >= info.totalItemsCount - 1) followTail = true
+        if (followTail) listState.animateScrollToItem(newest)
+    }
     BackHandler(onBack = vm::closeCharacter)
     Column(Modifier.fillMaxSize().padding(padding)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -389,6 +416,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
         HorizontalDivider()
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
+            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
