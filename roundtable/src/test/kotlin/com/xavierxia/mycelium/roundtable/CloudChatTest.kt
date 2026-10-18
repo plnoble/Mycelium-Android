@@ -22,6 +22,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.net.SocketTimeoutException
 import java.nio.file.Files
+import java.sql.DriverManager
 import kotlin.io.path.readText
 
 class CloudChatTest {
@@ -200,6 +201,45 @@ class CloudChatTest {
         store.delete(id)
         assertTrue(store.messages(id).isEmpty())
         assertTrue(store.conversations("luchuan").isEmpty())
+    }
+
+    /**
+     * The device test searches the SQLCipher file for a sentence in byte space. This proves the
+     * same comparison actually hits when a file is NOT encrypted, so the device assertion can fail.
+     */
+    @Test
+    fun theByteSpaceSearchUsedOnTheDeviceFindsAnUnencryptedSentence() {
+        val file = File(directory, "plain.sqlite").apply { delete() }
+        val sentence = "明文对话句子不应出现在库文件里"
+        val connection = DriverManager.getConnection("jdbc:sqlite:${file.path}")
+        try {
+            val session = object : SqlSession {
+                override fun exec(sql: String, args: List<Any?>) {
+                    if (args.isEmpty()) {
+                        connection.createStatement().use { it.execute(sql) }
+                    } else {
+                        connection.prepareStatement(sql).use { statement ->
+                            args.forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+                            statement.executeUpdate()
+                        }
+                    }
+                }
+
+                override fun query(sql: String, args: List<Any?>): List<List<Any?>> = emptyList()
+
+                override fun close() = Unit
+            }
+            ConversationStore { session }.append(
+                "luchuan", "ver-1", null, sentence, "回答也不应出现", "[]", "假服务", "deepseek-flash", "t",
+            )
+        } finally {
+            connection.close()
+        }
+
+        val latin = String(file.readBytes(), Charsets.ISO_8859_1)
+        assertTrue(latin.startsWith("SQLite format 3"))
+        assertTrue(latin.contains(String(sentence.toByteArray(), Charsets.ISO_8859_1)))
+        assertTrue(latin.contains(String("回答也不应出现".toByteArray(), Charsets.ISO_8859_1)))
     }
 
     private fun chat(server: LocalHttp, readTimeoutMs: Int = 60_000) = CloudChat(

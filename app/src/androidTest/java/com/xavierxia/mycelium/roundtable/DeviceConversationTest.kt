@@ -50,7 +50,13 @@ class DeviceConversationTest {
         }
         val bytes = file.readBytes()
         assertTrue(bytes.size > sentence.toByteArray().size)
-        assertFalse(String(bytes, Charsets.ISO_8859_1).contains(sentence))
-        assertFalse(String(bytes, Charsets.ISO_8859_1).contains("回答也不应出现"))
+        // Compare in byte space. ISO-8859-1 maps every byte to one char, so a UTF-8
+        // sentence survives this view and the search can actually hit. Comparing the
+        // decoded text against the original CJK string would never match, and the
+        // check would pass no matter what the file contains.
+        val latin = String(bytes, Charsets.ISO_8859_1)
+        assertFalse(latin.contains(String(sentence.toByteArray(), Charsets.ISO_8859_1)))
+        assertFalse(latin.contains(String("回答也不应出现".toByteArray(), Charsets.ISO_8859_1)))
+        assertFalse("库文件还是明文 sqlite", latin.startsWith("SQLite format 3"))
     }
 }
