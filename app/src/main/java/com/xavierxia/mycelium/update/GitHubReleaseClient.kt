@@ -1,44 +1,39 @@
 package com.xavierxia.mycelium.update
 
 import com.xavierxia.mycelium.BuildConfig
+import com.xavierxia.mycelium.net.HttpText
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
+
+/** Status and body of one GET. The app's implementation goes through the outbound gateway. */
+fun interface HttpGet {
+    fun get(url: String, headers: Map<String, String>, timeoutMs: Int): HttpText
+}
 
 /** Metadata boundary for UpdateManager's future download, verification and installation flow. */
 fun interface ReleaseSource {
     fun latestRelease(): ReleaseInfo?
 }
 
+/** No default transport: the app passes the gateway, so every update check is whitelisted and audited. */
 class GitHubReleaseClient(
-    private val openConnection: (URL) -> HttpURLConnection = {
-        it.openConnection() as HttpURLConnection
-    }
+    private val get: HttpGet,
 ) : ReleaseSource {
     override fun latestRelease(): ReleaseInfo? {
         val endpoint =
             "https://api.github.com/repos/${BuildConfig.GITHUB_OWNER}/${BuildConfig.GITHUB_REPO}/releases/latest"
-
-        val connection = openConnection(URL(endpoint)).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            setRequestProperty("User-Agent", "Mycelium-Android/${BuildConfig.VERSION_NAME}")
-        }
-
-        return try {
-            when (connection.responseCode) {
-                HttpURLConnection.HTTP_NOT_FOUND -> null
-                HttpURLConnection.HTTP_OK -> {
-                    val json = connection.inputStream.bufferedReader().use { it.readText() }
-                    parseRelease(JSONObject(json))
-                }
-                else -> error("GitHub returned HTTP ${connection.responseCode}")
-            }
-        } finally {
-            connection.disconnect()
+        val response = get.get(
+            endpoint,
+            mapOf(
+                "Accept" to "application/vnd.github+json",
+                "X-GitHub-Api-Version" to "2022-11-28",
+                "User-Agent" to "Mycelium-Android/${BuildConfig.VERSION_NAME}",
+            ),
+            10_000,
+        )
+        return when (response.status) {
+            404 -> null
+            200 -> parseRelease(JSONObject(response.body))
+            else -> error("GitHub returned HTTP ${response.status}")
         }
     }
 

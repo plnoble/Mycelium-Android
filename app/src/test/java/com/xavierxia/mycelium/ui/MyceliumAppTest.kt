@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.xavierxia.mycelium.net.HttpText
 import com.xavierxia.mycelium.update.GitHubReleaseClient
 import com.xavierxia.mycelium.update.ReleaseSource
 import com.xavierxia.mycelium.update.UpdateManager
@@ -25,14 +26,7 @@ class MyceliumAppTest {
 
     @Test
     fun github404DisplaysNoReleaseAndAllowsAnotherCheck() {
-        val manager = UpdateManager(GitHubReleaseClient { url ->
-            object : HttpURLConnection(url) {
-                override fun getResponseCode() = HTTP_NOT_FOUND
-                override fun connect() = Unit
-                override fun disconnect() = Unit
-                override fun usingProxy() = false
-            }
-        })
+        val manager = UpdateManager(GitHubReleaseClient { _, _, _ -> HttpText(404, "") })
         compose.setContent { MyceliumApp(manager) }
         compose.onNodeWithText("我的").performClick()
 
