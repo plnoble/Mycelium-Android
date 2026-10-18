@@ -1,0 +1,10 @@
+# Mycelium Android 正式发布签名证书的 SHA-256 指纹（公开信息，不是密钥，也不能当密钥用）
+#
+# 来源：GitHub 发布 v0.1.1 的资产 mycelium-v0.1.1.apk，用 apksigner --print-certs 读出。
+#   build-tools 36.0.0；证书 CN=Mycelium Android Release；密钥 RSA 4096；签名方案仅 v2；签名者 1 个。
+# 实测日期：2026-10-18（Asia/Shanghai）。
+# 用途：scripts/release-guard.sh 在每次发版构建后比对 APK 的签名证书指纹，不一致就中止发布。
+#   .github/workflows/release.yml 也用它，所以只需要改这一处。
+# 注意：这是唯一的正式签名证书。真的换成别的证书，已装 0.1.1 及以后的手机就无法覆盖安装，
+#   只能卸载重装（会丢数据）。换证书时必须同时改这个文件、并在发布说明里告诉用户。
+bb72a9c7e71137dd62558a9a644c1b5a44eae8501d31ee27138887835ba7fe68

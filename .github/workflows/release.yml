@@ -1,15 +1,24 @@
 name: Release APK
 
+# Two entry points (P2-2b step 6):
+#   * a v* tag push builds, signs, runs the release gate and publishes the GitHub Release;
+#   * workflow_dispatch is the dry run: it builds, signs, and runs the same release gate (release
+#     notes, versionCode and signing fingerprint included), then prints versionCode, sha256 and the
+#     certificate fingerprint. It never creates a release and never uploads the APK.
+#     Use it after the first push to confirm that GitHub can build the signed APK with llama.cpp.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
+# The build job only reads. The publish job alone asks for contents: write, so a dry run cannot
+# write anything at all (it also skips the artifact upload).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     # P2-1b: the local model engine is compiled from source in this job, so the build takes longer
     # than it did before P2-1. Raised from 20 to 60 minutes; the signing steps below are unchanged.
@@ -18,14 +27,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # scripts/release-guard.sh compares versionCode against the previous release tag, so the
+          # full history and every tag are needed here (a shallow clone would silently skip that
+          # check).
+          fetch-depth: 0
 
-      - name: Verify tag matches versionName
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          VER=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
-          echo "tag=$TAG versionName=$VER"
-          test -n "$VER"
-          test "$TAG" = "$VER" || { echo "::error::tag($TAG) 与 versionName($VER) 不一致，发布中止"; exit 1; }
+      - name: Fetch tags for the versionCode check
+        run: git fetch --tags --force --quiet
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -66,6 +75,25 @@ jobs:
         run: |
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mycelium-release.jks"
 
+      # A tag push uses the pushed tag. The manual dry run has no tag, so it derives one from
+      # versionName: that keeps the release-notes, versionCode and fingerprint checks meaningful.
+      - name: Resolve the release tag
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VER="$(grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' app/build.gradle.kts | head -1 | sed -e 's/.*"\(.*\)"/\1/')"
+            test -n "$VER"
+            TAG="v$VER"
+            echo "试跑模式：没有推送标签，按 versionName 取 $TAG"
+          else
+            TAG="$GITHUB_REF_NAME"
+            case "$TAG" in
+              v[0-9]*) ;;
+              *) echo "::error::标签格式不对：$TAG"; exit 1 ;;
+            esac
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "本次使用标签：$TAG"
+
       - name: Build signed release APK
         env:
           MYCELIUM_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mycelium-release.jks
@@ -75,15 +103,69 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk "mycelium-${GITHUB_REF_NAME}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "mycelium-$RELEASE_TAG.apk"
+
+      # Tag/versionName, docs/releases/<tag>.md, versionCode growth and the pinned signing
+      # certificate fingerprint. Any failure stops the release here.
+      - name: Release gate
+        run: bash scripts/release-guard.sh --tag "$RELEASE_TAG" --apk "mycelium-$RELEASE_TAG.apk"
 
       - name: Generate SHA-256
-        run: sha256sum "mycelium-${GITHUB_REF_NAME}.apk" > "mycelium-${GITHUB_REF_NAME}.apk.sha256"
+        run: sha256sum "mycelium-$RELEASE_TAG.apk" > "mycelium-$RELEASE_TAG.apk.sha256"
+
+      # The dry run stops here: versionCode, sha256, size and the fingerprint (appended by
+      # release-guard.sh) are printed, and the APK goes nowhere.
+      - name: Dry run summary (no publish, no upload)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          APK="mycelium-$RELEASE_TAG.apk"
+          SHA="$(cut -d' ' -f1 "$APK.sha256")"
+          echo "试跑完成：$RELEASE_TAG"
+          echo "APK 大小：$(stat -c%s "$APK") 字节"
+          echo "sha256：$SHA"
+          {
+            echo ""
+            echo "### 试跑结果（不发布、不上传 APK）"
+            echo ""
+            echo "- APK 大小：$(stat -c%s "$APK") 字节"
+            echo "- sha256：\`$SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the signed APK (tag push only)
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          # Only a tag push reaches this step, so github.ref_name is the release tag itself.
+          path: |
+            mycelium-${{ github.ref_name }}.apk
+            mycelium-${{ github.ref_name }}.apk.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    # Only a real tag push publishes. The manual dry run ends with the build job.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the signed APK built above
+        uses: actions/download-artifact@v4
+        with:
+          name: release-apk
+          path: release
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          # The release notes are the repository's Chinese file. The English auto-generated commit
+          # list is gone; release-guard.sh has already aborted if this file is missing or empty.
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: |
-            mycelium-${{ github.ref_name }}.apk
-            mycelium-${{ github.ref_name }}.apk.sha256
+            release/mycelium-${{ github.ref_name }}.apk
+            release/mycelium-${{ github.ref_name }}.apk.sha256
