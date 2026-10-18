@@ -50,7 +50,7 @@
 - 试跑会照常装 NDK、编 llama.cpp、构建、用正式 keystore 签名、跑同一个发版闸门（发布说明、versionCode、签名指纹都在内），然后算 sha256，把版本号、APK 大小、sha256 和证书指纹打进日志与任务摘要。
 - 试跑**不建 Release、不上传 APK**（构建 job 只有 `contents: read`；发布是另一个 job，试跑时不会跑）。
 - 用途：确认 GitHub 上能编出带 llama.cpp 的**签名**包，且指纹对得上。试跑里的标签是从 `versionName` 推出来的 `v<版本>`。
-- 试跑不能验证「Release 附件齐全」——那要等真正打标签那次。
+- 试跑不能验证「Release 附件齐全」——那要等真正打标签那次；也验证不了**真实标签事件**：试跑用的标签是从 `versionName` 推出来的，所以闸门第 1 项「标签与 versionName 一致」在试跑里恒为真。
 
 ## 8. 打标签
 
@@ -99,4 +99,4 @@ bash scripts/release-guard.sh --tag "$RELEASE_TAG" --apk "mycelium-$RELEASE_TAG.
 - **闸门说「找不到任何前序版本标签」**：说明这次 checkout 里没有标签历史（浅克隆最常见）。先按上面的 `fetch-depth: 0` + `git fetch --tags --force` 补全，再重跑闸门；**不要去改闸门来跳过这项检查**，也不要手工传 `--previous-tag` 顶过去（CI 里本就会被拒）。
 - **标签已推、发布不对**：不要删标签重推（会造成混乱）。先定位并修好问题，发一个补丁版本（0.4.1）。
 - **CI 里编不出带 llama.cpp 的包**：先看「Prepare pinned llama.cpp source」与 NDK 安装两步的日志；本地离线构建能过不代表联网 runner 能过。
-- **0.1.1 上的用户收不到更新提示**：0.1.1 的「检查更新」只会用浏览器打开发布页，这是预期行为，不是故障。
+- **0.1.1 上的用户不会收到应用内安装提示**：0.1.1 的「检查更新」只会在浏览器里打开 **APK 的下载地址**（旧版源码是 `apkDownloadUrl = apkUrl ?: html_url`），没有应用内安装，也不会跑 0.4.0 新增的四项校验。这是预期行为，不是故障。
