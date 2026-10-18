@@ -23,6 +23,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -76,6 +77,12 @@ import com.xavierxia.mycelium.roundtable.InstalledVersion
 import com.xavierxia.mycelium.roundtable.Roundtable
 import com.xavierxia.mycelium.roundtable.SqlCipherPackDatabase
 import com.xavierxia.mycelium.roundtable.StoredMessage
+import com.xavierxia.mycelium.update.CurrentAppFacts
+import com.xavierxia.mycelium.update.DownloadFailureReason
+import com.xavierxia.mycelium.update.DownloadUiState
+import com.xavierxia.mycelium.update.GatewayApkDownloader
+import com.xavierxia.mycelium.update.LocalApkVerifier
+import com.xavierxia.mycelium.update.PackageManagerApkFactsReader
 import com.xavierxia.mycelium.update.ReleaseInfo
 import com.xavierxia.mycelium.update.UpdateCenter
 import com.xavierxia.mycelium.update.UpdateError
@@ -121,11 +128,22 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
     val scope = rememberCoroutineScope()
     val center = remember(updateManager, scope) {
         val manager = updateManager ?: UpdateManager(chat.releaseSource())
+        val files = UpdateFiles(File(context.cacheDir, "updates"))
+        // 第 4 步接线：应用内下载与四项校验都走 ChatService 手上的同一个网关，
+        // 审计因此和聊天/检查更新写进同一份 privacy/audit.json。
+        val transport = chat.updateTransport()
         UpdateCenter(
             updates = manager,
             prefs = UpdatePreferences(context),
             isDebugPackage = BuildConfig.APPLICATION_ID.endsWith(".debug"),
-            files = UpdateFiles(File(context.cacheDir, "updates")),
+            files = files,
+            downloader = GatewayApkDownloader(files, transport),
+            verifier = LocalApkVerifier(
+                transport = transport,
+                archive = PackageManagerApkFactsReader(context),
+                installed = CurrentAppFacts(context),
+                selfPackageName = BuildConfig.APPLICATION_ID,
+            ),
             scope = scope,
         )
     }
@@ -480,7 +498,9 @@ private fun MineScreen(
                 UpdateCard(
                     release = release,
                     installReady = center.installReady,
+                    download = state.download,
                     onDownload = { center.startDownload() },
+                    onCancel = { center.cancelDownload() },
                     onIgnore = { center.ignore(release.tagName) },
                 )
             }
@@ -553,12 +573,17 @@ private fun UpdateText(result: UpdateResult?) {
 /**
  * 「我的」页顶部的更新卡片：版本号、大小、更新说明（纯文本，太长可展开）、忽略、
  * 以及（接线后）下载并安装。发布页按钮始终在：缺附件、被白名单拒绝、签名读不出都还能点到它。
+ *
+ * 下载中点「取消」立刻停，进度条按 `written / total` 前进；`total` 未知时是不确定态。
+ * 校验失败的人话由 `DownloadUiState.Failed.message` 带上来（第 4 步：要说清是哪一项）。
  */
 @Composable
 private fun UpdateCard(
     release: ReleaseInfo,
     installReady: Boolean,
+    download: DownloadUiState,
     onDownload: () -> Unit,
+    onCancel: () -> Unit,
     onIgnore: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -572,11 +597,34 @@ private fun UpdateCard(
             if (release.releaseNotes.isNotBlank()) {
                 UpdateNotes(release.releaseNotes)
             }
+            when (download) {
+                is DownloadUiState.Running -> {
+                    val total = download.total
+                    if (total != null && total > 0L) {
+                        LinearProgressIndicator(
+                            progress = { (download.written.toFloat() / total).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text("下载中 ${UpdateFormat.mebibytes(download.written)} / ${UpdateFormat.mebibytes(total)}")
+                    } else {
+                        // 服务器没说长度：不确定态，不假装知道百分比。
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("下载中 ${UpdateFormat.mebibytes(download.written)}")
+                    }
+                }
+                is DownloadUiState.Verifying -> Text("正在校验下载的文件…")
+                is DownloadUiState.Ready -> Text("下载并校验通过，可以安装。")
+                is DownloadUiState.Installing -> Text("正在安装…")
+                is DownloadUiState.Failed -> Text(downloadFailureText(download.reason, download.message))
+                is DownloadUiState.Idle -> Unit
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // 下载/校验/安装三件都接线（且非调试包、两个附件都在）才画这个按钮：
                 // 不放按了没用的入口，也不给缺附件的发布画一个装不上的按钮。
                 val installable = release.apkUrl != null && release.sha256Url != null
-                if (installReady && installable) {
+                if (download is DownloadUiState.Running) {
+                    Button(onClick = onCancel) { Text("取消") }
+                } else if (installReady && installable && download !is DownloadUiState.Ready) {
                     Button(onClick = onDownload) { Text(stringResource(R.string.update_download_install)) }
                 }
                 TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version)) }
@@ -592,6 +640,16 @@ private fun UpdateCard(
             }
         }
     }
+}
+
+/** 校验/下载失败的人话：第 4 步的实现给了具体项就用它，否则按类型回退到通用文案。 */
+private fun downloadFailureText(reason: DownloadFailureReason, message: String?): String = message ?: when (reason) {
+    DownloadFailureReason.ChecksumMismatch -> "校验和不符：下载的文件和发布里的不一致。"
+    DownloadFailureReason.NotAllowed -> "下载被拒绝：地址不在允许的下载域名里。"
+    DownloadFailureReason.Network -> "网络失败，稍后再试。"
+    DownloadFailureReason.Verification -> "校验没通过，下载的文件已经删掉。"
+    DownloadFailureReason.Storage -> "存储空间不够。"
+    DownloadFailureReason.Installation -> "安装没成功。"
 }
 
 /** 更新说明是纯文本（不渲染 Markdown），超过几行折起来，给一个展开入口。 */

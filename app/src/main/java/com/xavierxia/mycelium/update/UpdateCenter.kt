@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.net.DownloadOutcome
 import com.xavierxia.mycelium.net.GatewayCall
+import com.xavierxia.mycelium.net.GatewayCancelled
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,14 +23,19 @@ sealed interface DownloadUiState {
     data object Verifying : DownloadUiState
     data class Ready(val file: File, val size: Long) : DownloadUiState
     data object Installing : DownloadUiState
-    data class Failed(val reason: DownloadFailureReason) : DownloadUiState
+
+    /**
+     * [message] 是失败项的**人话**：四项校验的第 4 步要「说明是哪一项」，空间不足要说「还差多少」。
+     * 第 3 步的既有调用点不传它（null = 只有类型），界面据此回退到按 [reason] 的通用文案。
+     */
+    data class Failed(val reason: DownloadFailureReason, val message: String? = null) : DownloadUiState
 }
 
 /**
- * 下载/校验/安装失败的原因**类型**。界面文案在第 4/5 步真正用到时随代码加进 strings.xml
- * （C3 第 4 条：这一步不提前塞用不到的文案键），所以这里不拼中文。
+ * 下载/校验/安装失败的原因**类型**。校验与空间不足的具体人话在 `Failed.message` 里
+ * （校验器逐项给文案；空间不足由 `SpaceShortage` 给出差值），这里只保留可判定的类型。
  */
-enum class DownloadFailureReason { ChecksumMismatch, NotAllowed, Network, Verification, Installation }
+enum class DownloadFailureReason { ChecksumMismatch, NotAllowed, Network, Verification, Storage, Installation }
 
 /**
  * 「我的」页与底栏红点都读这一份状态。
@@ -145,21 +151,31 @@ class UpdateCenter(
         downloadCall = call
         _state.value = _state.value.copy(download = DownloadUiState.Running(0L, release.apkSizeBytes))
         scope.launch {
-            val expected = downloader.fetchExpectedSha256(release, call)
+            val expected = try {
+                downloader.fetchExpectedSha256(release, call)
+            } catch (_: GatewayCancelled) {
+                // 取消不是失败：不显示错误，`.part` 留给下次续传。
+                finishCancelled()
+                return@launch
+            }
             if (expected == null) {
                 finishFailed(DownloadFailureReason.Network)
                 return@launch
             }
             val target = files.apkFile(release.tagName)
-            val outcome = downloader.downloadApk(release, target, expected, call) { written, total ->
-                _state.value = _state.value.copy(download = DownloadUiState.Running(written, total))
+            val outcome = try {
+                downloader.downloadApk(release, target, expected, call) { written, total ->
+                    _state.value = _state.value.copy(download = DownloadUiState.Running(written, total))
+                }
+            } catch (shortage: SpaceShortage) {
+                // 下载器在下任何字节之前就查了空间（未知大小时拿到真实长度后再查一次）；
+                // C4 第 3 条要求文案里有差值，这里原样带给界面。
+                finishFailed(DownloadFailureReason.Storage, shortage.message)
+                return@launch
             }
             when (outcome) {
                 is DownloadOutcome.Completed -> verifyDownloaded(release, target, outcome)
-                is DownloadOutcome.Cancelled -> {
-                    downloadCall = null
-                    _state.value = _state.value.copy(download = DownloadUiState.Idle)
-                }
+                is DownloadOutcome.Cancelled -> finishCancelled()
                 is DownloadOutcome.ChecksumMismatch -> finishFailed(DownloadFailureReason.ChecksumMismatch)
                 is DownloadOutcome.Rejected -> finishFailed(DownloadFailureReason.NotAllowed)
                 is DownloadOutcome.Failed -> finishFailed(DownloadFailureReason.Network)
@@ -167,9 +183,14 @@ class UpdateCenter(
         }
     }
 
+    /** 点「取消」：立刻停（下载器按 C4 保留 `.part` 以便续传），界面马上回到「没在下」。 */
     fun cancelDownload() {
         downloadCall?.cancel()
         downloadCall = null
+        val current = _state.value.download
+        if (current is DownloadUiState.Running || current is DownloadUiState.Verifying) {
+            _state.value = _state.value.copy(download = DownloadUiState.Idle)
+        }
     }
 
     fun install() {
@@ -231,22 +252,28 @@ class UpdateCenter(
 
     private suspend fun verifyDownloaded(release: ReleaseInfo, target: File, outcome: DownloadOutcome.Completed) {
         _state.value = _state.value.copy(download = DownloadUiState.Verifying)
-        when (verifier.verify(target, release)) {
+        when (val verdict = verifier.verify(target, release)) {
             is VerifyOutcome.Verified -> {
                 prefs.pendingApkPath = target.path
                 downloadCall = null
                 _state.value = _state.value.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize))
             }
             is VerifyOutcome.Failed -> {
+                // 校验器已经删过一遍；这里再删一次是为了「校验失败绝不留文件」这条口径不依赖调用顺序。
                 target.delete()
-                finishFailed(DownloadFailureReason.Verification)
+                finishFailed(DownloadFailureReason.Verification, verdict.message)
             }
         }
     }
 
-    private fun finishFailed(reason: DownloadFailureReason) {
+    private fun finishCancelled() {
         downloadCall = null
-        _state.value = _state.value.copy(download = DownloadUiState.Failed(reason))
+        _state.value = _state.value.copy(download = DownloadUiState.Idle)
+    }
+
+    private fun finishFailed(reason: DownloadFailureReason, message: String? = null) {
+        downloadCall = null
+        _state.value = _state.value.copy(download = DownloadUiState.Failed(reason, message))
     }
 
     /**
@@ -254,6 +281,8 @@ class UpdateCenter(
      * 目标 tag 与元数据一致、比当前版本新、没被忽略、已下载的文件还在。
      */
     private fun restore() {
+        // 启动时清一次过期文件（>7 天的 .apk / .part / .sha256）；当前 tag 的 .part 留着续传。
+        files.purge(clock(), prefs.pendingReleaseTag)
         val tag = prefs.pendingReleaseTag
         val candidate = prefs.pendingReleaseJson
             ?.let(ReleaseJson::decode)
