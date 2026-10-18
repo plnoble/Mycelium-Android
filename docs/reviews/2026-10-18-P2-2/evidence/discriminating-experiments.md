@@ -341,8 +341,8 @@ Gradle 控制台那行打印的是后者，两条都来自同一份原始输出�
 
 对 `evidence/r3-logs/` 全部 15 个文件做了正则扫描，结论是**可以入库**：
 
-- 没有本机用户名（`87953` 等）、没有 `C:\Users`、没有邮箱；
-- 没有设备序列号/型号串（`NX809J` 等未出现）、没有 `android_id`/IMEI；
+- 没有本机用户名（`<本机账户名>` 等）、没有 `C:\Users`、没有邮箱；
+- 没有设备序列号/型号串（`<设备型号>` 等未出现）、没有 `android_id`/IMEI；
 - 没有密钥、token、`apiKey` 值（第 2 条复刻件里只出现**测试用的假人物名「老周」**与类名 `xavierxia`，
   后者是包名 `com.xavierxia.mycelium` 的一部分，不是本机用户名）；
 - 路径只有 `D:\Agent\Worktrees\...`、`D:\Development\Android-studio\jbr` 这类工程路径，不含用户名；

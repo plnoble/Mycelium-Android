@@ -57,8 +57,8 @@ promptTokens=12  completionTokens=8
 - JSON 字段只有上表九个，**没有** `apiKey` / `token` / `secret` / `password` / `serial` 之类字段
   （出现的 `promptTokens` / `completionTokens` 是计数，不是凭据）；
 - `host` 21 处**全部是 `127.0.0.1`**，没有局域网或真实地址；全文没有其他 IP 字面量；
-- 没有 `C:\`、`Users`、本机用户名（`87953` 等）、Windows 路径、邮箱、HTTP(S) URL；
-- 没有设备序列号（`NX809J` 等型号串也未出现）、没有 `android_id` / IMEI。
+- 没有 `C:\`、`Users`、本机用户名（`<本机账户名>` 等）、Windows 路径、邮箱、HTTP(S) URL；
+- 没有设备序列号（`<设备型号>` 等型号串也未出现）、没有 `android_id` / IMEI。
 
 需要留意的**非敏感但属个人内容**：`sentBody` 里是用户自己在本机假服务上试聊的正文
 （人物设定「老周」与问句「我很累 / 你好吗」等，以及 2026-10-17 圆桌的记账问答）。
