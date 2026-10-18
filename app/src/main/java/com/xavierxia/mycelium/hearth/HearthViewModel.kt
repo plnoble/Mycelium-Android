@@ -29,6 +29,9 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
+/** A cloud turn that is waiting for the user to agree to the service that would receive it. */
+data class PendingSend(val character: HearthCharacter, val question: String)
+
 data class HearthState(
     val characters: List<HearthCharacter> = emptyList(),
     val activity: Map<String, String> = emptyMap(),
@@ -50,6 +53,8 @@ data class HearthState(
     val mode: HearthMode = HearthMode.IMMERSIVE,
     /** A question that produced nothing (stopped before the first word) and goes back to the box. */
     val pendingQuestion: String? = null,
+    /** A cloud question held back until the user agrees to the receiving service. */
+    val sendConfirm: PendingSend? = null,
     val notice: String? = null,
 )
 
@@ -346,6 +351,33 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     fun consumePendingQuestion() = mutable.update { it.copy(pendingQuestion = null) }
 
+    /**
+     * The user agreed to the cloud receiver that the send was waiting on. The agreement is written
+     * to the character first, so the turn that follows passes the same check it was stopped by.
+     */
+    fun confirmSend() = viewModelScope.launch {
+        val pending = mutable.value.sendConfirm ?: return@launch
+        val service = withContext(Dispatchers.IO) {
+            cloudSettings.services().firstOrNull { it.id == pending.character.serviceId }
+        }
+        if (service == null) {
+            mutable.update { it.copy(sendConfirm = null, notice = "这个人物选的云端服务已经不在了，请在人物编辑里重新选") }
+            return@launch
+        }
+        val target = cloudTarget(service.id, service.baseUrl)
+        withContext(Dispatchers.IO) {
+            characters.update(pending.character.id, draftOf(pending.character).copy(cloudConfirmedTarget = target), now())
+        }
+        val refreshed = withContext(Dispatchers.IO) { characters.character(pending.character.id) } ?: pending.character
+        mutable.update { it.copy(sendConfirm = null, openCharacter = refreshed, notice = null) }
+        send(pending.question)
+    }
+
+    /** Refused: nothing is sent and the question goes back to the box. */
+    fun dismissSendConfirm() = mutable.update {
+        it.copy(sendConfirm = null, pendingQuestion = it.sendConfirm?.question, notice = "已取消，这一轮没有发出去")
+    }
+
     /** Test mode starts from a clean page and keeps everything in memory only. */
     fun setMode(mode: HearthMode) = viewModelScope.launch {
         if (mutable.value.mode == mode) return@launch
@@ -402,6 +434,20 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         val character = current.openCharacter ?: return
         val question = text.trim()
         if (question.isEmpty() || operation?.isActive == true) return
+        if (character.modelKind == ModelKind.CLOUD) {
+            // Nothing leaves the phone until this exact receiver has been agreed to. A changed
+            // service or address asks here, where the user is actually sending, instead of only in
+            // the editor.
+            val service = cloudSettings.services().firstOrNull { it.id == character.serviceId }
+            if (service == null) {
+                mutable.update { it.copy(notice = "这个人物选的云端服务已经不在了，请在人物编辑里重新选") }
+                return
+            }
+            if (character.cloudConfirmedTarget != cloudTarget(service.id, service.baseUrl)) {
+                mutable.update { it.copy(sendConfirm = PendingSend(character, question), notice = null) }
+                return
+            }
+        }
         val chosen = choose(character) ?: return
         val turn = Turn(character, current.mode, current.openConversation, question, chosen)
         val token = ++generationToken

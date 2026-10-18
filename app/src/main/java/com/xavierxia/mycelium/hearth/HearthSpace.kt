@@ -469,6 +469,21 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             }
         }
     }
+    state.sendConfirm?.let { pending ->
+        AlertDialog(
+            onDismissRequest = vm::dismissSendConfirm,
+            title = { Text("这个人物改用云端模型？") },
+            text = {
+                Text(
+                    "这个人物以后发给「${pending.character.serviceName.ifBlank { "云端服务" }}」的内容包括：" +
+                        "人物设定、你这轮问的话、以前的对话（P2-3 以后还有它对你的记忆）。确认后才会生效，你在对话页可以随时改回本地模型。\n\n" +
+                        "「测试模式 · 不留记录」只管手机上的记录：内容照样会发给这家服务。",
+                )
+            },
+            confirmButton = { TextButton(onClick = vm::confirmSend) { Text("知道了，用云端") } },
+            dismissButton = { TextButton(onClick = vm::dismissSendConfirm) { Text("取消") } },
+        )
+    }
     removing?.let { conversation ->
         AlertDialog(
             onDismissRequest = { removing = null },
