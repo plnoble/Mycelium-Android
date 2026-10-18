@@ -21,6 +21,10 @@ android {
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
         buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // 明文 HTTP 只给调试包的走查用（adb reverse 的本机假服务）；正式包显式关闭。
+        // 用清单占位符而不是 debug 清单覆盖：覆盖要靠 tools:replace，而合并单测清单时
+        // 那个标记找不到可替换的声明，清单合并器会报警告（P2-1b）。
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
     }
 
     buildFeatures {
@@ -69,6 +73,7 @@ android {
             applicationIdSuffix = ".debug"
             // The walkthrough points at a fake model on the phone's own loopback. Release builds refuse it.
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "true")
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
         release {
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "false")
