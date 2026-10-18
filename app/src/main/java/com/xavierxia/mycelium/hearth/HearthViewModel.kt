@@ -455,8 +455,22 @@ class HearthViewModel @JvmOverloads constructor(
             mutable.update { it.copy(sendConfirm = pending.copy(target = target), notice = "这家服务的地址又变了，请再确认一次") }
             return@launch
         }
-        withContext(Dispatchers.IO) {
-            characters.update(pending.character.id, draftOf(pending.character).copy(cloudConfirmedTarget = pending.target), now())
+        // One narrow write that asks for the agreement itself: opening the database or waiting for
+        // its write lock can take a while, and by then the dialog may have been cancelled, the page
+        // left or the character switched. The check runs inside that transaction, after it is open
+        // and before a single column is touched, so an abandoned confirmation cannot write at all —
+        // and it never writes the rest of the row, so a name or personality edited while the dialog
+        // waited is not put back from this snapshot.
+        val confirmed = withContext(Dispatchers.IO) {
+            characters.confirmCloudTarget(pending.character.id, pending.target, now(), ::stillWanted)
+        }
+        if (!confirmed) {
+            // Nothing was written. Either the stop got there first — the dialog is gone, so there is
+            // nothing to say — or the character was deleted while the dialog waited.
+            if (stillWanted() && withContext(Dispatchers.IO) { characters.character(pending.character.id) } == null) {
+                mutable.update { it.copy(sendConfirm = null, notice = "这个人物已经不在了") }
+            }
+            return@launch
         }
         if (!stillWanted()) return@launch
         val refreshed = withContext(Dispatchers.IO) { characters.character(pending.character.id) }

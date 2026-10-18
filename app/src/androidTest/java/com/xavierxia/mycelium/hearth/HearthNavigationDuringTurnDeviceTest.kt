@@ -126,6 +126,15 @@ class HearthNavigationDuringTurnDeviceTest {
         }
     }
 
+    /**
+     * 第 4 条：确认任务在**数据库打开/等锁**的时候被取消或离开页面，它再跑也不许发出请求，更不许
+     * 改写人物的确认状态，也不许用旧快照把后来编辑的字段覆盖回去。
+     *
+     * 判别力靠两件事摆出来：进测试模式（这一轮不留记录，写库只可能来自确认本身）；用
+     * [GatedHearthSessions] 把确认写事务（同一个会话上的第 2 个事务，1 是 schema 检查）停在
+     * `BEGIN IMMEDIATE` 之前，再在停住的时候取消弹窗 / 离页，并顺手改一次人物名字。旧写法会在放行
+     * 之后整条快照 update：确认被写上、名字被改回去；新写法在事务内判定有效性，一列都不改。
+     */
     @Test
     fun aConfirmationTheUserLeftBehindCannotSendOrWriteAnything() {
         val context = application()
@@ -141,6 +150,7 @@ class HearthNavigationDuringTurnDeviceTest {
         val serviceName = "P2-2 导航复验服务 $tag"
         val characterName = "导航复验人物 $tag"
         val question = "导航复验：这句还会发出去吗 $tag"
+        val secondQuestion = "导航复验：离页之后这句还会发出去吗 $tag"
         val mustNotArrive = "不该出现的回答 $tag"
         // 人物记的确认目标不是这个服务现在的地址：下一次发送必须先问一次。
         val staleTarget = cloudTarget("另一个服务", "http://127.0.0.1:1")
@@ -154,6 +164,7 @@ class HearthNavigationDuringTurnDeviceTest {
 
         var serviceId: String? = null
         var characterId: String? = null
+        var hold: HearthStageHold? = null
         try {
             val service = settings.addService(null, serviceName, baseUrl, "test-key-127")
             serviceId = service
@@ -172,28 +183,55 @@ class HearthNavigationDuringTurnDeviceTest {
                 now(),
             ).id
             val character = requireNotNull(characters.character(requireNotNull(characterId)))
-            val model = HearthViewModel(context)
+            val gates = GatedHearthSessions(database)
+            val model = HearthViewModel(context, gates::open)
 
             model.openChat(character)
-            waitUntil(20_000) { model.state.value.openCharacter?.id == character.id }
+            waitUntil(20_000) { !model.state.value.historyLoading }
+            // 进测试模式：这一轮不留记录，库里之后出现的任何变化都只可能来自确认任务本身。
+            model.setMode(HearthMode.TEST)
+            waitUntil(20_000) { model.state.value.mode == HearthMode.TEST }
             model.send(question)
             waitUntil(20_000) { model.state.value.sendConfirm != null }
             assertEquals("弹确认框的时候不该有请求", 0, calls.get())
 
-            // 确认任务先起来，紧接着离开页面：两种先后都不许发出请求。
+            // 场景一：确认任务卡在数据库写事务上时取消弹窗，并在同一时刻改一次人物名字。
+            hold = gates.hold(HearthStage.Transaction(2))
             model.confirmSend()
-            model.leaveHearth()
+            hold.await()
+            model.dismissSendConfirm()
+            val editedName = "导航复验人物（改过名字）$tag"
+            characters.update(character.id, draftOf(character).copy(name = editedName), now())
+            hold.letGo()
+            hold = null
             Thread.sleep(1_500)
 
-            assertEquals("离开之后这个确认任务不该发出请求", 0, calls.get())
-            assertEquals(
-                "人物上的确认状态不该被这个任务改写",
-                staleTarget,
-                requireNotNull(characters.character(character.id)).cloudConfirmedTarget,
-            )
+            assertEquals("取消弹窗之后这个确认任务不该发出请求", 0, calls.get())
+            val afterDismiss = requireNotNull(characters.character(character.id))
+            assertEquals("人物上的确认状态不该被这个任务改写", staleTarget, afterDismiss.cloudConfirmedTarget)
+            assertEquals("停住期间编辑的名字不该被旧快照覆盖回去", editedName, afterDismiss.name)
+            assertNull("取消之后不该还挂着这个确认框", model.state.value.sendConfirm)
             assertTrue("不该建出对话", log.conversations(character.id).isEmpty())
+
+            // 场景二：再来一次，这次在同一个窗口里直接离开页面。
+            model.send(secondQuestion)
+            waitUntil(20_000) { model.state.value.sendConfirm != null }
+            hold = gates.hold(HearthStage.Transaction(2))
+            model.confirmSend()
+            hold.await()
+            model.leaveHearth()
+            hold.letGo()
+            hold = null
+            Thread.sleep(1_500)
+
+            assertEquals("离开页面之后这个确认任务不该发出请求", 0, calls.get())
+            val afterLeave = requireNotNull(characters.character(character.id))
+            assertEquals("确认状态仍然不该被改写", staleTarget, afterLeave.cloudConfirmedTarget)
+            assertEquals("改过的名字仍然应该保留", editedName, afterLeave.name)
+            assertTrue("两轮都不该建出对话", log.conversations(character.id).isEmpty())
             assertTrue("提问框的内容应该跟着页面一起收走", model.state.value.pendingQuestion == null)
         } finally {
+            hold?.letGo()
             characterId?.let { characters.delete(it) }
             serviceId?.let { settings.removeService(it) }
             restoreAudit(audit, auditBefore)
@@ -548,6 +586,7 @@ private val leftoverNames = listOf("P2-2 导航复验服务 ", "导航复验人�
 private val leftoverQuestions = listOf(
     "导航复验：这句会不会跟着页面走",
     "导航复验：这句还会发出去吗",
+    "导航复验：离页之后这句还会发出去吗",
     "切历史复验：",
     "返回再进入复验：",
     "刷新窗口复验：",
