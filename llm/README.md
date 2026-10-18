@@ -7,6 +7,16 @@
 
 ~~~powershell
 .\scripts\prepare-llama.ps1 -SourceRepository '<已有的本地 llama.cpp 克隆>'
+.\scripts\check-all.ps1 -LlamaSourceRepository '<已有的本地 llama.cpp 克隆>'
+~~~
+
+`check-all.ps1` 是交付和验收的唯一入口：所有模块的单元测试、`:app` 的 debug 和 release lint、
+调试包 / 正式包 / 测试包，最后给一张汇总表；任何失败或警告都以非零退出码结束。它在全新
+worktree 里对已提交版本跑（P2-1b 起）。等价的 `scripts/check-all.sh` 给 Linux 的 CI 用。
+
+下面这串手写命令保留作参考（P2-1b 之前每个工作包各写一串，口径不一）：
+
+~~~powershell
 .\gradlew.bat --offline :model-api:test :llm:testDebugUnitTest :contract:test :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
 ~~~
 
@@ -14,6 +24,17 @@ JAVA_HOME 指向 Android Studio 自带 JBR，ANDROID_HOME 指向已安装的 And
 使用仓库现有 Gradle 9.5.0，NDK 30.0.16248370，CMake 3.22.1，arm64-v8a / API 29。
 准备脚本不联网；克隆不使用 hardlink/alternates；忽略目录 llm/vendor/ 保存独立源码副本。
 脚本和 CMake 都校验固定 HEAD 及源码干净状态。没有自动联网补取或构建产物入库。
+
+## 警告门禁（P2-1b）
+
+- Kotlin 编译开了 `allWarningsAsErrors`（覆盖生产、单测和 androidTest 三种编译），lint 开了
+  `warningsAsErrors`，自家的 `engine.cpp` 用 `-Wall -Wextra -Werror`。
+- **llama.cpp 的警告不算在内**：它是固定的第三方源码，不能改。`check-all` 按路径 `llm/vendor`
+  把这类警告单独计数（约定豁免），不计入必须修的警告。
+- llama.cpp 的头文件目录在本目标里标成 `SYSTEM`（CMake 的 `-isystem`），所以它的头文件诊断
+  不会被 `-Werror` 当成错误；只有自家的 `engine.cpp` 走严格模式。
+- `GradleDependency`（依赖有新版本）在 `:app` 的 lint 配置里关掉，理由：离线环境下不升级依赖，
+  升级要单独评估。
 
 CPU 构建：GGML_NATIVE=OFF、GGML_OPENMP=OFF、GGML_LLAMAFILE=OFF、LLAMA_OPENSSL=OFF；
 关闭 common、server、tools、examples、app、UI；JNI 使用 -O2 -fexceptions 和 c++_shared。
@@ -46,14 +67,18 @@ SHA256 按 1 MiB 块校验，显示进度并检查 GGUF 魔数、已知文件大
 
 ## 真机复验
 
-先确认共享手机已由其他开发线释放。安装本分支 debug 包；仅当其他线 debug 版本更高时用 adb install -r -d，
-保留应用数据，不卸载、不清数据；不安装 release。
-在「我的 → 本地模型」用系统选择器导入既有 Qwen3.5-4B-Q4_K_M.gguf 后运行：
+用手机前先问用户（2026-10-18 起只有一条开发线，但仍要问，因为手机是用户自己在用）。
+只装调试包 `com.xavierxia.mycelium.debug`，不装 release、不卸载、不清数据，正式版
+`com.xavierxia.mycelium` 保持不动。先装调试包，再装对应的测试包，然后跑 instrumentation
+（离线状态下 `connectedDebugAndroidTest` 缺 UTP 插件，跑不了，改用下面这两步）：
 
 ~~~powershell
-.\gradlew.bat --offline :app:connectedDebugAndroidTest
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
+adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
+在「我的 → 本地模型」用系统选择器导入既有 Qwen3.5-4B-Q4_K_M.gguf 后跑上面的命令。
 测试读取该登记及持久授权，验证 64 token、确定性重复的流式顺序、生成中停止 <1 秒、
 长提示处理中取消 <1 秒、卸载 RSS 回落；文件日志在 debug 应用 files/p2-1-device.txt。
 测试不复制、写入或删除用户原模型。截图和设备原始日志保存在 Windows 侧评审目录，不入公开安卓仓库。
