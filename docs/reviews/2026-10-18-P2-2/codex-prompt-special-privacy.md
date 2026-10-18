@@ -40,4 +40,4 @@
 - 只读，不要改任何文件、不要跑 Gradle（会写构建产物）。构建与真机证据请读 `build/check-all/` 与交付报告里指向的 Windows 仓库证据目录。
 - 结论只能是「通过 / 需修改 / 不通过」；每条「必须修改」写清**什么输入会出什么错**。
 - 用中文；最后一条消息就是完整报告。
-- 末尾写一行 Codex 额度读数（从 `C:\Users\87953\.codex\sessions\` 下最新 rollout 文件的 `rate_limits` 取；取不到写「取不到」）。
+- 末尾写一行 Codex 额度读数（从 `C:\Users\<用户>\.codex\sessions\` 下最新 rollout 文件的 `rate_limits` 取；取不到写「取不到」）。
