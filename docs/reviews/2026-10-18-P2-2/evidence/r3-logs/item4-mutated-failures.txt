@@ -1,0 +1,15 @@
+SUITE com.xavierxia.mycelium.hearth.AbandonedWriteTest  tests=5 skipped=0 failures=0 errors=0
+PASS  redoingAnAbandonedAnswerLeavesTheOldOneAndItsTimeInPlace()
+PASS  aTurnCommittedBeforeTheCallReturnsIsKept()
+PASS  aTurnThatIsStillWantedIsStoredWholeAfterTheSameWait()
+PASS  aRedoThatIsStillWantedReplacesOnlyTheAnswer()
+PASS  aTurnAbandonedWhileTheWriteLockIsHeldIsNotStored()
+SUITE com.xavierxia.mycelium.hearth.CloudConfirmTargetTest  tests=4 skipped=0 failures=1 errors=0
+PASS  confirmingACharacterThatIsGoneWritesNothing()
+FAIL  aConfirmationCancelledWhileTheWriteWaitsChangesNothing()
+  org.opentest4j.AssertionFailedError: org.opentest4j.AssertionFailedError: 取消之后的确认不该算数
+  at: com.xavierxia.mycelium.hearth.CloudConfirmTargetTest.aConfirmationCancelledWhileTheWriteWaitsChangesNothing(CloudConfirmTargetTest.kt:51)
+PASS  aNullTargetRecordsNoAgreementAtAll()
+PASS  aConfirmationOnlyTouchesTheConfirmColumnAndTheTimestamp()
+
+generated: 2026-10-19T05:12:43+08:00

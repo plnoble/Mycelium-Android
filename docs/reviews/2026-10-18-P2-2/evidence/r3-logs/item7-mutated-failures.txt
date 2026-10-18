@@ -1,0 +1,11 @@
+SUITE com.xavierxia.mycelium.llm.LocalModelEngineTest  tests=6 skipped=0 failures=1 errors=0
+PASS  streamsOrderedBodyAndClosesReplacedDescriptor
+FAIL  aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded
+  java.lang.AssertionError: java.lang.AssertionError: 停止之后这次加载必须以失败收场，实际 null
+  at: com.xavierxia.mycelium.llm.LocalModelEngineTest$aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded$1.invokeSuspend(LocalModelEngineTest.kt:98)
+PASS  explicitStopEndsGenerationWithoutCancellingCollector
+PASS  aNativeLoadingStoppedFailureReleasesTheModelAndTheFile
+PASS  collectorCancellationAbortsJniBeforeUnload
+PASS  cancellationDuringLoadReleasesTheOnlyModelAndFile
+
+generated: 2026-10-19T05:13:16+08:00

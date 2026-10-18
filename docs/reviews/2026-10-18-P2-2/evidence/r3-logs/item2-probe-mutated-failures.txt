@@ -1,0 +1,9 @@
+SUITE com.xavierxia.mycelium.hearth.R3Item2NavProbeTest  tests=2 skipped=0 failures=2 errors=0
+FAIL  aSendWhileTheHistoryIsStillBeingReadIsRefused
+  java.lang.AssertionError: java.lang.AssertionError: 历史还没就绪时不该开始任何一轮（notice） expected null, but was:<先在「我的 → 本地模型」导入一个模型，再和人物聊天>
+  at: com.xavierxia.mycelium.hearth.R3Item2NavProbeTest.aSendWhileTheHistoryIsStillBeingReadIsRefused(R3Item2NavProbeTest.kt:157)
+FAIL  theTargetIsFixedAndThePageWaitsAsSoonAsTheSwitchStarts
+  org.junit.ComparisonFailure: org.junit.ComparisonFailure: 切换开始时就该把目标定到新的一段 expected:<[065e5488-f045-4ffd-8f32-676e54eca21f]> but was:<[98573980-e66f-4202-a780-06c463843e2a]>
+  at: com.xavierxia.mycelium.hearth.R3Item2NavProbeTest.theTargetIsFixedAndThePageWaitsAsSoonAsTheSwitchStarts(R3Item2NavProbeTest.kt:141)
+
+generated: 2026-10-19T05:18:24+08:00

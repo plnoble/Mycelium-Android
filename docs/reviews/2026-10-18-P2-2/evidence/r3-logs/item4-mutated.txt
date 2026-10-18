@@ -1,0 +1,42 @@
+> Task :hearth:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:compileKotlin UP-TO-DATE
+> Task :model-api:compileJava NO-SOURCE
+> Task :hearth:processResources NO-SOURCE
+> Task :hearth:processTestResources NO-SOURCE
+> Task :model-api:processResources NO-SOURCE
+> Task :model-api:classes UP-TO-DATE
+> Task :model-api:jar UP-TO-DATE
+> Task :hearth:compileKotlin
+> Task :hearth:compileJava NO-SOURCE
+> Task :hearth:classes UP-TO-DATE
+> Task :hearth:jar
+> Task :hearth:compileTestKotlin UP-TO-DATE
+> Task :hearth:compileTestJava NO-SOURCE
+> Task :hearth:testClasses UP-TO-DATE
+
+> Task :hearth:test FAILED
+
+CloudConfirmTargetTest > aConfirmationCancelledWhileTheWriteWaitsChangesNothing() FAILED
+    org.opentest4j.AssertionFailedError at CloudConfirmTargetTest.kt:51
+gradlew.bat : 
+所在位置 行:1 字符: 352
++ ... ence-logs'; & "$wd\gradlew.bat" --offline --console=plain -p $wd :hea ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+9 tests completed, 1 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':hearth:test'.
+> There were failing tests. See the report at: file:///D:/Agent/Worktrees/Mycelium-Android/p2-2-evidence/hearth/build/r
+eports/tests/test/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 5s
+6 actionable tasks: 3 executed, 3 up-to-date

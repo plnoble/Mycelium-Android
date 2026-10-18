@@ -1,0 +1,16 @@
+SUITE com.xavierxia.mycelium.hearth.AbandonedWriteTest  tests=5 skipped=0 failures=4 errors=0
+FAIL  redoingAnAbandonedAnswerLeavesTheOldOneAndItsTimeInPlace()
+  org.opentest4j.AssertionFailedError: org.opentest4j.AssertionFailedError: 作废的重做不该算成功
+  at: com.xavierxia.mycelium.hearth.AbandonedWriteTest.redoingAnAbandonedAnswerLeavesTheOldOneAndItsTimeInPlace(AbandonedWriteTest.kt:145)
+PASS  aTurnCommittedBeforeTheCallReturnsIsKept()
+FAIL  aTurnThatIsStillWantedIsStoredWholeAfterTheSameWait()
+  org.opentest4j.AssertionFailedError: org.opentest4j.AssertionFailedError: valid() 必须在写入事务内被问到
+  at: com.xavierxia.mycelium.hearth.AbandonedWriteTest.aTurnThatIsStillWantedIsStoredWholeAfterTheSameWait(AbandonedWriteTest.kt:98)
+FAIL  aRedoThatIsStillWantedReplacesOnlyTheAnswer()
+  org.opentest4j.AssertionFailedError: org.opentest4j.AssertionFailedError: valid() 必须在写入事务内被问到
+  at: com.xavierxia.mycelium.hearth.AbandonedWriteTest.aRedoThatIsStillWantedReplacesOnlyTheAnswer(AbandonedWriteTest.kt:198)
+FAIL  aTurnAbandonedWhileTheWriteLockIsHeldIsNotStored()
+  org.opentest4j.AssertionFailedError: org.opentest4j.AssertionFailedError: 作废的一轮不该被存下来 ==> expected: <null> but was: <5409d3ce-9a12-4757-a9b7-af33362d2870>
+  at: com.xavierxia.mycelium.hearth.AbandonedWriteTest.aTurnAbandonedWhileTheWriteLockIsHeldIsNotStored(AbandonedWriteTest.kt:52)
+
+generated: 2026-10-19T05:12:12+08:00

@@ -1,0 +1,21 @@
+> Task :hearth:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:compileKotlin UP-TO-DATE
+> Task :model-api:compileJava NO-SOURCE
+> Task :hearth:compileKotlin UP-TO-DATE
+> Task :hearth:compileJava NO-SOURCE
+> Task :hearth:processResources NO-SOURCE
+> Task :hearth:classes UP-TO-DATE
+> Task :hearth:jar UP-TO-DATE
+> Task :hearth:compileTestKotlin UP-TO-DATE
+> Task :hearth:compileTestJava NO-SOURCE
+> Task :hearth:processTestResources NO-SOURCE
+> Task :hearth:testClasses UP-TO-DATE
+> Task :model-api:processResources NO-SOURCE
+> Task :model-api:classes UP-TO-DATE
+> Task :model-api:jar UP-TO-DATE
+> Task :hearth:test
+
+BUILD SUCCESSFUL in 4s
+6 actionable tasks: 1 executed, 5 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html
