@@ -40,6 +40,14 @@
 | 产物 | debug APK / androidTest APK 已签名；release 未签名 |
 | 证据 | `build/check-all/summary.md`、`gradle.log`（gitignore，只在本机） |
 
+**全新 worktree 的从零验证**（交付要求的那一条）：在 `D:\Agent\Worktrees\Mycelium-Android\p2-2-delivery`
+干净检出提交 `f614d36`，跑 `scripts/check-all.ps1 -LlamaSourceRepository <本地 llama.cpp 克隆>`：
+
+- `worktree: clean`、`commit: f614d36…`、**253 个任务实际执行**（20 个无需执行）、llama.cpp 校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`；
+- 七个模块 **133 用例 0 失败 0 错误**（`:app` 27、`:contract` 22、`:hearth` 34、`:llm` 11、`:model-api` 3、`:net` 12、`:roundtable` 24）；
+- lint `:app` debug/release 均 **0 错 0 警**；`app-debug.apk` / `app-debug-androidTest.apk` 已签名、`app-release-unsigned.apk` 未签名；
+- 结论 **PASS：0 failures, 0 warnings, exit code 0**（原始输出在 `p2-2-work/checkall-freshwt2.txt`）。
+
 ## 三、三轮审核与逐条落实
 
 ### 3.1 开工前方案审（`PLAN-REVIEW.md`，Codex，审基线 `e94599b`）：需修改，12 条
