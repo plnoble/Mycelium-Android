@@ -14,11 +14,12 @@
 # (see llm/README.md); lines whose path contains llm/vendor are counted separately.
 #
 # Usage:
-#   scripts/check-all.sh [--online] [--skip-llama-prepare] [upstream-url]
+#   scripts/check-all.sh [--online] [--skip-llama-prepare] [--tasks a,b,c] [upstream-url]
 #
 #   --online               let Gradle resolve dependencies (the runner has network; local runs must
 #                          stay offline because Maven Central handshakes fail on this machine)
 #   --skip-llama-prepare   llm/vendor/llama.cpp is already prepared
+#   --tasks                comma-separated Gradle selectors for a subset run (debugging only)
 #   upstream-url           passed to scripts/prepare-llama.sh (default: the official repository)
 set -uo pipefail
 
@@ -27,12 +28,13 @@ LOG_DIR="$ROOT/build/check-all"
 ONLINE=0
 SKIP_LLAMA=0
 UPSTREAM=""
-TASKS=(test lintDebug lintRelease assembleDebug assembleRelease assembleDebugAndroidTest)
+SUBSET_TASKS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --online) ONLINE=1 ;;
     --skip-llama-prepare) SKIP_LLAMA=1 ;;
+    --tasks) shift; SUBSET_TASKS="${1:-}" ;;
     *) UPSTREAM="$1" ;;
   esac
   shift
@@ -52,7 +54,7 @@ ANDROID_HOME_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 [ -n "$ANDROID_HOME_DIR" ] || fail "ANDROID_HOME（或 ANDROID_SDK_ROOT）未设置"
 [ -d "$ANDROID_HOME_DIR" ] || fail "ANDROID_HOME 不是目录：$ANDROID_HOME_DIR"
 
-# --- 2. module list (to check the reports and artifacts that must exist) ------
+# --- 2. module list (defines the reports and artifacts that must exist) ------
 
 SETTINGS="$ROOT/settings.gradle.kts"
 [ -f "$SETTINGS" ] || fail "settings.gradle.kts 不存在"
@@ -66,6 +68,13 @@ done < <(grep -o 'include([^)]*)' "$SETTINGS" | grep -o '":[^"]*"' | tr -d '"' |
 
 module_dir() {
   if [ "$1" = ":contract" ]; then echo "contract-lib"; else echo "${1#:}"; fi
+}
+
+# Module name from a path below the repository root (contract-lib maps to :contract).
+module_of_path() {
+  local relative="${1#"$ROOT"/}" first
+  first="${relative%%/*}"
+  if [ "$first" = "contract-lib" ]; then echo ":contract"; else echo ":$first"; fi
 }
 
 module_kind() {
@@ -90,6 +99,22 @@ for module in "${MODULES[@]}"; do
     *) EXPECTED_TASKS+=("$module:test") ;;
   esac
 done
+
+[ "${#APP_MODULES[@]}" -gt 0 ] || fail "没有找到 application 模块"
+
+SUBSET=0
+if [ -n "$SUBSET_TASKS" ]; then
+  SUBSET=1
+  IFS=',' read -r -a TASKS <<< "$SUBSET_TASKS"
+else
+  # "test" has no leading colon on purpose: it selects the same-named task in every subproject, so
+  # a new module is covered without touching this script. The app tasks are derived from
+  # settings.gradle.kts for the same reason.
+  TASKS=(test)
+  for module in "${APP_MODULES[@]}"; do
+    TASKS+=("$module:lintDebug" "$module:lintRelease" "$module:assembleDebug" "$module:assembleRelease" "$module:assembleDebugAndroidTest")
+  done
+fi
 
 # --- 3. llama.cpp source ------------------------------------------------------
 
@@ -121,19 +146,25 @@ GRADLE_EXIT=$?
 
 # --- 5. summary: task states, tests, lint, APKs, warnings --------------------
 
+# An executed task has no trailing state word, so an empty remainder means "executed" and a missing
+# line means the task never took part in this run.
 task_state() {
-  local task="$1" state
-  state="$(grep -E "^> Task $task( |\$)" "$LOG" | tail -1 | sed -E 's/^> Task [^ ]+ ?//')"
-  if [ -z "$state" ]; then echo "没有运行"; else echo "$state"; fi
+  local task="$1" line state
+  line="$(grep -E "^> Task $task( |\$)" "$LOG" | tail -1)"
+  if [ -z "$line" ]; then echo "没有运行"; return; fi
+  state="$(echo "${line#"> Task $task"}" | tr -d ' ')"
+  if [ -z "$state" ]; then echo "executed"; else echo "$state"; fi
 }
 
 TOTAL_TESTS=0; TOTAL_FAILURES=0; TOTAL_ERRORS=0
 TEST_TABLE=""
 for dir in "$ROOT"/*/build/test-results/*/; do
   [ -d "$dir" ] || continue
-  module="${dir#"$ROOT"/}"; module="${module%%/*}"
-  [ "$module" = "contract-lib" ] && module=":contract" || module=":$module"
+  module="$(module_of_path "${dir%/}")"
   task="$(basename "$dir")"
+  # Reports are only read for tasks that took part in this run: a report left over from an earlier
+  # run must never be counted.
+  [ "$(task_state "$module:$task")" != "没有运行" ] || continue
   tests=0; failures=0; errors=0; skipped=0
   for file in "$dir"TEST-*.xml; do
     [ -f "$file" ] || continue
@@ -157,9 +188,10 @@ TOTAL_LINT_ERRORS=0; TOTAL_LINT_WARNINGS=0
 LINT_TABLE=""
 for file in "$ROOT"/*/build/reports/lint-results-*.txt; do
   [ -f "$file" ] || continue
-  module="$(basename "$(dirname "$(dirname "$file")")")"
-  [ "$module" = "contract-lib" ] && module=":contract" || module=":$module"
+  module="$(module_of_path "$file")"
   variant="$(basename "$file" .txt)"; variant="${variant#lint-results-}"
+  suffix="$(echo "${variant:0:1}" | tr '[:lower:]' '[:upper:]')${variant:1}"
+  [ "$(task_state "$module:lint$suffix")" != "没有运行" ] || continue
   counts="$(grep -oE '[0-9]+ errors?, [0-9]+ warnings?' "$file" | tail -1)"
   if [ -n "$counts" ]; then
     errors="$(echo "$counts" | grep -oE '^[0-9]+')"
@@ -173,17 +205,20 @@ for file in "$ROOT"/*/build/reports/lint-results-*.txt; do
 done
 
 APK_TABLE=""
-APK_LIST="$(find "$ROOT" -path '*/build/outputs/apk/*' -name '*.apk' 2>/dev/null | sort)"
-if [ -n "$APK_LIST" ]; then
+APK_PATHS=""
+for module in "${APP_MODULES[@]}"; do
+  dir="$ROOT/$(module_dir "$module")/build/outputs/apk"
+  [ -d "$dir" ] || continue
   while IFS= read -r apk; do
     [ -n "$apk" ] || continue
     size="$(wc -c < "$apk" | tr -d ' ')"
     APK_TABLE+="| $(basename "$apk") | $size 字节 | $apk |"$'\n'
-  done <<< "$APK_LIST"
-fi
+    APK_PATHS+="$apk"$'\n'
+  done < <(find "$dir" -name '*.apk' | sort)
+done
 
 # warnings: llama.cpp (llm/vendor) is exempt, everything else must be fixed
-WARNING_PATTERN='(^w: |warning:|CMake Warning|has been deprecated|is deprecated|Deprecated Gradle features were used)'
+WARNING_PATTERN='(^w: |warning:|Warning:|CMake Warning|has been deprecated|is deprecated|Deprecated Gradle features were used)'
 WARNING_LINES="$(grep -nE "$WARNING_PATTERN" "$LOG" | grep -v 'llm/vendor' || true)"
 EXEMPT_LINES="$(grep -nE "$WARNING_PATTERN" "$LOG" | grep 'llm/vendor' || true)"
 WARNING_COUNT=0; [ -n "$WARNING_LINES" ] && WARNING_COUNT="$(echo "$WARNING_LINES" | wc -l | tr -d ' ')"
@@ -198,38 +233,42 @@ add_problem() { PROBLEMS+="- $1"$'\n'; }
 
 [ "$GRADLE_EXIT" -eq 0 ] || add_problem "Gradle 退出码 $GRADLE_EXIT（构建或测试失败）"
 
-for task in "${EXPECTED_TASKS[@]}"; do
-  state="$(task_state "$task")"
-  if [ "$state" = "没有运行" ]; then add_problem "预期任务没有运行：$task"
-  elif [ "$state" = "FAILED" ]; then add_problem "任务失败：$task"; fi
+for task in $(grep -oE '^> Task :[^ ]+ FAILED' "$LOG" | sed -E 's/^> Task (:[^ ]+) FAILED/\1/' | sort -u); do
+  add_problem "任务失败：$task"
 done
 
-for module in "${MODULES[@]}"; do
-  dir="$ROOT/$(module_dir "$module")"
-  if [ -d "$dir/src/test" ]; then
-    if ! ls "$dir"/build/test-results/*/TEST-*.xml >/dev/null 2>&1; then
-      add_problem "有测试源码但没有测试报告：$module"
-    fi
-  fi
-done
+if [ "$SUBSET" = "0" ]; then
+  for task in "${EXPECTED_TASKS[@]}"; do
+    state="$(task_state "$task")"
+    if [ "$state" = "没有运行" ]; then add_problem "预期任务没有运行：$task"; fi
+  done
 
-for module in "${APP_MODULES[@]:-}"; do
-  [ -n "$module" ] || continue
-  dir="$ROOT/$(module_dir "$module")"
-  for pair in "调试包:debug" "正式包:release" "测试包:androidTest/debug"; do
-    name="${pair%%:*}"; path="${pair#*:}"
-    if ! ls "$dir"/build/outputs/apk/"$path"/*.apk >/dev/null 2>&1; then
-      add_problem "$module 缺少$name（build/outputs/apk/$path/）"
+  for module in "${MODULES[@]}"; do
+    dir="$ROOT/$(module_dir "$module")"
+    if [ -d "$dir/src/test" ]; then
+      if ! ls "$dir"/build/test-results/*/TEST-*.xml >/dev/null 2>&1; then
+        add_problem "有测试源码但没有测试报告：$module"
+      fi
     fi
   done
-  for variant in debug release; do
-    suffix="$(echo "${variant:0:1}" | tr '[:lower:]' '[:upper:]')${variant:1}"
-    state="$(task_state "$module:lint$suffix")"
-    if [ "$state" != "没有运行" ] && [ "$state" != "SKIPPED" ] && [ ! -f "$dir/build/reports/lint-results-$variant.txt" ]; then
-      add_problem "lint 任务跑过但没有报告：$module:lint$suffix"
-    fi
+
+  for module in "${APP_MODULES[@]}"; do
+    dir="$ROOT/$(module_dir "$module")"
+    for pair in "调试包:debug" "正式包:release" "测试包:androidTest/debug"; do
+      name="${pair%%:*}"; path="${pair#*:}"
+      if ! ls "$dir"/build/outputs/apk/"$path"/*.apk >/dev/null 2>&1; then
+        add_problem "$module 缺少$name（build/outputs/apk/$path/）"
+      fi
+    done
+    for variant in debug release; do
+      suffix="$(echo "${variant:0:1}" | tr '[:lower:]' '[:upper:]')${variant:1}"
+      state="$(task_state "$module:lint$suffix")"
+      if [ "$state" != "没有运行" ] && [ "$state" != "SKIPPED" ] && [ ! -f "$dir/build/reports/lint-results-$variant.txt" ]; then
+        add_problem "lint 任务跑过但没有报告：$module:lint$suffix"
+      fi
+    done
   done
-done
+fi
 
 [ "$TOTAL_FAILURES" -eq 0 ] || add_problem "测试失败 $TOTAL_FAILURES 个"
 [ "$TOTAL_ERRORS" -eq 0 ] || add_problem "测试出错 $TOTAL_ERRORS 个"
@@ -248,6 +287,8 @@ fi
   echo
   echo "- 仓库：$ROOT"
   echo "- 提交：$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo '未知')"
+  echo "- 工作区：$([ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ] && echo '干净' || echo '有未提交改动')"
+  echo "- 运行：$([ "$SUBSET" = "1" ] && echo '子集（不是完整门禁）' || echo '完整门禁')"
   echo "- 模式：$([ "$ONLINE" = "1" ] && echo '允许联网' || echo '离线 --offline')"
   echo "- JAVA_HOME：$JAVA_HOME"
   echo "- ANDROID_HOME：$ANDROID_HOME_DIR"
@@ -273,6 +314,14 @@ fi
   echo "| APK | 大小 | 路径 |"
   echo "|---|---|---|"
   printf '%s' "$APK_TABLE"
+  echo
+  echo "## 关键任务状态"
+  echo
+  echo "| 任务 | 状态 |"
+  echo "|---|---|"
+  for task in "${EXPECTED_TASKS[@]}"; do
+    echo "| $task | $(task_state "$task") |"
+  done
   echo
   echo "## 警告"
   echo
