@@ -182,7 +182,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1
 - `-SelfTest` 确实只调用 `-ScanDirectory`，没有实际覆盖历史解析分支。
 - 普通盘符路径只列不失败，符合任务书。
 - 前 8000 字节含 NUL 即跳过内容；本次三个文件为 SQLite 样例、角色包样例和 Gradle wrapper JAR。零令牌匹配不等于这些二进制元数据已经检查。
-- UNC 路径不命中；盘符正斜杠及 Git Bash 的 `/c/Users/...` 会被 `/Users/` 模式命中；中文用户名存在漏检。
+- UNC 路径不命中；盘符正斜杠及 Git Bash 的盘符映射写法（形如 `/c/<用户目录>`）会被用户目录类模式命中；中文用户名存在漏检。
 - `HEAD == origin/main` 时范围为空是 Git 的正常结果，不能作为此前公开历史无问题的证明。
 - 模式拼装和长度门槛能够避免当前脚本自匹配；正常报告不打印命中的内容。文件名本身若含敏感词，直接打印路径仍可能带出该词，后续应补文件名脱敏。
 - `.gitignore` 的这次变更只有 `.local/` 规则及说明、空行；当前跟踪列表没有 APK、GGUF、keystore、JKS 或词表。
