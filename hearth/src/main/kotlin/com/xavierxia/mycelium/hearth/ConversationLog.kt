@@ -13,6 +13,26 @@ data class HearthMessage(val role: ChatRole, val text: String, val model: String
  */
 internal class AbandonedTurn : IllegalStateException("这一轮已经作废")
 
+/**
+ * The one transaction that may store a turn. [valid] is asked **after** the transaction is open and
+ * **before the first row is touched** — opening the session or waiting for its write lock can take a
+ * while, and the user may stop, switch conversation or leave the page while that is happening. Saying
+ * no rolls the whole block back and raises [AbandonedTurn], so the caller can report "nothing was
+ * stored".
+ *
+ * Note that this is the transaction that writes, not the schema check every session open runs first:
+ * a test that gates transactions has to gate this one, or it proves nothing about the check.
+ *
+ * **Committing wins.** If `COMMIT` has already run, the turn is stored even when the stop lands while
+ * the call is still on its way back: nothing here takes it back, and the call returns its normal
+ * result (the conversation id, or true). The check is asked exactly once, at the start of the
+ * transaction; a change of mind after that belongs to the next turn.
+ */
+private fun <T> HearthSession.writeTurn(valid: () -> Boolean, block: () -> T): T = transaction {
+    if (!valid()) throw AbandonedTurn()
+    block()
+}
+
 class ConversationLog(private val connect: () -> HearthSession) {
     fun conversations(characterId: String): List<HearthConversation> = withSession(connect) { session ->
         session.query(
@@ -33,9 +53,10 @@ class ConversationLog(private val connect: () -> HearthSession) {
     /**
      * Stores one question and its answer. The answer keeps the model label it was written by.
      *
-     * [valid] is asked **inside** the transaction, right before anything is written: opening the
-     * session or waiting for the write lock can take a while, and the user may stop or leave while
-     * that is happening. When it says no, the whole turn is dropped without being stored.
+     * [valid] is asked inside the write transaction that actually stores this turn, after that
+     * transaction is open and before its first row is written (see [writeTurn]). When it says no the
+     * whole turn is dropped and nothing is stored; when the transaction has committed, the turn is
+     * kept and this returns the conversation id even if the stop arrives on the way back.
      */
     fun append(
         characterId: String,
@@ -46,8 +67,7 @@ class ConversationLog(private val connect: () -> HearthSession) {
         now: String,
         valid: () -> Boolean = { true },
     ): String = withSession(connect) { session ->
-        session.transaction {
-            if (!valid()) throw AbandonedTurn()
+        session.writeTurn(valid) {
             val id = conversationId ?: UUID.randomUUID().toString()
             if (conversationId == null) {
                 session.exec(
@@ -77,8 +97,7 @@ class ConversationLog(private val connect: () -> HearthSession) {
         now: String,
         valid: () -> Boolean = { true },
     ): Boolean = withSession(connect) { session ->
-        session.transaction {
-            if (!valid()) throw AbandonedTurn()
+        session.writeTurn(valid) {
             val last = session.query(
                 "SELECT id, role FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1",
                 listOf(conversationId),

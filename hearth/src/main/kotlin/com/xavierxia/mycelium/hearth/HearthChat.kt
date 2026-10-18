@@ -53,8 +53,10 @@ class HearthChat(private val log: ConversationLog) {
 
     /**
      * Stores one finished turn. Test mode writes nothing and returns null, so nothing about it can
-     * be found later. [valid] is asked inside the write transaction; a turn that was abandoned while
-     * the write waited is dropped whole and also returns null.
+     * be found later. [valid] is asked inside the write transaction that stores the turn, before its
+     * first row; a turn that was abandoned while the write waited is dropped whole and also returns
+     * null. The boundary rule is the log's: once that transaction has committed the turn is kept and
+     * the id comes back even if the stop lands before this call returns — there is nothing to undo.
      */
     fun finish(
         character: HearthCharacter,
@@ -74,7 +76,12 @@ class HearthChat(private val log: ConversationLog) {
         }
     }
 
-    /** Replaces the last answer. Test mode writes nothing and returns false. */
+    /**
+     * Replaces the last answer. Test mode writes nothing and returns false. Like [finish], [valid]
+     * is asked inside the write transaction; false means either that the turn was abandoned before
+     * its first row or that test mode wrote nothing. Once committed, true comes back even if the stop
+     * lands on the way back.
+     */
     fun redo(
         conversationId: String,
         answer: String,
