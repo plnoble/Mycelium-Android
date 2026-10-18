@@ -1,5 +1,6 @@
 package com.xavierxia.mycelium.net
 
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
@@ -75,8 +76,11 @@ class GatewayCancelled(message: String) : Exception(message)
  * disconnect with a flag that never goes back, so:
  *
  *  * a stop that lands before the socket is opened means no connection is opened at all;
- *  * a stop that lands while the socket is being opened is seen by [attach] and by the gateway's
- *    checkpoints, so not one request byte goes out;
+ *  * a stop that lands while the socket is being opened is seen by [attach], by the gateway's own
+ *    checkpoints and by [bodyStream], which reads the switch again the moment the output stream
+ *    exists — the point where a real connection has actually been started — so not one body byte
+ *    goes out;
+ *  * a stop that lands after that is seen before every write and every flush of the body;
  *  * a stop that lands while the blocking read is waiting closes the connection at once, which is
  *    the only thing that ends that read.
  *
@@ -107,6 +111,65 @@ class GatewayCall {
     /** The gateway's checkpoint: a cancelled request throws instead of sending the next byte. */
     internal fun check() {
         if (cancelled.get()) throw GatewayCancelled("请求已被取消")
+    }
+
+    /**
+     * Hands back the stream the body is written into, with the switch read on both sides of the call
+     * that creates it.
+     *
+     * `connection.outputStream` is where a real connection is established, so a checkpoint in front
+     * of it cannot be the last word: this thread can be paused between that checkpoint and this call
+     * — and `disconnect()` on a connection that has not connected does nothing — so the paused
+     * thread would come back and start the connection anyway. Reading the switch again the moment
+     * the stream exists closes exactly that gap: whatever happened during the pause, the request
+     * never hands a body byte over. The stream that goes back asks the same switch before every
+     * write and every flush, so no later action can send a byte without verifying it again, and the
+     * switch only ever goes from false to true, so a stop that has been seen once is seen by every
+     * checkpoint after it.
+     */
+    internal fun bodyStream(open: () -> OutputStream): OutputStream {
+        // A stop that landed before this point opens nothing at all.
+        check()
+        val stream = open()
+        // The stream exists now: a stop that landed while it was being opened still wins, before the
+        // first body byte.
+        check()
+        return StoppedBodyStream(stream, this)
+    }
+}
+
+/**
+ * The only place a request body is written. Every write and every flush asks the request's switch
+ * first, so a stop that lands between two of the gateway's own checkpoints — a thread pause, for
+ * instance — cannot push the body out anyway.
+ */
+private class StoppedBodyStream(
+    private val out: OutputStream,
+    private val call: GatewayCall,
+) : OutputStream() {
+    override fun write(b: Int) {
+        call.check()
+        out.write(b)
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        call.check()
+        out.write(b, off, len)
+    }
+
+    override fun flush() {
+        call.check()
+        out.flush()
+    }
+
+    /**
+     * A stopped request deliberately leaves the stream alone: closing it would flush whatever was
+     * already buffered out of the door. The socket is torn down by the gateway's own `disconnect()`
+     * instead, and that is what ends the request.
+     */
+    override fun close() {
+        if (call.isCancelled) return
+        out.close()
     }
 }
 
@@ -187,10 +250,13 @@ class OutboundGateway(
             call.check()
             if (request.body != null) {
                 connection.doOutput = true
-                // The checkpoint sits after `doOutput` and before the stream itself, so a cancelled
-                // request never opens an output stream to write its body into.
-                call.check()
-                connection.outputStream.use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
+                // The stream acquisition is itself bracketed by the switch: the first read stops a
+                // request that was already cancelled before the connection could start, the second —
+                // taken once the stream exists — stops one whose stop landed while this thread was
+                // paused between the checkpoint above and the moment the connection really started.
+                // From there the stream keeps asking, so not one body byte leaves after a stop.
+                call.bodyStream { connection.outputStream }
+                    .use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
                 // The body is on the wire; a stop must still catch whatever comes back.
                 call.check()
             }

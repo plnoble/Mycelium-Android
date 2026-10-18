@@ -7,7 +7,12 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.HttpURLConnection
 import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -313,10 +318,135 @@ class GatewayTest {
         assertTrue(entries.first().sentCharacters > 0)
     }
 
+    @Test
+    fun aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte() {
+        // The window the review named: the gateway has already passed its last checkpoint and is
+        // inside `connection.outputStream`, which is where a real connection is established — and it
+        // is held still right there, before anything exists to send into and before one byte has
+        // been handed over. `disconnect()` on a connection that has not connected does nothing, so
+        // the connection object cannot remember this stop: only the request's own switch can, and
+        // only if it keeps applying after the checkpoint that already passed.
+        val acquiring = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val service = FrozenPeer(acquiring, release)
+        val call = GatewayCall()
+        val gateway = OutboundGateway(
+            hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
+            audit = AuditLog(File(directory, "privacy/audit.json")),
+            clock = { "2026-10-18T00:00:00Z" },
+            open = { service },
+        )
+        val outcome = AtomicReference<Result<GatewayResponse>?>(null)
+        val worker = thread(name = "gateway-body-stream") {
+            outcome.set(
+                runCatching {
+                    gateway.send(
+                        GatewayRequest(
+                            url = "https://api.deepseek.com/chat/completions",
+                            purpose = GatewayPurpose.RoundtableChat,
+                            method = "POST",
+                            body = """{"messages":[{"role":"user","content":"这句不该发出去"}]}""",
+                            call = call,
+                        ),
+                    )
+                },
+            )
+        }
+        assertTrue(acquiring.await(5, TimeUnit.SECONDS), "网关没有进到取流")
+        call.cancel()
+        val started = System.nanoTime()
+        release.countDown()
+        worker.join(5_000)
+        assertFalse(worker.isAlive, "取消之后网关没有及时返回")
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue(elapsedMs < 2_000, "取消后等了 ${elapsedMs}ms，说明请求没有及时结束")
+        val failure = outcome.get()?.exceptionOrNull()
+        assertTrue(failure is GatewayCancelled, "期望取消异常，实际是 $failure")
+        assertEquals(0, service.bytes, "取消之后假服务收到了正文：${service.body}")
+        // The connection is torn down on the way out, which is what ends a real request.
+        assertTrue(service.disconnects >= 1, "取消之后没有断开连接")
+
+        // Positive control over the same wiring: a fresh switch delivers that very body, so the zero
+        // above is the stop and not a peer that swallows everything.
+        val deliveredTo = FrozenPeer(CountDownLatch(0), CountDownLatch(0))
+        val delivered = OutboundGateway(
+            hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
+            audit = AuditLog(File(directory, "privacy/audit.json")),
+            clock = { "2026-10-18T00:00:00Z" },
+            open = { deliveredTo },
+        ).send(
+            GatewayRequest(
+                url = "https://api.deepseek.com/chat/completions",
+                purpose = GatewayPurpose.RoundtableChat,
+                method = "POST",
+                body = "正常正文",
+                call = GatewayCall(),
+            ),
+        )
+        assertEquals(200, delivered.status)
+        assertEquals("正常正文", deliveredTo.body, "放行的请求没有把正文交给假服务")
+
+        val entries = AuditLog(File(directory, "privacy/audit.json")).read()
+        assertEquals(2, entries.size, "被取消的和被放行的各留一条记录")
+        assertFalse(entries.first().succeeded, "被取消的请求不该记成成功")
+        assertNull(entries.first().status)
+        assertTrue(entries.first().sentCharacters > 0)
+    }
+
     private fun gateway(base: String, cleartext: Boolean = false) = OutboundGateway(
         hosts = AllowedHosts(base, cleartext),
         audit = AuditLog(File(directory, "privacy/audit.json")),
         clock = { "2026-10-17T00:00:00Z" },
         open = ::openHttp,
     )
+}
+
+/**
+ * A controlled stand-in for the service a request talks to, with the one hook the test needs:
+ * `getOutputStream()` is where a real `HttpURLConnection` establishes its connection, so this one
+ * can be held still exactly there — the gateway is already inside the acquisition, nothing has been
+ * established and nothing has been sent. Everything the gateway hands over is counted, which is
+ * precisely what the far end of a real request would have received.
+ */
+private class FrozenPeer(
+    private val acquiring: CountDownLatch,
+    private val release: CountDownLatch,
+) : HttpURLConnection(URI("https://api.deepseek.com/chat/completions").toURL()) {
+    private val received = ByteArrayOutputStream()
+
+    @Volatile
+    var disconnects: Int = 0
+        private set
+
+    val bytes: Int get() = synchronized(received) { received.size() }
+
+    val body: String get() = synchronized(received) { String(received.toByteArray(), Charsets.UTF_8) }
+
+    override fun getOutputStream(): OutputStream {
+        acquiring.countDown()
+        release.await(5, TimeUnit.SECONDS)
+        return object : OutputStream() {
+            override fun write(b: Int) {
+                synchronized(received) { received.write(b) }
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                synchronized(received) { received.write(b, off, len) }
+            }
+        }
+    }
+
+    override fun getResponseCode(): Int = 200
+
+    override fun getInputStream(): InputStream = ByteArrayInputStream(body.toByteArray())
+
+    override fun getErrorStream(): InputStream? = null
+
+    override fun disconnect() {
+        disconnects += 1
+    }
+
+    override fun usingProxy(): Boolean = false
+
+    override fun connect() {}
 }
