@@ -106,6 +106,7 @@ dependencies {
 
     implementation(project(":contract"))
     implementation(project(":llm"))
+    implementation(project(":hearth"))
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material3:material3")
@@ -139,6 +140,5 @@ dependencies {
     }
     androidTestImplementation("androidx.test:monitor:1.8.0")
     androidTestImplementation(project(":contract"))
+    androidTestImplementation(project(":hearth"))
 }
-
-
