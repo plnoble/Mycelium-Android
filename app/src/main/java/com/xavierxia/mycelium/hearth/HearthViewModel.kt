@@ -70,7 +70,7 @@ private sealed interface Chosen {
         override val isCloud: Boolean get() = false
     }
 
-    data class Cloud(val service: CloudService, override val label: String) : Chosen {
+    data class Cloud(val serviceId: String, override val label: String) : Chosen {
         override val isCloud: Boolean get() = true
     }
 }
@@ -87,7 +87,10 @@ private data class Turn(
     val conversationId: String?,
     val question: String,
     val chosen: Chosen,
-)
+) {
+    /** A turn is stored at most once, whatever the cancellation timing turns out to be. */
+    val written = java.util.concurrent.atomic.AtomicBoolean(false)
+}
 
 class HearthViewModel(application: Application) : AndroidViewModel(application) {
     private val database = HearthDatabase(application)
@@ -248,9 +251,13 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openChat(character: HearthCharacter) = viewModelScope.launch {
         abandonTurn()
+        val token = generationToken
         val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
+        if (token != generationToken) return@launch
         val first = conversations.firstOrNull()?.id
         val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
+        // A blocked read that comes back after the page moved on must not refill it.
+        if (token != generationToken) return@launch
         mutable.update {
             it.copy(
                 openCharacter = character,
@@ -333,29 +340,40 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             return@launch
         }
         val character = mutable.value.openCharacter
+        val token = generationToken
         val conversations = if (character == null) emptyList() else withContext(Dispatchers.IO) { log.conversations(character.id) }
+        if (token != generationToken) return@launch
         val first = conversations.firstOrNull()?.id
         val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
+        if (token != generationToken) return@launch
         mutable.update {
             it.copy(mode = mode, conversations = conversations, openConversation = first, messages = messages, streaming = null, streamLabel = null, droppedTurns = 0, pendingQuestion = null, notice = null)
         }
     }
 
-    fun newConversation() = mutable.update {
-        it.copy(openConversation = null, messages = emptyList(), streaming = null, streamLabel = null, droppedTurns = 0)
+    fun newConversation() {
+        generationToken++
+        mutable.update {
+            it.copy(openConversation = null, messages = emptyList(), streaming = null, streamLabel = null, droppedTurns = 0)
+        }
     }
 
     fun openConversation(id: String) = viewModelScope.launch {
+        val token = ++generationToken
         val messages = withContext(Dispatchers.IO) { log.messages(id) }
+        if (token != generationToken) return@launch
         mutable.update { it.copy(openConversation = id, messages = messages, streaming = null, streamLabel = null, droppedTurns = 0) }
     }
 
     fun deleteConversation(id: String) = viewModelScope.launch {
         val character = mutable.value.openCharacter ?: return@launch
+        val token = generationToken
         withContext(Dispatchers.IO) { log.delete(id) }
         val conversations = withContext(Dispatchers.IO) { log.conversations(character.id) }
+        if (token != generationToken) return@launch
         val keep = mutable.value.openConversation?.takeIf { it != id }
         val messages = withContext(Dispatchers.IO) { if (keep == null) emptyList() else log.messages(keep) }
+        if (token != generationToken) return@launch
         mutable.update { it.copy(conversations = conversations, openConversation = keep, messages = messages) }
     }
 
@@ -387,16 +405,17 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 finishTurn(turn, buffer.toString(), token = token)
             } catch (cancelled: CancellationException) {
-                withContext(NonCancellable) { finishTurn(turn, buffer.toString(), stopped = true, token = token) }
+                withContext(NonCancellable) { finishTurn(turn, buffer.toString(), stopped = true, cancelled = true, token = token) }
                 throw cancelled
             } catch (failure: Exception) {
                 if (token == generationToken) mutable.update { it.copy(notice = failure.message ?: "生成失败") }
             } finally {
+                // A late finishing task must not clear the state of the turn that replaced it.
                 if (token == generationToken) {
                     cloudModel = null
                     currentChosen = null
+                    mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
                 }
-                mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
             }
         }
     }
@@ -426,7 +445,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 replaceTurn(requireNotNull(turn), buffer.toString(), token = token)
             } catch (cancelled: CancellationException) {
-                turn?.let { withContext(NonCancellable) { replaceTurn(it, buffer.toString(), stopped = true, token = token) } }
+                turn?.let { withContext(NonCancellable) { replaceTurn(it, buffer.toString(), stopped = true, cancelled = true, token = token) } }
                 throw cancelled
             } catch (failure: Exception) {
                 if (token == generationToken) mutable.update { it.copy(notice = failure.message ?: "生成失败") }
@@ -434,8 +453,8 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 if (token == generationToken) {
                     cloudModel = null
                     currentChosen = null
+                    mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
                 }
-                mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
             }
         }
     }
@@ -453,6 +472,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        cloudModel?.stop()
         engine.stop()
         operation?.cancel()
     }
@@ -479,12 +499,20 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
                 engine
             }
             is Chosen.Cloud -> {
+                // One authoritative read per send: the address, the key and the agreement check all
+                // come from the same snapshot, so a request can never mix an old address with a new
+                // key, and a changed address can never slip through a stale cache.
+                val service = cloudSettings.services().firstOrNull { it.id == chosen.serviceId }
+                    ?: throw IllegalStateException("这个人物选的云端服务已经不在了，请在人物编辑里重新选")
+                if (turn.character.cloudConfirmedTarget != cloudTarget(service.id, service.baseUrl)) {
+                    throw IllegalStateException("这个人物要发的云端服务或地址变了，请在人物编辑里重新确认一次")
+                }
                 val test = turn.mode == HearthMode.TEST
                 val built = CloudChatModel(
                     gateway = gateway().gateway,
-                    serviceName = chosen.service.name,
-                    baseUrl = chosen.service.baseUrl,
-                    apiKey = cloudSettings.apiKey(chosen.service.id),
+                    serviceName = service.name,
+                    baseUrl = service.baseUrl,
+                    apiKey = cloudSettings.apiKey(service.id),
                     model = turn.character.modelName,
                     purpose = if (test) GatewayPurpose.HearthChatTest else GatewayPurpose.HearthChat,
                     // The request-level option is the second guard: the purpose already protects,
@@ -506,22 +534,16 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         val current = mutable.value
         return when (character.modelKind) {
             ModelKind.CLOUD -> {
-                val service = current.services.firstOrNull { it.id == character.serviceId }
-                if (service == null) {
-                    mutable.update { it.copy(notice = "这个人物选的云端服务已经不在了，请在人物编辑里重新选") }
-                    return null
-                }
                 if (character.modelName.isBlank()) {
                     mutable.update { it.copy(notice = "这个人物还没有选云端模型，请在人物编辑里选一个") }
                     return null
                 }
-                if (character.cloudConfirmedTarget != cloudTarget(service.id, service.baseUrl)) {
-                    // Checked before every send: another service, or the same one at another
-                    // address, has to be agreed to again.
-                    mutable.update { it.copy(notice = "这个人物要发的云端服务或地址变了，请在人物编辑里重新确认一次") }
-                    return null
-                }
-                Chosen.Cloud(service, "云端 · ${service.name} ${character.modelName}")
+                // The address, the key and the agreement check are all read again from the settings
+                // at send time (see stream), so nothing here relies on a cached service list.
+                Chosen.Cloud(
+                    character.serviceId,
+                    "云端 · ${character.serviceName.ifBlank { "云端服务" }} ${character.modelName}",
+                )
             }
             ModelKind.LOCAL -> {
                 val record = current.models.firstOrNull { it.sha256 == character.modelId }
@@ -542,19 +564,24 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, token: Int) {
-        // The turn is only written when something was actually produced. The mode and the
-        // conversation come from the snapshot, so a page change mid-generation cannot move it.
+    private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
+        // A turn from a page the user has already left is dropped whole: nothing is shown and
+        // nothing is stored, no matter where the cancellation happened to land.
+        if (token != generationToken) return
         val byEngine = !turn.chosen.isCloud && engine.lastStats?.stopped == true
         val wasStopped = stopped || byEngine
         if (answer.isBlank()) {
             // Nothing came out at all: nothing is stored, and the question goes back to the box so
             // stopping early does not make it vanish.
-            if (wasStopped && token == generationToken) {
+            if (wasStopped) {
                 mutable.update { it.copy(streaming = null, pendingQuestion = turn.question, notice = "已停止，还没有回答") }
             }
             return
         }
+        // A cloud answer arrives in one piece, so a cancelled one is thrown away completely. A
+        // local answer that was already streaming keeps what it had produced.
+        if (cancelled && turn.chosen.isCloud) return
+        if (!turn.written.compareAndSet(false, true)) return
         val conversationId = withContext(Dispatchers.IO) {
             chat.finish(turn.character, turn.conversationId, turn.question, answer, turn.chosen.label, now(), turn.mode)
         }
@@ -585,7 +612,7 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun replaceTurn(turn: Turn, answer: String, stopped: Boolean = false, token: Int) {
+    private suspend fun replaceTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
         if (token != generationToken) return
         val wasStopped = stopped || (!turn.chosen.isCloud && engine.lastStats?.stopped == true)
         if (answer.isBlank()) {
@@ -594,6 +621,8 @@ class HearthViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+        if (cancelled && turn.chosen.isCloud) return
+        if (!turn.written.compareAndSet(false, true)) return
         val stored = turn.conversationId?.let { id ->
             if (withContext(Dispatchers.IO) { chat.redo(id, answer, turn.chosen.label, now(), turn.mode) }) id else null
         }

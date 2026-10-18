@@ -15,6 +15,8 @@ import com.xavierxia.mycelium.net.GatewayAbort
 import com.xavierxia.mycelium.net.GatewayPurpose
 import com.xavierxia.mycelium.net.GatewayRequest
 import com.xavierxia.mycelium.net.OutboundGateway
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -67,10 +69,9 @@ class CloudChatModel(
     private val naturalChat: Boolean = false,
     private val readTimeoutMs: Int = 60_000,
 ) : ChatModel {
-    private val connection = java.util.concurrent.atomic.AtomicReference<GatewayAbort?>(null)
-
-    @Volatile
+    private val gate = Any()
     private var aborted = false
+    private var handle: GatewayAbort? = null
 
     override val info = ModelInfo(
         id = model,
@@ -79,17 +80,31 @@ class CloudChatModel(
     )
 
     /**
-     * The answer arrives in one piece, but the request itself can be stopped: the caller gets the
-     * open connection and disconnects it, which makes the blocking read return immediately. A
-     * stopped request produces no answer and no error, so nothing late can reach the screen or the
-     * database.
+     * The answer arrives in one piece, but the request itself can be stopped: the caller gets an
+     * abort handle and calling it makes the blocking read return immediately. A stopped request
+     * produces no answer and no error, so nothing late can reach the screen or the database.
+     *
+     * Stop and registration share one lock, so a stop that lands *before* the connection exists is
+     * not lost: the handle is aborted the moment it arrives.
      */
-    override fun stop() {
+    override fun stop() = synchronized(gate) {
         aborted = true
-        connection.getAndSet(null)?.abort()
+        handle?.abort()
+        handle = null
+    }
+
+    private fun register(open: GatewayAbort) = synchronized(gate) {
+        if (aborted) open.abort() else handle = open
     }
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> = flow {
+        // Cancelling whoever collects this flow must also abort the call itself, not just stop
+        // waiting for it: a blocking read only ends when the connection is closed.
+        val job = currentCoroutineContext()[Job]
+        val watcher = job?.invokeOnCompletion { if (job.isCancelled) stop() }
+        try {
+        // Stopped before the request even started: nothing goes out at all.
+        if (aborted) return@flow
         val key = apiKey ?: throw IllegalStateException("这个服务还没有填写 API key")
         val list = JSONArray()
         messages.forEach { message ->
@@ -128,7 +143,7 @@ class CloudChatModel(
                     body = payload.toString(),
                     readTimeoutMs = readTimeoutMs,
                     omitAuditBody = omitAuditBody,
-                    onOpen = { open -> connection.set(open) },
+                    onOpen = ::register,
                 ),
             )
         } catch (failure: Exception) {
@@ -136,7 +151,7 @@ class CloudChatModel(
             if (aborted) return@flow
             throw failure
         } finally {
-            connection.set(null)
+            synchronized(gate) { handle = null }
         }
         if (aborted) return@flow
         if (response.status !in 200..299) {
@@ -145,6 +160,9 @@ class CloudChatModel(
         val json = JSONObject(response.body)
         val content = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         emit(content)
+        } finally {
+            watcher?.dispose()
+        }
     }
 
     private fun failureMessage(status: Int): String = when (status) {

@@ -98,6 +98,15 @@ class CharacterModelChoiceTest {
         assertTrue(cloudTarget("a", "https://api.example.net") != cloudTarget("a", "https://api.example.org"))
         assertTrue(cloudTarget("a", "https://api.example.net:8443") != cloudTarget("a", "https://api.example.net"))
         assertTrue(cloudTarget("a", "https://api.example.net/v2") != cloudTarget("a", "https://api.example.net/v1"))
+        // A query selects the receiver too, and it is case sensitive: no silent merging.
+        assertTrue(
+            cloudTarget("a", "https://api.example.net?tenant=A") !=
+                cloudTarget("a", "https://api.example.net?tenant=a"),
+        )
+        assertEquals(
+            cloudTarget("a", "https://api.example.net?tenant=A"),
+            cloudTarget("a", "HTTPS://API.example.net:443/?tenant=A"),
+        )
     }
 
     @Test

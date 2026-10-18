@@ -252,7 +252,13 @@ fun normalizeEndpoint(baseUrl: String): String {
     val value = baseUrl.trim()
     val schemeEnd = value.indexOf("://")
     val scheme = if (schemeEnd > 0) value.substring(0, schemeEnd).lowercase() else "https"
-    val rest = (if (schemeEnd > 0) value.substring(schemeEnd + 3) else value).trimEnd('/')
+    var rest = if (schemeEnd > 0) value.substring(schemeEnd + 3) else value
+    // A query or fragment selects a different receiver and is case sensitive, so it is kept exactly
+    // as written instead of being folded together with the host.
+    val suffixStart = rest.indexOfFirst { it == '?' || it == '#' }
+    val suffix = if (suffixStart >= 0) rest.substring(suffixStart) else ""
+    if (suffixStart >= 0) rest = rest.substring(0, suffixStart)
+    rest = rest.trimEnd('/')
     val slash = rest.indexOf('/')
     val authority = if (slash >= 0) rest.substring(0, slash) else rest
     val path = if (slash >= 0) rest.substring(slash).trimEnd('/') else ""
@@ -260,7 +266,7 @@ fun normalizeEndpoint(baseUrl: String): String {
     val port = authority.substringAfter(':', "")
     val defaultPort = (scheme == "https" && port == "443") || (scheme == "http" && port == "80")
     val keptPort = if (port.isEmpty() || defaultPort) "" else ":$port"
-    return "$scheme://$host$keptPort$path"
+    return "$scheme://$host$keptPort$path$suffix"
 }
 
 /** Small key/value table that lives next to the characters (preset marker, schema version). */

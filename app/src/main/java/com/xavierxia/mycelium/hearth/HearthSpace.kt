@@ -344,15 +344,23 @@ private fun ModelChoice(selected: Boolean, title: String, subtitle: String, inde
 
 @Composable
 private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: HearthCharacter, padding: PaddingValues) {
-    var text by rememberSaveable { mutableStateOf("") }
+    // Immersive drafts may be restored after a rotation; a test-mode draft must not be, because
+    // "no trace" includes the saved instance state.
+    var immersiveText by rememberSaveable { mutableStateOf("") }
+    var testText by remember { mutableStateOf("") }
+    val inTest = state.mode == HearthMode.TEST
+    val text = if (inTest) testText else immersiveText
+    val setText: (String) -> Unit = { value -> if (inTest) testText = value else immersiveText = value }
     var historyOpen by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<HearthConversation?>(null) }
     val listState = rememberLazyListState()
     var followTail by remember { mutableStateOf(true) }
+    // Leaving test mode takes its draft with it.
+    LaunchedEffect(state.mode) { if (state.mode != HearthMode.TEST) testText = "" }
     // A turn that produced nothing puts its question back here, so stopping early loses nothing.
     LaunchedEffect(state.pendingQuestion) {
         val pending = state.pendingQuestion ?: return@LaunchedEffect
-        text = pending
+        setText(pending)
         vm.consumePendingQuestion()
     }
     // Follow the newest message while the user is at the bottom; leave them alone once they scroll up.
@@ -388,7 +396,11 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                 Text("测试模式", style = MaterialTheme.typography.bodySmall)
             }
             if (state.mode == HearthMode.TEST) {
-                Text("测试模式 · 不留记录：不写库、不留历史，离开这页就没有了；也不读不写这个人物的记忆。", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "测试模式 · 不留记录：不写库、不留历史，离开这页就没有了；也不读不写这个人物的记忆。" +
+                        if (character.modelKind == ModelKind.CLOUD) "注意：这只管手机上的记录，内容照样会发给云端服务。" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             state.notice?.let { note -> Text(note) }
             if (state.droppedTurns > 0) {
@@ -439,7 +451,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
         ) {
             OutlinedTextField(
                 text,
-                { value -> text = value },
+                { value -> setText(value) },
                 modifier = Modifier.weight(1f),
                 label = { Text("说点什么") },
             )
@@ -449,7 +461,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                 Button(
                     onClick = {
                         val question = text
-                        text = ""
+                        setText("")
                         vm.send(question)
                     },
                     enabled = text.isNotBlank(),
