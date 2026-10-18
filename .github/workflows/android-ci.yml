@@ -15,7 +15,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The local model engine (llama.cpp + ggml) is compiled from source in this job, so the first
+    # run takes much longer than a plain Android build. P2-1b raised this from 20 to 60 minutes;
+    # check the first real run and lower it again if there is headroom.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -30,26 +33,32 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      # The runner image does not ship NDK 30, CMake 3.22.1 or the compile SDK used here, so they
+      # are installed explicitly. Semicolon package names must stay quoted.
+      - name: Install NDK, CMake and the compile SDK
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;30.0.16248370" "cmake;3.22.1" "platforms;android-37.0" "build-tools;36.0.0"
 
-      - name: Run unit tests
-        run: ./gradlew :app:testDebugUnitTest :contract:test --stacktrace
+      # The same gate as the local check (scripts/check-all.ps1): every module's unit tests, debug
+      # and release lint, the debug / release / androidTest packages, and no warnings allowed. The
+      # script prepares the pinned llama.cpp source first. --online lets Gradle resolve dependencies
+      # on the runner; local runs stay offline.
+      - name: Full check (tests, lint, debug/release/androidTest APKs)
+        run: bash scripts/check-all.sh --online
 
-      - name: Run Android Lint
-        run: ./gradlew :app:lintDebug --stacktrace
-
-      - name: Upload test and lint reports
+      - name: Upload verification reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mycelium-verification-reports
           path: |
-            app/build/reports/tests/testDebugUnitTest/
-            app/build/test-results/testDebugUnitTest/
-            app/build/reports/lint-results-debug.*
-            contract-lib/build/reports/tests/test/
-            contract-lib/build/test-results/test/
+            build/check-all/
+            */build/reports/tests/
+            */build/test-results/
+            */build/reports/lint-results-*
+          if-no-files-found: warn
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

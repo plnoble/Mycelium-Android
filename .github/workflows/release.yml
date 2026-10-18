@@ -11,7 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # P2-1b: the local model engine is compiled from source in this job, so the build takes longer
+    # than it did before P2-1. Raised from 20 to 60 minutes; the signing steps below are unchanged.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -33,6 +35,18 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      # P2-1b: :llm compiles the pinned llama.cpp from source, so the runner needs the NDK, CMake and
+      # that source before the build step. Everything else in this workflow, in particular every
+      # signing step, is unchanged.
+      - name: Install NDK, CMake and the compile SDK
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;30.0.16248370" "cmake;3.22.1" "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Prepare pinned llama.cpp source
+        run: bash scripts/prepare-llama.sh
 
       - name: Validate signing secrets
         env:

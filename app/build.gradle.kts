@@ -21,11 +21,23 @@ android {
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
         buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // 明文 HTTP 只给调试包的走查用（adb reverse 的本机假服务）；正式包显式关闭。
+        // 用清单占位符而不是 debug 清单覆盖：覆盖要靠 tools:replace，而合并单测清单时
+        // 那个标记找不到可替换的声明，清单合并器会报警告（P2-1b）。
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    lint {
+        // P2-1b：警告即错误，防止警告重新长出来。
+        warningsAsErrors = true
+        // 依赖升级要单独评估：本机连不上 Maven Central，所有构建都走 --offline，
+        // 现有版本是配合 P0-7 选定的（SQLCipher 支持 FTS5）。这项由统筹在联网评估时再开。
+        disable += "GradleDependency"
     }
 
     compileOptions {
@@ -47,6 +59,11 @@ android {
                 "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
                 "--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"
             )
+            // JDK 24 起，JNI 加载本地库会报「restricted method」警告；测试用到的 sqlite-jdbc 就属于这种。
+            // 只在会出现该警告的 JVM 上加这个参数：旧 JDK 不认识它，也不会有这条警告。
+            val testJvm = it.javaLauncher.orNull?.metadata?.languageVersion?.asInt()
+                ?: JavaVersion.current().majorVersion.toInt()
+            if (testJvm >= 24) it.jvmArgs("--enable-native-access=ALL-UNNAMED")
         }
     }
 
@@ -56,6 +73,7 @@ android {
             applicationIdSuffix = ".debug"
             // The walkthrough points at a fake model on the phone's own loopback. Release builds refuse it.
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "true")
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
         release {
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "false")
@@ -76,6 +94,13 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+}
+
+// P2-1b：警告即缺陷。Kotlin 编译一有警告就让构建失败，和 lint 的 warningsAsErrors 一致。
+kotlin {
+    compilerOptions {
+        allWarningsAsErrors.set(true)
     }
 }
 

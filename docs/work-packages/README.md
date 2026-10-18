@@ -33,3 +33,4 @@
 3. **禁止提交**：模型文件（`*.gguf` 等）、keystore、token、本机 SDK/代理路径、APK、构建缓存。
 4. **汇报**：只写「已通过 / 失败 / 未验证」。在 JVM 或 Robolectric 上的验证和真机验证要分开写；模拟器结果不能冒充真机结果。
 5. **审核**：和 Windows 侧一样，由同一个开发 agent 自己调用 Codex 命令行审核（程序位置和命令模板见 Windows 仓库总计划 §10），审核依据是 Windows 仓库的 `docs/work-packages/REVIEW-GUIDE.md`。审核报告用 `-o` 写到 `docs/reviews/<日期>-<编号>/REVIEW.md`，交付报告写在同目录的 `DELIVERY.md`。结论是「通过」才可以合并进本地 `main`，不推送。
+6. **交付和验收一律用 `scripts/check-all.ps1`**（P2-1b 起）：在**全新 worktree** 里对**已提交的版本**跑，覆盖所有模块的单元测试、`:app` 的 debug 和 release lint、调试包 / 正式包 / 测试包，最后给一张汇总表。任何失败或警告都以非零退出码结束；缺报告、缺产物、该跑的任务没跑也算失败。llama.cpp 自己的警告是约定的例外，单独计数。CI 用等价的 `scripts/check-all.sh`（`--online`）。以前那种每个包各写一串 Gradle 命令的做法作废。

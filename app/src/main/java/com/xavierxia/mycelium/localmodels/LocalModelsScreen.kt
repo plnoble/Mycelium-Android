@@ -2,7 +2,6 @@ package com.xavierxia.mycelium.localmodels
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xavierxia.mycelium.llm.LocalModelRecord
@@ -113,7 +113,7 @@ fun LocalModelsScreen(padding: PaddingValues, onBack: () -> Unit, vm: LocalModel
     state.copyRequest?.let { (uri, document) ->
         AlertDialog(onDismissRequest = vm::dismissCopy, title = { Text("需要复制模型") },
             text = { Text("文件提供器不支持持久直接读取。复制「${document.name}」将额外占用${document.size?.let(::sizeText) ?: "未知大小的空间（提供器未报告文件大小）"}。原文件会保留。") },
-            confirmButton = { TextButton(onClick = { vm.import(Uri.parse(uri), true) }) { Text("复制并导入") } },
+            confirmButton = { TextButton(onClick = { vm.import(uri.toUri(), true) }) { Text("复制并导入") } },
             dismissButton = { TextButton(onClick = vm::dismissCopy) { Text("取消") } })
     }
     removing?.let { model ->

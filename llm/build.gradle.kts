@@ -32,15 +32,27 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
+
+// P2-1b：警告即缺陷。Kotlin 编译一有警告就让构建失败，和 lint 的 warningsAsErrors 一致。
+kotlin {
+    compilerOptions {
+        allWarningsAsErrors.set(true)
+    }
+}
 val verifyOfflineDependencies by tasks.registering {
+    // 在配置阶段取好工程和配置对象：执行阶段再碰 Task.project 会被 Gradle 10 判为错误
+    // （P2-1b：清掉那条 Gradle 弃用警告）。
+    val targets = listOf(
+        project to "debugRuntimeClasspath",
+        project(":model-api") to "runtimeClasspath",
+    ).map { (module, configurationName) -> module.configurations.getByName(configurationName) }
     doLast {
         val allowed = setOf("org.jetbrains.kotlin", "org.jetbrains.kotlinx", "org.jetbrains", "androidx.annotation")
-        listOf(project, project(":model-api")).forEach { module ->
-            val name = if (module == project) "debugRuntimeClasspath" else "runtimeClasspath"
-            module.configurations.getByName(name).incoming.resolutionResult.allComponents.forEach {
+        targets.forEach { configuration ->
+            configuration.incoming.resolutionResult.allComponents.forEach {
                 val id = it.id
                 if (id is org.gradle.api.artifacts.component.ModuleComponentIdentifier) {
-                    check(id.group in allowed) { "Offline module ${module.path} resolved forbidden dependency $id" }
+                    check(id.group in allowed) { "Offline module resolved forbidden dependency $id" }
                 }
                 if (id is org.gradle.api.artifacts.component.ProjectComponentIdentifier) {
                     check(id.projectPath in setOf(":llm", ":model-api")) { "Forbidden project dependency $id" }

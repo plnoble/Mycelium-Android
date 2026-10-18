@@ -1,6 +1,7 @@
 package com.xavierxia.mycelium.roundtable
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * Defaults checked against DeepSeek's documentation on 2026-10-17.
@@ -27,7 +28,7 @@ class CloudSettingsStore(context: Context, secrets: SecretBox) {
     private val preferences = context.getSharedPreferences("cloud-model", Context.MODE_PRIVATE)
     private val store = CloudStore(
         storage = { preferences.getString("services", null) },
-        persist = { blob -> preferences.edit().putString("services", blob).apply() },
+        persist = { blob -> preferences.edit { putString("services", blob) } },
         secrets = secrets,
     )
     private val keystore = secrets
@@ -59,7 +60,7 @@ class CloudSettingsStore(context: Context, secrets: SecretBox) {
         if (stored != null) return String(keystore.unwrap(stored), Charsets.UTF_8)
         val bytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
         val passphrase = bytes.joinToString("") { "%02x".format(it) }
-        preferences.edit().putString("database", keystore.wrap(passphrase.toByteArray(Charsets.UTF_8))).apply()
+        preferences.edit { putString("database", keystore.wrap(passphrase.toByteArray(Charsets.UTF_8))) }
         return passphrase
     }
 }
