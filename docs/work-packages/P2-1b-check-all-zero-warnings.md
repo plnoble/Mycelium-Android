@@ -2,7 +2,7 @@
 
 - 仓库 / 基准提交：安卓仓库 `main` @ `1143dc4`（交审前并入当时最新的 `main`）
 - 分支：`wp/P2-1b-check-all`
-- 工作目录：`D:\Agent\Worktrees\Mycelium-Android\hearth`（A-炉边线）。开工前确认工作区干净；`wp/P2-2-hearth-chat` 还没有提交，先放着，本包合并后再从新的 `main` 重拉。
+- 工作目录：`D:\Agent\Project\Nivra`（2026-10-18 起只有一条开发线）。`wp/P2-2-hearth-chat` 上已经有 6 个提交，先放着；本包合并后，再把新的 `main` 并进去继续做。
 - 依赖：P2-1 已合并。
 - 规模：1–2 个工作日。
 - 背景：
