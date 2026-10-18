@@ -82,7 +82,7 @@
 - **工作目录**：`D:\Agent\Project\Nivra`，按工作包拉分支（`wp/<编号>-<短名>`）。
   - 探针类的工作包（例如 P2-6）另建 worktree，放在 `D:\Agent\Worktrees\Mycelium-Android\` 下。
   - 交付前的「全新 worktree 全套检查」也在这个目录下建、用完删掉。
-- **队列**：以 `docs/work-packages/README.md` 索引里的「队列 1、2、3……」为准，统筹会随时更新。2026-10-18 的顺序是：P2-1b → P2-2（修订）→ P2-3 → P2-5 → P2-4 → P2-6，之后才回到圆桌的 P1-8。
+- **队列**：以 `docs/work-packages/README.md` 索引里的「队列 1、2、3……」为准，统筹会随时更新。2026-10-18 的顺序是：P2-1b → P2-2（修订）→ P2-2b 发版准备 → P2-1c → P2-3 → P2-5 → P2-4 → P2-6，之后才回到圆桌的 P1-8。
 - **进度和交接**：写在 `docs/tracks/开发线.md`。旧的 `A-圆桌.md`、`A-炉边.md` 保留作历史，不再追加。
 - **要清理的旧目录**（确认工作区干净后再删）：
   - `D:\Agent\Worktrees\Mycelium-Android\hearth`：`wp/P2-2-hearth-chat` 分支还在，删掉 worktree 后可以在 `Nivra` 里切过去；
