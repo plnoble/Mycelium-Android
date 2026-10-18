@@ -294,6 +294,37 @@ class DownloadGatewayTest {
         }
     }
 
+    @Test
+    fun resumeIsRejectedWhenAHopLeavesTheWhitelistAgain() {
+        val bytes = bodyBytes(32 * 1024)
+        val destination = AtomicReference("/asset-a")
+        LocalHttp { call ->
+            when (call.path) {
+                "/start" -> HttpReply(302, ByteArray(0), mapOf("Location" to destination.get()))
+                destination.get() -> partial(call, bytes)
+                else -> HttpReply(200, bytes)
+            }
+        }.use { server ->
+            val g = gateway(policyFor(server))
+            val file = target()
+            assertEquals(200, g.download(DownloadRequest("http://127.0.0.1:${server.port}/start", update, file)).status)
+            file.writeBytes(bytes.copyOfRange(0, 4096))
+            val before = file.readBytes()
+            destination.set("https://evil.example/asset-b")
+            val rejected = assertThrows(GatewayRejected::class.java) {
+                g.download(DownloadRequest("http://127.0.0.1:${server.port}/start", update, file))
+            }
+            assertTrue(rejected.message!!.contains("evil.example"), rejected.message!!)
+            assertArrayEquals(before, file.readBytes(), "续传被拒时一个字节都不该写")
+            assertEquals(3, server.count.get(), "被拒的那一跳不该被联系")
+            val entry = auditEntries().last()
+            assertEquals(listOf("127.0.0.1"), entry.hostPath, "只有已经联系过的跳")
+            assertFalse(entry.succeeded)
+            // "本次字节数" is what this call wrote: the resume was refused before any write.
+            assertEquals(0L, entry.receivedBytes)
+        }
+    }
+
     // ---- cancel ----
 
     @Test
