@@ -46,12 +46,14 @@ SHA256 按 1 MiB 块校验，显示进度并检查 GGUF 魔数、已知文件大
 
 ## 真机复验
 
-先确认共享手机已由其他开发线释放。安装本分支 debug 包；仅当其他线 debug 版本更高时用 adb install -r -d，
-保留应用数据，不卸载、不清数据；不安装 release。
+先确认共享手机已由其他开发线释放。离线状态下 Gradle 的 connectedDebugAndroidTest 缺 UTP 插件，不要为此联网。
+安装本分支 debug 包用 adb install -r；仅当其他线 debug 版本更高时加 -d。保留应用数据，不卸载、不清数据；不安装 release。
 在「我的 → 本地模型」用系统选择器导入既有 Qwen3.5-4B-Q4_K_M.gguf 后运行：
 
 ~~~powershell
-.\gradlew.bat --offline :app:connectedDebugAndroidTest
+adb -s <序列号> install -r app\build\outputs\apk\debug\app-debug.apk
+adb -s <序列号> install -r app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
+adb -s <序列号> shell am instrument -w com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
 测试读取该登记及持久授权，验证 64 token、确定性重复的流式顺序、生成中停止 <1 秒、
