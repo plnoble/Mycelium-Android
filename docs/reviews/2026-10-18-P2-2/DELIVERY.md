@@ -48,6 +48,10 @@
 - lint `:app` debug/release 均 **0 错 0 警**；`app-debug.apk` / `app-debug-androidTest.apk` 已签名、`app-release-unsigned.apk` 未签名；
 - 结论 **PASS：0 failures, 0 warnings, exit code 0**（原始输出在 `p2-2-work/checkall-freshwt2.txt`）。
 
+同一条腿再用 **CI 用的脚本**验一遍（`android-ci.yml` 跑的就是它）：在同一个全新 worktree 里用 Git Bash 跑
+`bash scripts/check-all.sh --skip-llama-prepare` → **通过：0 失败、0 警告、退出码 0**（`p2-2-work/checkall-sh4.txt`）。
+两条门禁脚本在 P2-2 的改动上都验过了；GitHub 上的远端 CI 仍需推送后才能看到（推送由用户决定）。
+
 ## 三、三轮审核与逐条落实
 
 ### 3.1 开工前方案审（`PLAN-REVIEW.md`，Codex，审基线 `e94599b`）：需修改，12 条
