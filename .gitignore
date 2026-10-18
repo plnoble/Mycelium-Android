@@ -31,6 +31,10 @@ models/
 .env.*
 secrets.properties
 
+# Local-only material for scripts/check-public.ps1 (never committed: the denylist words are
+# exactly the strings that must not appear in the repository)
+.local/
+
 # OS
 .DS_Store
 Thumbs.db
