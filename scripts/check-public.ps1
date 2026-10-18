@@ -5,7 +5,9 @@
 .DESCRIPTION
   Scans everything that would become public with the next push:
 
-    * every file tracked at HEAD (its content and its file name);
+    * every file tracked at HEAD (its content and its file name), read from HEAD itself: the run
+      refuses to report when the working tree is dirty, because a dirty tree can hide what HEAD
+      contains;
     * every commit in origin/main..HEAD (the diff text and the changed file names), so a value
       that only ever existed somewhere in the branch history still fails.
 
@@ -22,7 +24,9 @@
   one by one; they do not change the exit code.
 
   Output never prints the text that matched: only the category, the file and the line number.
-  A local denylist hit is reported as a line number only, without the word.
+  A local denylist hit is reported as a line number only, without the word. The report prints the
+  baseline ref and its SHA, the HEAD SHA and the number of commits in the range, so an empty range
+  (HEAD equals the baseline) cannot be mistaken for proof that the published history is clean.
 
   The script is deliberately pure ASCII (like the other scripts in scripts/): Windows PowerShell
   5.1 reads a BOM-less file as ANSI, which would corrupt non-ASCII text. It runs on Windows
@@ -98,7 +102,11 @@ function Stop-WithError {
 # origin/main..HEAD.
 
 $slash = "/"
-$nameChars = "[A-Za-z0-9._-]+"
+# Windows user names may start with non-ASCII characters (a Chinese name, for example), so the name
+# class accepts the ASCII name characters plus every non-ASCII character, instead of only
+# [A-Za-z0-9._-]. Punctuation stays out, which keeps documented pattern text such as
+# "[home]/[^/\s]+" or the trailing "`" of a "C:\Users\" example from looking like a real name.
+$nameChars = '(?:[A-Za-z0-9._-]|[^\x00-\x7F])+'
 $privateKeyPattern = "-{5}BEGIN[A-Z ]*PRIVATE KEY[A-Z ]*-{5}"
 $tokenPatterns = @(
     "sk-[A-Za-z0-9_-]{20,}",
@@ -294,6 +302,12 @@ function Invoke-SelfTest {
             $slash + "home" + $slash + $sampleUser + "/work/app.log" + "`n"
         $listedPathForbid = $sampleDrive + ":" + "\" + "work"
         $listedPathSample = $listedPathForbid + "\" + "notes.txt" + "`n"
+        # A Windows user name that starts with non-ASCII characters (a Chinese name): the class used
+        # to be [A-Za-z0-9._-], which missed these entirely. Built from code points so this file
+        # stays pure ASCII.
+        $chineseUser = [string]([char]0x5F20) + [string]([char]0x4F1F)
+        $chineseUserForbid = $sampleDrive + ":" + "\" + "Users" + "\" + $chineseUser
+        $chineseUserSample = $chineseUserForbid + "\" + "project" + "`n"
 
         New-Sample "clean/notes.md" "A clean note.`nNothing to see here.`n"
         New-Sample "clean/second.txt" "Second clean file.`n"
@@ -306,6 +320,7 @@ function Invoke-SelfTest {
         New-Sample "dirty-private-key/note.txt" $privateKeySample
         New-Sample "dirty-token/note.txt" $tokenSample
         New-Sample "dirty-user-path/note.txt" $userPathSample
+        New-Sample "dirty-user-path-chinese/note.txt" $chineseUserSample
         New-Sample "dirty-name-keystore/release.keystore" ""
         New-Sample "dirty-name-jks/keystore.jks" ""
         New-Sample "dirty-name-gguf/model.gguf" ""
@@ -347,6 +362,7 @@ function Invoke-SelfTest {
             @{ Name = "fake-private-key-fails"; Dir = "dirty-private-key"; Deny = $false; Expect = 1; Category = "private-key"; Forbid = $privateKeyHeader },
             @{ Name = "fake-token-fails"; Dir = "dirty-token"; Deny = $false; Expect = 1; Category = "token"; Forbid = $sampleToken },
             @{ Name = "user-name-path-fails"; Dir = "dirty-user-path"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
+            @{ Name = "chinese-user-name-path-fails"; Dir = "dirty-user-path-chinese"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $chineseUserForbid },
             @{ Name = "tracked-keystore-fails"; Dir = "dirty-name-keystore"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "tracked-jks-fails"; Dir = "dirty-name-jks"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "tracked-gguf-fails"; Dir = "dirty-name-gguf"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
@@ -472,11 +488,17 @@ if ($directoryMode) {
     $status = Invoke-Git @("status", "--porcelain")
     if ($status.ExitCode -ne 0) { Stop-WithError "git status failed in $repoRoot" }
     if ($status.Output.Count -gt 0) {
-        Write-Host "check-public: note: the working tree has uncommitted changes; tracked files are read from the working tree"
+        # Reading tracked files out of a dirty working tree can hide what HEAD really contains, so
+        # this gate refuses to produce a result instead of judging something that is not the commit
+        # under test. Commit or stash first; -ScanDirectory stays available for single files.
+        Stop-WithError "the working tree has uncommitted changes; this check reports on HEAD and refuses to run on a dirty tree (commit or stash first)"
     }
 
-    $listed = Invoke-Git @("ls-files")
-    if ($listed.ExitCode -ne 0) { Stop-WithError "git ls-files failed" }
+    # The file list comes from HEAD, not from the index: together with the dirty-tree refusal above,
+    # the working tree is identical to HEAD here, so a file's content is the content of the commit
+    # under test.
+    $listed = Invoke-Git @("ls-tree", "-r", "--name-only", "HEAD")
+    if ($listed.ExitCode -ne 0) { Stop-WithError "git ls-tree failed for HEAD" }
     $trackedFiles = @($listed.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     foreach ($relative in $trackedFiles) {
         if (Test-SensitiveName -Path $relative) { Add-Finding "sensitive-file" $relative }
@@ -544,7 +566,14 @@ if ($directoryMode) {
         Test-ScanUnits -Units $units.ToArray() -DenyWords $denyWords
     }
     Write-Host "check-public: tracked files: $($trackedFiles.Count) ($scannedFiles scanned, $skippedBinary skipped as binary)"
+    Write-Host ("check-public: baseline: " + $base + " " + (@((Invoke-Git @("rev-parse", $base)).Output) | Select-Object -First 1))
+    Write-Host ("check-public: HEAD: " + (@((Invoke-Git @("rev-parse", "HEAD")).Output) | Select-Object -First 1))
     Write-Host "check-public: history: $($commits.Count) commit(s) in $base..HEAD"
+    if ($commits.Count -eq 0) {
+        Write-Host "check-public: note: the range is empty because HEAD equals the baseline; an empty range says nothing about the history that was already published"
+    } else {
+        Write-Host "check-public: note: the range covers every commit between the baseline and HEAD; a commit outside it is not judged here"
+    }
 }
 
 Write-Host ""
