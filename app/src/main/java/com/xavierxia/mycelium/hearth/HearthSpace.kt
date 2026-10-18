@@ -26,9 +26,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,8 @@ private val presetColors = listOf(0xFF7EB6A4, 0xFF8D4A2B, 0xFF5B7DB1, 0xFFB18BC4
 @Composable
 fun HearthSpace(padding: PaddingValues, vm: HearthViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // Services, models and characters can change on the other tabs, so refresh on every entry.
+    LaunchedEffect(Unit) { vm.refresh() }
     val editing = state.editing
     val character = state.openCharacter
     when {
@@ -67,7 +71,7 @@ private fun CharacterList(vm: HearthViewModel, state: HearthState, padding: Padd
         item {
             Text("炉边", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(4.dp))
-            Text("这里的人物是你自己写的。聊天只用手机上的模型，不联网。")
+            Text("这里的人物是你自己写的。默认用手机上的模型，不联网；也可以给某个人物单独选云端模型。")
         }
         state.notice?.let { note -> item { Text(note) } }
         item { Button(onClick = vm::startCreate) { Text("新建人物") } }
@@ -84,7 +88,13 @@ private fun CharacterList(vm: HearthViewModel, state: HearthState, padding: Padd
                             Text(character.avatarChar.ifBlank { character.name.take(1) }, color = Color.White, style = MaterialTheme.typography.titleLarge)
                         }
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                            Text(character.name, style = MaterialTheme.typography.titleSmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(character.name, style = MaterialTheme.typography.titleSmall)
+                                if (character.modelKind == ModelKind.CLOUD) {
+                                    Spacer(Modifier.size(6.dp))
+                                    Text("云端", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
                             Text(briefOf(character), style = MaterialTheme.typography.bodySmall)
                             Text("最近对话：${friendlyTime(state.activity[character.id])}", style = MaterialTheme.typography.bodySmall)
                         }
@@ -189,22 +199,62 @@ private fun CharacterEditor(vm: HearthViewModel, state: HearthState, draft: Char
                 minLines = 2,
             )
         }
-        item { Text("用哪个本地模型", style = MaterialTheme.typography.titleSmall) }
+        item { Text("用哪个模型", style = MaterialTheme.typography.titleSmall) }
+        item {
+            ModelChoice(
+                selected = draft.modelKind == ModelKind.DEFAULT,
+                title = "默认本地模型",
+                subtitle = "跟随全局默认；现在用「我的 → 本地模型」里登记的第一个",
+                onSelect = { vm.updateEditing { it.copy(modelKind = ModelKind.DEFAULT, modelId = "", modelName = "", serviceId = "", serviceName = "") } },
+            )
+        }
         if (state.models.isEmpty()) {
             item { Text("还没有导入本地模型。先去「我的 → 本地模型」导入一个 GGUF 文件。") }
         } else {
             items(state.models, key = { it.sha256 }) { record ->
-                Row(
-                    Modifier.fillMaxWidth().clickable {
-                        vm.updateEditing { it.copy(modelId = record.sha256, modelName = record.name) }
+                ModelChoice(
+                    selected = draft.modelKind == ModelKind.LOCAL && draft.modelId == record.sha256,
+                    title = record.name,
+                    subtitle = "本机模型",
+                    onSelect = {
+                        vm.updateEditing {
+                            it.copy(modelKind = ModelKind.LOCAL, modelId = record.sha256, modelName = record.name, serviceId = "", serviceName = "")
+                        }
                     },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = draft.modelId == record.sha256,
-                        onClick = { vm.updateEditing { it.copy(modelId = record.sha256, modelName = record.name) } },
+                )
+            }
+        }
+        if (state.services.isEmpty()) {
+            item { Text("还没有云端服务。要让人物用云端，先去「我的 → 云端模型」添加服务并拉取模型。") }
+        } else {
+            state.services.forEach { service ->
+                item(key = "service-${service.id}") {
+                    ModelChoice(
+                        selected = draft.modelKind == ModelKind.CLOUD && draft.serviceId == service.id,
+                        title = "云端：${service.name}",
+                        subtitle = service.baseUrl,
+                        onSelect = { vm.updateEditing { it.copy(modelKind = ModelKind.CLOUD, serviceId = service.id, serviceName = service.name, modelId = "") } },
                     )
-                    Text(record.name)
+                }
+                if (draft.modelKind == ModelKind.CLOUD && draft.serviceId == service.id) {
+                    val models = state.cloudModels[service.id].orEmpty()
+                    if (models.isEmpty()) {
+                        item(key = "service-${service.id}-empty") {
+                            Text("这个服务还没有保存的模型。先去「我的 → 云端模型」点「拉取模型」。")
+                        }
+                    } else {
+                        models.forEach { model ->
+                            item(key = "service-${service.id}-$model") {
+                                ModelChoice(
+                                    selected = draft.modelName == model,
+                                    title = model,
+                                    subtitle = "云端模型",
+                                    indent = true,
+                                    onSelect = { vm.chooseCloudService(service, model) },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -256,6 +306,34 @@ private fun CharacterEditor(vm: HearthViewModel, state: HearthState, draft: Char
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("取消") } },
         )
     }
+    state.cloudConfirm?.let { pending ->
+        AlertDialog(
+            onDismissRequest = vm::dismissCloudConfirm,
+            title = { Text("这个人物改用云端模型？") },
+            text = {
+                Text(
+                    "这个人物的聊天内容（以后还有它对你的记忆）会发给「${pending.serviceName}」。" +
+                        "确认后才会生效，你在对话页可以随时改回本地模型。",
+                )
+            },
+            confirmButton = { TextButton(onClick = vm::confirmCloud) { Text("知道了，用云端") } },
+            dismissButton = { TextButton(onClick = vm::dismissCloudConfirm) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun ModelChoice(selected: Boolean, title: String, subtitle: String, indent: Boolean = false, onSelect: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onSelect).padding(start = if (indent) 24.dp else 0.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Column {
+            Text(title)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable
@@ -269,13 +347,27 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = vm::closeCharacter) { Text("返回") }
                 Text(character.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (character.modelKind == ModelKind.CLOUD) {
+                    Text("云端", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
                 TextButton(onClick = vm::newConversation) { Text("新对话") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("沉浸模式", style = MaterialTheme.typography.bodySmall)
+                Switch(
+                    checked = state.mode == HearthMode.TEST,
+                    onCheckedChange = { on -> vm.setMode(if (on) HearthMode.TEST else HearthMode.IMMERSIVE) },
+                )
+                Text("测试模式", style = MaterialTheme.typography.bodySmall)
+            }
+            if (state.mode == HearthMode.TEST) {
+                Text("测试模式 · 不留记录：不写库、不留历史，离开这页就没有了；也不读不写这个人物的记忆。", style = MaterialTheme.typography.bodySmall)
             }
             state.notice?.let { note -> Text(note) }
             if (state.droppedTurns > 0) {
                 Text("较早的 ${state.droppedTurns} 轮对话放不下了，已经省略；人物设定一直都在。", style = MaterialTheme.typography.bodySmall)
             }
-            if (state.conversations.isNotEmpty()) {
+            if (state.mode == HearthMode.IMMERSIVE && state.conversations.isNotEmpty()) {
                 TextButton(onClick = { historyOpen = !historyOpen }) { Text("历史对话（${state.conversations.size}）") }
                 if (historyOpen) {
                     state.conversations.forEach { conversation ->
@@ -304,7 +396,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                 item { Text(character.greeting.ifBlank { "说点什么吧。" }) }
             }
             items(state.messages) { message -> MessageRow(message, character) }
-            state.streaming?.let { partial -> item { StreamingRow(partial, character) } }
+            state.streaming?.let { partial -> item { StreamingRow(partial, state.streamLabel) } }
         }
         if (!state.busy && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
@@ -362,9 +454,9 @@ private fun MessageRow(message: HearthMessage, character: HearthCharacter) {
 }
 
 @Composable
-private fun StreamingRow(partial: String, character: HearthCharacter) {
+private fun StreamingRow(partial: String, label: String?) {
     Column(Modifier.fillMaxWidth()) {
-        Text("本机 · ${character.modelName}", style = MaterialTheme.typography.labelSmall)
+        Text(label ?: "正在生成…", style = MaterialTheme.typography.labelSmall)
         Text(partial.ifEmpty { "…" })
     }
 }
