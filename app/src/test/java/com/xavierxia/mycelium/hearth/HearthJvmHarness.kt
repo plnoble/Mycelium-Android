@@ -53,7 +53,6 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 abstract class HearthJvmTestCase {
     protected lateinit var context: Application
-    private lateinit var databaseFile: File
     internal lateinit var gates: GatedJvmSessions
     protected lateinit var log: ConversationLog
     protected lateinit var characters: CharacterStore
@@ -61,13 +60,19 @@ abstract class HearthJvmTestCase {
     protected lateinit var model: HearthViewModel
     private lateinit var record: LocalModelRecord
     private lateinit var store: ViewModelStore
+    private lateinit var databaseFile: File
+
+    /** 用例建人物时用的那条假模型登记。 */
+    protected val registeredModel: LocalModelRecord get() = record
 
     @Before
     fun setUpHarness() {
         context = RuntimeEnvironment.getApplication()
         registerSqliteDrivers()
-        databaseFile = File(context.filesDir, "jvm-hearth-${System.nanoTime()}.sqlite")
-        gates = GatedJvmSessions("jdbc:sqlite:${databaseFile.absolutePath}")
+        databaseFile = shortLivedDatabaseFile()
+        // busy_timeout：同一时刻可能有几个会话一起开库（每个会话开工前都会跑一次 schema 检查），
+        // 默认的超时太短，偶发的 SQLITE_BUSY 会让用例莫名其妙地失败。
+        gates = GatedJvmSessions("jdbc:sqlite:${databaseFile.absolutePath}?busy_timeout=5000")
         log = ConversationLog(gates::open)
         characters = CharacterStore(gates::open)
         engine = FakeLocalEngine()
@@ -88,6 +93,7 @@ abstract class HearthJvmTestCase {
     @After
     fun tearDownHarness() {
         store.clear()
+        listOf("", "-journal", "-wal", "-shm").forEach { suffix -> File("${databaseFile.absolutePath}$suffix").delete() }
     }
 
     /** 一个用测试登记的假模型当默认引擎的人物。 */
@@ -125,10 +131,12 @@ abstract class HearthJvmTestCase {
         }
     }
 
-    /** 页面已经读过一次历史、可以发送了。 */
+    /** 页面已经读过一次历史、可以发送了；顺带等到人物与模型登记都上来了（发送要用到它）。 */
     protected fun openReady(character: HearthCharacter) {
+        waitFor(what = "启动时的登记读取完成") { model.state.value.models.isNotEmpty() }
         model.openChat(character)
         waitFor(what = "打开人物后历史读取完成") { !model.state.value.historyLoading }
+        assertTrue("打开人物时历史读取失败了：${model.state.value.notice}", !model.state.value.historyFailed)
     }
 
     /** 库里的时间戳用应用自己的格式，排序规则才一致。 */
@@ -140,8 +148,15 @@ abstract class HearthJvmTestCase {
 }
 
 /**
- * Robolectric 给每个测试类一份自己的类加载器，sqlite 驱动因此在同一个 JVM 里会有两份拷贝，而
- * `DriverManager` 的 `isDriverAllowed` 只认「调用方加载器能看见的那一份」。如果本用例先跑，驱动
+ * 用例自己的库文件。真机上这是应用私有目录；JVM 上放在系统临时目录里，而且名字要短：Robolectric
+ * 的按用例目录会把「类名 + 方法名」拼进去，sqlite 还要在同一个目录里建 journal 文件，长方法名下
+ * Windows 的 260 字符上限会被顶破，第一条 `CREATE TABLE` 就是 `SQLITE_CANTOPEN`。
+ */
+private fun shortLivedDatabaseFile(): File =
+    File(System.getProperty("java.io.tmpdir"), "hearth-jvm-${System.nanoTime()}.sqlite").apply { deleteOnExit() }
+
+/**
+ * Robolectric 给每个测试类一份自己的类加载器，sqlite 驱动因此在同一个 JVM 里会有两份拷贝，而 * `DriverManager` 的 `isDriverAllowed` 只认「调用方加载器能看见的那一份」。如果本用例先跑，驱动
  * 的首次初始化就发生在沙箱加载器上，之后普通 JUnit 用例（用父加载器那一份）会直接报
  * `No suitable driver found`。所以两份都在这里显式登记一次：谁先跑都不会坑到另一份。
  */

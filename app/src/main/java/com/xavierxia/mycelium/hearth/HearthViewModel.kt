@@ -857,6 +857,18 @@ class HearthViewModel @JvmOverloads constructor(
 
     private fun budgetFor(character: HearthCharacter): Int = options.contextLength - character.maxTokens
 
+    /**
+     * The turn's own stop record, asked at the generation boundary. The engine cannot answer this: its
+     * flag is process-wide, it is cleared by the next generation it starts, and a stop that landed
+     * before that clear would be forgotten. The turn's record is per turn, so a stop that landed while
+     * the model was loading (or while the window was still being read, or between this check and the
+     * model being asked) is still there. Refusing here leaves nothing behind, because a turn that
+     * produced nothing is never stored.
+     */
+    private fun stopBeforeGenerating(turn: Turn) {
+        if (turn.userStopped) throw CancellationException("这一轮已经停止")
+    }
+
     private suspend fun stream(turn: Turn, messages: List<ChatMessage>, onDelta: (String) -> Unit) {
         currentChosen = turn.chosen
         val model: ChatModel = when (val chosen = turn.chosen) {
@@ -864,13 +876,6 @@ class HearthViewModel @JvmOverloads constructor(
                 if (engine.loadedModel.value?.id != chosen.record.sha256) {
                     mutable.update { it.copy(notice = "正在加载 ${chosen.record.name} …") }
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
-                    // The load came back. That is not proof that nobody pressed stop while the page
-                    // still said "loading": a stop that arrived before the engine's own flag was
-                    // cleared (or before the load even started) leaves no trace there, and the very
-                    // next runNative would clear whatever was left. So this turn's intent is asked
-                    // here, at the last moment before generating: a stopped turn produces nothing,
-                    // and a turn that produced nothing is never stored (see stillCommittable).
-                    if (turn.userStopped) throw CancellationException("这一轮已经停止")
                     mutable.update { it.copy(notice = null) }
                 }
                 engine
@@ -904,10 +909,25 @@ class HearthViewModel @JvmOverloads constructor(
                 built
             }
         }
+        // The stop boundary, asked for every turn and not only for the one that had to load. A load
+        // coming back is not proof that nobody pressed stop while the page still said "loading": the
+        // engine's own flag is cleared by the very next runNative, so it cannot carry this turn's
+        // intent, and a model that was already loaded never passed the load at all. Two questions are
+        // asked instead — before the generation is handed to a dispatcher, and again at the moment the
+        // model is actually asked — because a stop can land in between. A stopped turn produces
+        // nothing, and a turn that produced nothing is never stored (see [stillCommittable]), so
+        // stopping here leaves no answer behind; what a stop does keep is what the turn had already
+        // produced before it landed, which is the answer written below with the stopped notice.
+        stopBeforeGenerating(turn)
         // The cloud model keeps its request on the caller's dispatcher, so the collection runs on IO;
         // the local engine switches by itself, so this is harmless for it.
         withContext(Dispatchers.IO) {
+            stopBeforeGenerating(turn)
             model.generate(messages, turn.character.parameters()).collect { delta ->
+                // A delta that arrives after the stop is not part of this answer any more: the turn
+                // keeps what it had produced *before* the stop, so this one is dropped instead of
+                // being shown or stored (and it no longer counts as "produced").
+                if (turn.userStopped) return@collect
                 // Marked before the delta reaches the screen or the buffer: from this point the turn
                 // has something to keep, which is what a stop is allowed to preserve.
                 turn.produced = true
