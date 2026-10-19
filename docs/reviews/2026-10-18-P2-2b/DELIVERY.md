@@ -75,3 +75,59 @@
   - 只改回裸 `connection.responseCode` → **5 例全绿**。原因如实记录：走查在它前面紧挨着 `call.check()`，对 GET 而言裸调用只在「与 `cancel()` 抢同一把锁」的那段竞态里才有区别，确定性的测例进不去那段竞态 —— **这一条不当成已覆盖**。
 - **本步实测**：`:net:test --offline` **55 例、0 失败 0 错误 0 跳过**（`DownloadCancelGateTest` 5、`DownloadGatewayTest` 29、`GatewayTest` 18、`LocalHttpTest` 2、`AuditLogTest` 1）。
 - **已知残留（沿用 P2-2 裁定，本包没有改变它）**：`download()` 发的是 GET、`DownloadRequest` 没有请求正文，`DownloadRun` 交给走查的 body 恒为 `null`，所以「正在取正文流」那一段在下载路径上**不可达**（生产里的 `readFollowingRedirects` 也全是 GET）；它目前只由走查的元数据用途带 body 时到达，测例是直接驱动走查才覆盖到的。同时，**平台限制那条残留同样适用于下载**：停止恰好落在「建连刚启动」的极窄窗口时，可能要等到连接超时才结束（P2-2 已把这条裁定为已知残留，不换 HTTP 库）。
+
+## 四、门禁原文
+
+- **跑法**：全新 worktree，`git worktree add --detach … 0bb81f9`（工作区干净），在该 worktree 里跑 `scripts\check-all.ps1 -LlamaSourceRepository <llama.cpp 源码仓库>`；跑完用 `\\?\` 前缀删除该 worktree 并 `git worktree prune`（`git worktree list` 里已无此项）。
+- **原始日志**：仓库外 `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-0bb81f9-ps1.txt`（UTF-8 无 BOM，78 行）、退出码文件 `gate-0bb81f9-ps1.exitcode`（内容 `0`）。该文件含本机绝对路径，**不入库**；下表是原文摘录（只去掉本机路径列，其余逐字保留）。
+- **结论行（原文）**：
+
+  > **PASS**: 0 failures, 0 warnings, exit code 0 (lint hints: 0, informational, not a failure).
+
+摘要原文（`check-all summary (2026-10-19 22:25:12)`）：
+
+```
+- commit: 0bb81f9dbee1d04e9baebe41eb5f2587c22599a6
+- worktree: clean
+- run: full check
+- mode: offline --offline
+- gradle tasks: test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+- gradle exit code: 0
+- tasks: 255 executed, 21 up-to-date
+```
+
+单元测试原文表：
+
+| module | test task | cases | failures | errors | skipped |
+|---|---|---|---|---|---|
+| :app | testDebugUnitTest | 181 | 0 | 0 | 0 |
+| :contract | test | 22 | 0 | 0 | 0 |
+| :hearth | test | 46 | 0 | 0 | 0 |
+| :llm | testDebugUnitTest | 13 | 0 | 0 | 0 |
+| :model-api | test | 3 | 0 | 0 | 0 |
+| :net | test | 55 | 0 | 0 | 0 |
+| :roundtable | test | 28 | 0 | 0 | 0 |
+| **total** | | **348** | **0** | **0** | |
+
+lint 原文表与警告原文行：
+
+```
+| :app | debug   | 0 | 0 | 0 |
+| :app | release | 0 | 0 | 0 |
+| **total** |     | **0** | **0** | **0** |
+- warnings to fix: 0
+- llama.cpp warnings (agreed exemption): 0
+- Kotlin compiler error lines: 0
+```
+
+产物原文表（去掉绝对路径列）：
+
+| APK | size | signature |
+|---|---|---|
+| app-debug-androidTest.apk | 2.8 MiB | signed |
+| app-debug.apk | 59.7 MiB | signed |
+| app-release-unsigned.apk | **38.9 MiB** | **unsigned** |
+
+- 12 个期望任务**全部 `executed`**（没有 `UP-TO-DATE`/`FROM-CACHE` 混进来），llama.cpp 校验到 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`。
+- **本次只跑了 `check-all.ps1`**（本轮要求就是它）；`check-all.sh` 本轮未跑。以往两条脚本同 worktree 先后跑时，SH 那一次多数任务会 `UP-TO-DATE`、结论继承前一次 PS1 的产物，所以本报告不拿 SH 的读数当独立证据。
+- 第 7 步「正式包只带 arm64-v8a」的改后大小即上表的 **38.9 MiB**（改前大小见第 7 步提交 `6df413e`/`f47c706` 当轮门禁记录）。
