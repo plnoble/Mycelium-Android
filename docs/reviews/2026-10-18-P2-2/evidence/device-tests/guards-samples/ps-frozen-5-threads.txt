@@ -1,0 +1,6 @@
+   PID   TID STAT  WCHAN 
+ 21272 21272 SL    do_freezer_trap
+ 21272 21273 S<L   do_freezer_trap
+ 21272 21275 S<L   do_freezer_trap
+ 21272 21276 S<L   do_freezer_trap
+ 21272 21277 SNL   do_freezer_trap

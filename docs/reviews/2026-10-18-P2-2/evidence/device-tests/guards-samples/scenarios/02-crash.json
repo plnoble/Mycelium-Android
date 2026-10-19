@@ -1,0 +1,13 @@
+{
+  "name": "02-crash",
+  "why": "Real 04g tail: INSTRUMENTATION_RESULT: shortMsg=Process crashed. followed by INSTRUMENTATION_CODE: 0. The pre-fix script logged `run finished normally` here; the fix must report CRASH and exit 2.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 2,
+  "expectReport": ["^CRASH .*Process crashed.*INSTRUMENTATION_CODE: 0"],
+  "expectNoReport": ["run finished normally", "^DONE ", "^WATCHDOG "],
+  "expectCommands": [],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-crashed.txt" }
+  ]
+}

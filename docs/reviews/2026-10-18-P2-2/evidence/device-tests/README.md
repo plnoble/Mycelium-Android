@@ -104,12 +104,55 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 | --- | --- | --- |
 | 用例内的等待 | `HearthNavigationDuringTurnDeviceTest.kt` 的 `waitUntil` / `expectNothingFor`、`GatedHearthSessions.kt` 的 `HearthStageHold.await` / `awaitCallFinished` | 每个等待都有明确超时；超时失败信息里带上**页面状态**和**全部线程栈**；闸门到点自己兜底放行 |
 | 用例级硬上限 | `BoundedDeviceTest.kt`（4 分钟，`@get:Rule`） | 用例超时 → 打印全部线程栈 → 判失败，后面的用例照跑；进程被系统冻住时它也没用（线程一起冻住），这一层只防「用例自己的等待没边界」 |
-| 主机侧硬上限 | `scripts/guards.ps1`（6 分钟无增长就 force-stop 并记录停在哪一例） | 防的正是系统冻结：没有日志增长就认定卡住，如实记录并 force-stop |
+| 主机侧硬上限 | `scripts/guards.ps1`（默认 3 分钟无增长就 force-stop 并记录停在哪一例） | 防的正是系统冻结：没有日志增长就按探针结果分类、如实记录并 force-stop |
 
-每次 instrument 都用主机侧守卫跑；守卫的报告在 `guards.txt`（每一轮的开跑时间、`STICKY` 解冻记录、
-若有则 `WATCHDOG` 记录）。本次唯一一次主机侧判定卡住是**修复后、还没开 sticky 解冻**的那一轮：第 7 例
+每次 instrument 都用主机侧守卫跑；守卫的报告在 `guards.txt`（`WATCHDOG` 记录，以及 `RUN`/`STICKY` 行）。
+注意：`RUN`/`STICKY` 那几行**不是仓库里任何脚本写的**——`guards.ps1` 只写 `FREEZER`/`WATCHDOG`/`DONE`，
+`run-timestamped.ps1` 的解冻调用是 `Out-Null` 不落日志，它们来自当时未归档的主机包装命令。本次唯一一次主机侧
+判定卡住是**修复后、还没开 sticky 解冻**的那一轮：第 7 例
 `comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere` 3 分钟无增长被 force-stop（`hang-record/04`、
 `05`）。此后每轮开跑后都对调试包做一次 `am unfreeze --sticky`，单类、分批 B、分批 C 都跑完、无卡住。
+
+### 4.1 冻结守卫脚本：2026-10-19 的修正与验证到哪一步
+
+第四次复审（`REVIEW-r4.md` 必修 4）与第五次复审（`REVIEW-r5.md` 第 12 行、必修 3）都指出：归档的
+`guards.ps1` 不能按声明工作。本轮改了三处：
+
+1. **进程号**：原来给 `$pid` 赋值——PowerShell 不区分大小写，`$PID` 是只读自动变量，赋值拿不到目标进程号
+   （取到的是宿主 PowerShell 自己的 PID），后面的 `ps -p` 也就查了个不存在的号。现在改用 `$testPid`，
+   并把 `pidof` 的「进程不在」与「adb 报错」两条分支分开。
+2. **WCHAN 解析**：原来那条 `ps -o WCHAN` 只打印一列，而代码要求行首是数字，正常输出一行都匹配不上，
+   于是静默当成「没冻结」——守卫形同虚设。现在改成 `ps -T -p <pid> -o PID,TID,STAT,WCHAN`，**按表头列位解析**
+   （对齐真机摘录的四列形状，见 `hang-record/03` 第 165–170 行）；缺列、`WCHAN` 为空或为 `-`、列数不匹配、
+   `ps`/`adb` 报错，一律判 `PROBE-UNKNOWN` 并写进报告，**绝不**折成「没冻结」。
+3. **退出分类**：原来只要出现任意 `INSTRUMENTATION_CODE` 就写 `run finished normally`（连 `CODE: 0` +
+   `shortMsg=Process crashed.` 也这么记）。现在按语义分开：
+
+| 退出码 | 判定 | 依据 |
+| --- | --- | --- |
+| 0 `DONE` | 跑完 | 日志出现 `INSTRUMENTATION_CODE: -1`（跑完即止，用例过不过看末尾那几行） |
+| 2 `CRASH` | 崩溃 | 终止码非 -1（如 `CODE: 0` + `shortMsg=Process crashed.`）或出现崩溃标记 |
+| 3 `FREEZE_TIMEOUT` | 冻结超时 | 日志停涨到点，且探针确认全线程 `do_freezer_trap` |
+| 4 `STALL` | 停涨（非冻结） | 日志停涨到点，探针读得出来且不是冻结 |
+| 5 `UNKNOWN` | 未知 | 探针不可用/解析失败、进程不在又无终止标记、终止码无法归类、总时限到点仍无终止标记 |
+
+**验证方式（只到文本级）**：把真机摘录的 `dumpsys`/`ps -T`/`am instrument` 文本做成 `guards-samples/` 下的夹具，
+用 `scripts/guards-selftest.ps1` 以 `-ReplayDir` 驱动**同一个** `guards.ps1`（确定性时钟、不睡眠、不连 adb），
+逐场景断言退出码、必须出现与绝不能出现的报告行、以及本该发出的 `am unfreeze`/`am force-stop` 动作；另有第 2 阶段
+用夹具 adb（`guards-samples/fake-adb.ps1`，固定回「没有设备」）把**真的 live 循环**跑几秒，证明 adb 采集 → 探针 →
+报告 → 总时限这条通路没有被 replay 绕开，且全程不碰真机。本轮实跑（Windows PowerShell 5.1.26100.9711）：
+**11 个 replay 场景 + 1 个 live 冒烟全过**，原始输出 `guards-samples/selftest-output.txt`，
+每个夹具是真机摘录、派生还是构造，见 `guards-samples/README.md`。
+
+**哪些分支只做了文本级验证**：`ps -T` 表头/列解析的各种形状、`pidof` 的两条分支、`INSTRUMENTATION_CODE`
+的三种分类、停涨看门狗按探针状态分出的三种退出、报告行与 adb 动作——这些都是样例驱动的**文本级**验证。
+**需要真机才能确认的**：真机上 `pidof`/`ps -T` 的真实输出形状是否与摘录一致；真机真的被冻住时探针能否当场判出
+`FROZEN`；`am unfreeze --sticky` 是否真能让日志恢复增长；`-Seconds` 总时限与轮询节奏在真机上的实际行为
+（replay 用确定性时钟，不睡眠）。
+
+`hang-record/03` 的冻结现场是当时抓的原始文本，**仍然有效**（r5 也这么裁定），不因脚本缺陷作废；但 `04f` 的
+4 条 `DONE` 行是**修复前**的脚本写的，不能当「正常跑完」的证据——其中 `== E ==`（对应 `04g`）那一次实际以
+`CODE: 0` 崩溃收场。
 
 ## 5. 本次改了什么（只有 androidTest，3 个文件）
 
@@ -190,9 +233,9 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 | `04c-follow-class-green-timed.txt` / `04c-…-timings.md` | 最终代码单类复跑：`OK (10 tests)`，`Time: 11.234` |
 | `04d-follow-class-green-repeat-timed.txt` / `04d-…-timings.md` | 同 04c 重复一次：`OK (10 tests)`，`Time: 11.278` |
 | `04g-full-suite-after-test-fix-timed.txt` / `04g-…-timings.md` | 修好以后的全量：跑到 #15 被 `Broken pipe` 带走；#11 通过（1045ms） |
-| `04f-guards-follow-class.txt` | 04a–04g 几轮的主机侧守卫报告（全部 `DONE … run finished normally`） |
+| `04f-guards-follow-class.txt` | 04a–04g 几轮的主机侧守卫报告；**这是修复前脚本写的**，4 条 `DONE` 只表示「看到了某个 `INSTRUMENTATION_CODE`」，**不能**当「正常跑完」的证据（`== E ==` 那次 `04g` 实际以 `CODE: 0` 崩溃） |
 | `04e-follow-class-rerun.md` | **判定与依据**：两例失败是测试脆弱 / 环境，不是回归；含更正说明与编码说明 |
-| `guards.txt` | 主机侧守卫报告：每轮开跑时间、`STICKY` 解冻记录、唯一一次 `WATCHDOG` 判定 |
+| `guards.txt` | 主机侧守卫报告：唯一一次 `WATCHDOG` 判定，以及 `RUN`/`STICKY` 行（后者**不是**仓库里任何脚本写的，见第 4 节） |
 | `hang-record/01-user-run-16min-hang-b6dbc6c.txt` | 用户提供的原始 16 分钟挂死日志（UTF-16 转 UTF-8） |
 | `hang-record/02-reproduced-full-run-b6dbc6c.txt` | 用有界化之前的 APK 复现挂死（卡在第 9 例）；注意它跑的是 b6dbc6c，**已经含**复审 r3 第 5 条实现 |
 | `hang-record/03-frozen-process-evidence.txt` | `isFrozen=true` / 全部线程 `do_freezer_trap` / instrumentation 记录 |
@@ -200,7 +243,9 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 | `hang-record/06`、`07` | 修复后全量跑到第 15 例进程崩溃（第一次） |
 | `hang-record/08-crash-stack-broken-pipe.txt` | 崩溃栈：`LocalHttp.serve` → `SocketException: Broken pipe` |
 | `hang-record/09`、`10` | 同位置的崩溃复现（含 `pm clear` 之后那一次） |
-| `scripts/guards.ps1` | 主机侧守卫（冻结检测 + 6 分钟硬上限 + force-stop），可直接复用 |
+| `scripts/guards.ps1` | 主机侧守卫（冻结检测 + 无增长硬上限 + force-stop + 退出分类）。2026-10-19 修好 `$testPid`、`ps -T` 列解析与退出分类；**文本级验证见 4.1**，真机路径仍待复核，不再是「拿来即用」的声明 |
+| `scripts/guards-selftest.ps1` | 守卫的样例驱动自检：以 `-ReplayDir` 跑 `guards-samples/scenarios/*.json`，断言退出码、报告行与 adb 动作；**只做文本级验证**（不连设备），用法见 4.1 |
+| `guards-samples/` | 守卫的样例夹具与场景（真机摘录 + 少量构造）、出处清单 `README.md`、本轮自检原始输出 `selftest-output.txt` |
 | `scripts/run-timestamped.ps1` | 主机侧跑测器：force-stop → `am unfreeze --sticky` → 流式读 `am instrument -w -r` 并给每行加主机时间戳（`04*` 的原始输出就是它产生的），可直接复用 |
 | `scripts/extract-timings.ps1` | 把带时间戳的原始输出变成逐例耗时表 |
 
@@ -218,3 +263,7 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
    有偶发性，与本次改动无关，本次没有追。
 4. `cached_apps_freezer` 我**没有**改（仍是 `device_default`）；如果后续仍偶发冻住，可以考虑把它临时改成
    `disabled`（可回退），或把 `am unfreeze --sticky` 固化进跑测脚本（本次四轮都用它兜底，都没触发冻结）。
+5. **修好的冻结守卫脚本只在文本级验证过**（见 4.1）：真机上 `pidof`/`ps -T` 的实际输出形状、真被冻住时能否当场
+   判出 `FROZEN`、`am unfreeze --sticky` 是否真能让日志恢复增长，本轮都没有实测；`guards-samples/` 里
+   `ps-not-frozen-*`、`ps-wchan-*`、`log-code0-no-marker-*` 这几份是构造或派生的，不是真机原文（出处见
+   `guards-samples/README.md`）。

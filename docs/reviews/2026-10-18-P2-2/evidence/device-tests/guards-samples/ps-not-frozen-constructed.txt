@@ -1,0 +1,6 @@
+   PID   TID STAT  WCHAN 
+ 21272 21272 SL    do_epoll_wait
+ 21272 21273 S<L   futex_wait_queue_me
+ 21272 21275 S<L   0
+ 21272 21276 SNL   pipe_read
+ 21272 21277 S<L   binder_wait_for_work
