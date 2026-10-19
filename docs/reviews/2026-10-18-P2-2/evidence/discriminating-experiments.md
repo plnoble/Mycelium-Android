@@ -12,7 +12,7 @@
 | 3 | `ConversationLog.writeTurn`：`valid()` 固定在写入事务打开之后、写第一行之前 | `AbandonedWriteTest.aTurnAbandonedWhileTheWriteLockIsHeldIsNotStored`（另 3 例同时红） | `作废的一轮不该被存下来 ==> expected: <null> but was: <5409d3ce-9a12-4757-a9b7-af33362d2870>`；`valid() 必须在写入事务内被问到`；`作废的重做不该算成功` |
 | 4 | `CharacterStore.confirmCloudTarget`：在自己的写事务内判定 `valid()` | `CloudConfirmTargetTest.aConfirmationCancelledWhileTheWriteWaitsChangesNothing` | `取消之后的确认不该算数` |
 | 7 | `LocalModelEngine.load`：native 加载照常成功返回后复检停止标记 | `LocalModelEngineTest.aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded` | `停止之后这次加载必须以失败收场，实际 null` |
-| 8 | `HearthSpace.TimelineFollowState` 与手势协程同键（`LaunchedEffect(listState, follow)`） | `HearthTimelineFollowDeviceTest` 三例（真机） | **本轮没有取得判别力证据**：只有真机用例可跑，本轮不连设备。不是「改坏却不红」，是「没跑成」。详见第 6 条 |
+| 8 | `HearthSpace.TimelineFollowState` 与手势协程同键（`LaunchedEffect(listState, follow)`） | `HearthTimelineFollowDeviceTest` 三例（真机） | **本轮没有取得判别力证据**：只有真机用例可跑，本轮不连设备。不是「改坏却不红」，是「没跑成」。详见第 6 条。**2026-10-19 补**：这一条的「首次保存 vs 导航」那一半已经在真机上取得判别力实证（`device-tests/04b`，改回旧判据 → 用例真红）|
 
 **没有出现「改坏却不红」的情形**：实际跑到的第 2（临时复刻件）、3、4、7 条，改坏后对应用例都变红并已抓到原文；
 第 8 条未运行（原因见第 6 条），因此对它既不能断言「有判别力」也不能断言「没有」。
@@ -298,6 +298,25 @@ Gradle 控制台那行打印的是后者，两条都来自同一份原始输出�
    要补的话，最省事的是在真机上跑上面三例（`DELIVERY.md` 4.3/4.4 记的 instrumented 复跑命令；注意 4.4 那张表
    是 `3bfbdc3` 之前跑的那一轮，这三例是其后新增的），或另写一个能驱动
    `ChatTimeline(listState = …)` 滚动的 Robolectric 用例。
+
+### 6.1 2026-10-19 补：真机上的判别力实证（只覆盖「首次保存 vs 导航」那一半）
+
+上一轮真机复跑把 `HearthTimelineFollowDeviceTest` 的两例失败误归因成「缺本地模型」。重查后：一例是测例
+自己假红（导航后没等重组）、一例是被 `LocalHttp` 的 `Broken pipe` 带走，都不是回归。改稳测例之后，在
+真机上做了第 8 条这一半的「改坏 → 变红 → 还原」：
+
+- 变异（只改实现一行，未提交、已还原）：`TimelineFollowState.claim()` 里把「段身份变了就重置」改回旧判据
+  ——`if (previousId == null && conversationId != null) return`，即「未保存的新对话切到别处」仍被当成首次落库；
+- 结果：`openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` 立刻真红，
+  失败原文（`device-tests/04b-follow-class-old-claim-timed.txt`）：
+  `打开已有历史 B 以后必须跟到 B 的末尾：first=4/91 visibleCount=19 total=41 lastIndex=22 lastOffset=2609
+  lastSize=117 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false`
+  —— `total=41` 说明读的是**导航之后**的布局，视口确实没跟到 B 的末尾，是真判别；
+- 还原（`git diff` 只剩测例文件）后：该单类两轮 `OK (10 tests)`，全量里这一例也通过（`04g`）。
+
+**没有被这次覆盖的**：第 8 条里「手势协程与状态同键」那一半（r2 第 6 条第一个窗口），本次没有做对应的
+变异（恢复 `remember(…, conversationId)` + `LaunchedEffect(listState)` 的旧写法），所以那一半仍然是
+「没跑过变异」。完整判定与归档见 `device-tests/04e-follow-class-rerun.md`。
 
 ## 7. 还原后的复绿证据（`evidence/r3-logs/`）
 

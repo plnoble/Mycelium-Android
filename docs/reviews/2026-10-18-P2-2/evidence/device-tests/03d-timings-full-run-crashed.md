@@ -19,3 +19,11 @@ Source: host-timestamped instrument log `10-full-run-after-clear-crashed-at-test
 | 13 | com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest#openingAnotherConversationFollowsItsNewestMessageAgain | passed | 1030ms |
 | 14 | com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest#theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport | passed | 738ms |
 | 15 | com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest#scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive | FAILED | 648ms |
+
+说明（2026-10-19 更正）：第 11 行与第 15 行的 `FAILED` **不是**「缺本地模型」，也不是这两例的断言：
+
+- 第 11 行：测例自己在导航后没等重组，断言读到的是导航前那一帧 → 假红（`total=1`、`lastSize=3952`）。
+- 第 15 行：`net` 的测试假服务 `LocalHttp.serve` 抛 `SocketException: Broken pipe` 把进程带走，
+  这一例的断言没有走到。单类复跑里它三次都通过。
+
+依据与更正后的结论见 `04e-follow-class-rerun.md`。

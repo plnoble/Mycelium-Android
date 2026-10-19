@@ -126,12 +126,30 @@ class HearthTimelineFollowDeviceTest {
     /**
      * 上层的导航：换到另一段对话，会话段身份 +1（真实调用点是 HearthSpace 里的 `navigate`，打开历史、
      * 新对话、切模式都走它）。首次落库不是导航，段身份不动。
+     *
+     * 导航之后在这里等重组和自动滚动落定。这一步不能省：只改状态、不等的话，紧接着读
+     * `listState.layoutInfo` 读到的是导航**之前**那一帧（`total` 还是旧列表），
+     * `openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` 就是这样假红过一次
+     * （断言看见 `total=1`、`lastSize=3952` —— 那条还没被换掉的流式长回答）。
      */
     private fun navigateTo(id: String?, nextMessages: List<HearthMessage>, nextStreaming: String? = null) {
         conversationSegment += 1L
         conversationId = id
         messages = nextMessages
         streaming = nextStreaming
+        settle()
+    }
+
+    /**
+     * 用户往回想（内容跟着手指往下走）一个大半屏的距离。起止点按控件自己的高度算，不用固定像素：
+     * 换设备、换字号、换屏幕尺寸都还是「从上半屏拖到下半屏」，不会因为 1500px 在矮屏上出界而
+     * 只滑掉一点点。
+     */
+    private fun userScrollsBackAcrossTheScreen(durationMillis: Long) {
+        touch().performTouchInput {
+            swipeDown(startY = top + height * 0.15f, endY = bottom - height * 0.15f, durationMillis = durationMillis)
+        }
+        settle()
     }
 
     /** 不带容差：内容底边真的在视口里，一行都没被挡在下面。 */
@@ -203,8 +221,8 @@ class HearthTimelineFollowDeviceTest {
         val bottomIndex = listState.firstVisibleItemIndex
         assertTrue("一开始应该跟到底部：${viewport()}", atBottom())
 
-        // 回到前面的消息。
-        userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
+        // 回到前面的消息：拖的距离按控件高度算，不写死像素（见 userScrollsBackAcrossTheScreen）。
+        userScrollsBackAcrossTheScreen(durationMillis = 6_000)
         val indexBefore = listState.firstVisibleItemIndex
         val offsetBefore = listState.firstVisibleItemScrollOffset
         assertTrue("应该已经翻回较早的消息了：${viewport()}", indexBefore < bottomIndex - 2)
@@ -257,7 +275,6 @@ class HearthTimelineFollowDeviceTest {
         assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
 
         navigateTo("b", longHistory(20) + assistantMessage("B 里最后一条"))
-        settle()
         assertTrue("换对话以后应该看到新那段的最新一条：${viewport()}", tailVisible())
         rule.onNodeWithText("B 里最后一条").assertIsDisplayed()
     }
@@ -280,7 +297,6 @@ class HearthTimelineFollowDeviceTest {
 
         // 换到 B：状态按新的一段重建，先跟到底部。
         navigateTo("b", longHistory(20) + assistantMessage("B 里最后一条"))
-        settle()
         assertTrue("换对话以后应该跟到新那段的最新一条：${viewport()}", tailVisible())
 
         // 在 B 里上翻：这一次必须记在 B 的状态上。
@@ -342,6 +358,9 @@ class HearthTimelineFollowDeviceTest {
      *
      * 断言：段身份 +1（导航）以后必须重置——视口跟到 B 的末尾（`tailVisible()`），B 里后来
      * 到达的内容也继续自动跟随。
+     *
+     * `navigateTo` 里已经把重组和自动滚动等落定（这里以前没等，读到的是导航前那一帧的
+     * `layoutInfo`，在真机上假红过一次 —— 见 `navigateTo` 的注释）。
      */
     @Test
     fun openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail() {
@@ -386,7 +405,6 @@ class HearthTimelineFollowDeviceTest {
 
         // 换成另一段对话，消息条数一模一样。
         navigateTo("b", longHistory(20) + assistantMessage("B 的最后一条"))
-        settle()
 
         assertNotEquals("换会话以后视口还停在 A 的位置：${viewport()}", indexBefore, listState.firstVisibleItemIndex)
         assertTrue("换会话以后应该跟到 B 的最新一条：${viewport()}", tailVisible())

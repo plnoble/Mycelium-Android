@@ -15,6 +15,16 @@
 | 分批跑 C（`HearthTimelineFollowDeviceTest` 剩下 5 例） | **OK (5 tests)** | 无 |
 | 25 例并集 | **通过 19 / 失败 5 / 跳过 1 / 挂死 0**（逐例见 `03e-timings-all-25-cases.md`） | 无 |
 
+**2026-10-19 追加（`04*`，单类复跑 + 一次全量）**：上一轮把 `HearthTimelineFollowDeviceTest` 的两例失败
+归因成「缺本地模型」，那是错的（这个类不碰 ViewModel、不碰模型）。单类复跑定位结果：
+
+| 用例 | 判定 | 结果 |
+| --- | --- | --- |
+| `#11 openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` | **测试脆弱**（导航后没等重组，断言读到导航前那一帧 → 假红） | 改稳测例后单类两轮 `OK (10 tests)`（`04c`/`04d`），全量里也通过（`04g`） |
+| `#15 scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive` | **环境/脚手架**（`LocalHttp` 的 `Broken pipe` 把进程带走，不是它的断言） | 单类复跑三次都通过（`04a`/`04c`/`04d`） |
+
+细节、判别力实证（把判据改回旧语义 → 立刻真红）与更正说明见 `04e-follow-class-rerun.md`。
+
 **原挂死用例**：`com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest#aConfirmationTheUserLeftBehindCannotSendOrWriteAnything`
 —— 单类复跑与分批跑 B 里都是**通过**（6119–6121ms），并且它仍然在证明「用户离开之后，这个确认既不会发
 出请求、也不会写库」（断言一条没删，见第 5 节）。
@@ -126,17 +136,36 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
      的名字」；只是把「等多久」和「怎么等」改成有界、可解释的同步点，并补了两条更早、更精确的断言。
 3. `app/src/androidTest/.../BoundedDeviceTest.kt`（新增）：用例级 4 分钟硬上限 + 超时打印全部线程栈。
 
+**2026-10-19 追加（只动 `HearthTimelineFollowDeviceTest.kt` 一个测例文件，实现未改）**：
+
+4. `app/src/androidTest/.../HearthTimelineFollowDeviceTest.kt`
+   - `navigateTo(...)` 内部等到重组和自动滚动落定（`settle()`）：这一族测例原来靠每个调用点自己
+     `settle()`，新加的那一例忘了等，断言读到导航前那一帧 → 假红（`04a`）。四处重复的 `settle()`
+     随之删掉。
+   - #15 的滑动从写死 1 500px 换成按控件高度算的 `userScrollsBackAcrossTheScreen`
+     （`top + height*0.15f` → `bottom - height*0.15f`），不再依赖具体屏幕高度。
+   - 断言一条没放宽：`tailVisible()`/`atBottom()` 判据不变；判别力实证见 `04b`（把 `claim()` 的
+     判据改回旧语义 → 这一例立刻真红，`total=41`）。
+
 ## 6. 残余失败与环境限制（不是本次改动引入）
 
 - **真机上没有一个能用的本地模型**：`files/local-models/registry.json` 里只有一个 7.4GB 的外置 SAF 模型
   （`copied:false`，`content://com.android.externalstorage.documents/...Qwen3.5-9B-...gguf`），应用私有目录
-  里没有模型文件。因此 #4 走 assumption 跳过，#10/#21/#22 失败，#11/#15 这类需要真的生成出 token 的
-  时间线用例也失败。这一条与本次改动无关（这些文件我一行没动）。
+  里没有模型文件。因此 #4 走 assumption 跳过，#10/#21/#22 失败。这一条与本次改动无关（这些文件我一行没动）。
+- **`HearthTimelineFollowDeviceTest` 的两例与本地模型无关**（2026-10-19 更正，原先误归因成「缺模型」）：
+  - `#11 openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` 是**测例自己假红**：
+    `navigateTo` 之后没等重组，断言读到导航前那一帧（`total=1`、`lastSize=3952`）。已经在
+    `HearthTimelineFollowDeviceTest` 里改稳（导航 helper 内部等落定；滑动改成按控件高度算）。
+  - `#15 scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive` 在全量里的「失败」是
+    `LocalHttp` 的 `Broken pipe` 把进程带走，不是它的断言；单类复跑三次都通过。
+  - 同时更正：原先说这两例「修复前通过、修复后失败」——归档原文不支持。被称为「对照」的那次全量
+    （`hang-record/02`）跑的是 b6dbc6c（**已含**第 5 条实现），#11 在里面就是失败的（现场逐字节相同），
+    #15 是通过的。详见 `04e-follow-class-rerun.md`。
 - **`LocalHttp` 的 `Broken pipe` 会把进程带走**（`hang-record/08`）：`net` 模块的测试假服务在请求线程里
-  往已关闭的 socket 写，非主线程未捕获异常 → 进程崩溃。全量一次 invocation 会在第 15 例停在这里
-  （两次全量尝试、位置完全相同），所以 25 例的结果是三段并集。这是既有脚手架问题（仓库文档
-  `docs/reviews/2026-10-18-P2-2/DELIVERY.md` 里也记过同类现象），修它要改 `net` 的 main 源集，超出
-  「只改测试文件」的范围，故未改。
+  往已关闭的 socket 写，非主线程未捕获异常 → 进程崩溃。全量一次 invocation 会停在当时跑到的那一例
+  （三次全量分别停在第 15 例，一次停在第 9 例；`04g` 又在第 15 例），所以 25 例的结果是多段并集。
+  这是既有脚手架问题（仓库文档 `docs/reviews/2026-10-18-P2-2/DELIVERY.md` 里也记过同类现象），
+  修它要改 `net` 的 main 源集，超出「只改测试文件」的范围，故未改。
 
 ## 7. 复跑期间对设备做过的、可回退的一次性设置
 
@@ -156,25 +185,36 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 | `03-timings-single-class.md`、`03b-…`、`03c-…`、`03d-…` | 上面几次运行的逐例耗时表 |
 | `03e-timings-all-25-cases.md` | **全部 25 例的逐例结果与耗时（并集）** |
 | `04-build-final.txt` | 离线构建输出（`BUILD SUCCESSFUL`） |
+| `04a-follow-class-baseline-timed.txt` / `04a-…-timings.md` | 2026-10-19 单类复跑（测例未改）：`HearthTimelineFollowDeviceTest`，10 例 1 失败（#11） |
+| `04b-follow-class-old-claim-timed.txt` / `04b-…-timings.md` | 测例已改 + 判据改回旧语义（一行 mutation）：#11 真红（`total=41`），判别力实证 |
+| `04c-follow-class-green-timed.txt` / `04c-…-timings.md` | 最终代码单类复跑：`OK (10 tests)`，`Time: 11.234` |
+| `04d-follow-class-green-repeat-timed.txt` / `04d-…-timings.md` | 同 04c 重复一次：`OK (10 tests)`，`Time: 11.278` |
+| `04g-full-suite-after-test-fix-timed.txt` / `04g-…-timings.md` | 修好以后的全量：跑到 #15 被 `Broken pipe` 带走；#11 通过（1045ms） |
+| `04f-guards-follow-class.txt` | 04a–04g 几轮的主机侧守卫报告（全部 `DONE … run finished normally`） |
+| `04e-follow-class-rerun.md` | **判定与依据**：两例失败是测试脆弱 / 环境，不是回归；含更正说明与编码说明 |
 | `guards.txt` | 主机侧守卫报告：每轮开跑时间、`STICKY` 解冻记录、唯一一次 `WATCHDOG` 判定 |
 | `hang-record/01-user-run-16min-hang-b6dbc6c.txt` | 用户提供的原始 16 分钟挂死日志（UTF-16 转 UTF-8） |
-| `hang-record/02-reproduced-full-run-b6dbc6c.txt` | 用修复前 APK 复现挂死（卡在第 9 例） |
+| `hang-record/02-reproduced-full-run-b6dbc6c.txt` | 用有界化之前的 APK 复现挂死（卡在第 9 例）；注意它跑的是 b6dbc6c，**已经含**复审 r3 第 5 条实现 |
 | `hang-record/03-frozen-process-evidence.txt` | `isFrozen=true` / 全部线程 `do_freezer_trap` / instrumentation 记录 |
 | `hang-record/04`、`05` | 修复后仍未开 sticky 解冻的那轮：第 7 例卡住 3 分钟，主机侧 force-stop 与判定 |
 | `hang-record/06`、`07` | 修复后全量跑到第 15 例进程崩溃（第一次） |
 | `hang-record/08-crash-stack-broken-pipe.txt` | 崩溃栈：`LocalHttp.serve` → `SocketException: Broken pipe` |
 | `hang-record/09`、`10` | 同位置的崩溃复现（含 `pm clear` 之后那一次） |
 | `scripts/guards.ps1` | 主机侧守卫（冻结检测 + 6 分钟硬上限 + force-stop），可直接复用 |
+| `scripts/run-timestamped.ps1` | 主机侧跑测器：force-stop → `am unfreeze --sticky` → 流式读 `am instrument -w -r` 并给每行加主机时间戳（`04*` 的原始输出就是它产生的），可直接复用 |
 | `scripts/extract-timings.ps1` | 把带时间戳的原始输出变成逐例耗时表 |
 
 ## 9. 不确定项
 
-1. **第 15 例的进程崩溃**：位置固定、`Broken pipe` 明确，但它是「第 15 例先断言失败 → 清理时关掉假服务 →
-   还有请求线程在写」的时序；我没有动 `net` 的 `LocalHttp`（超出改动范围），所以**一次 invocation 跑完 25 例**
-   目前做不到。要彻底解决，需要在 `LocalHttp.serve` 里吞掉 `IOException`（或改用 `java.net.http` / 加线程池
-   与关闭握手）。
-2. **#11 / #15 在修复前后不一致**：修复前的对照全量（`hang-record/02`）里它们通过，修复后失败。这两个用例
-   在 `HearthTimelineFollowDeviceTest`（我未改动），且真机上的库/模型状态在多次复跑与两次崩溃之间被反复
-   写过——最可能是环境/遗留数据差异，但我没有把它查到「铁证」级别，列在此处。
-3. `cached_apps_freezer` 我**没有**改（仍是 `device_default`）；如果后续仍偶发冻住，可以考虑把它临时改成
-   `disabled`（可回退），或把 `am unfreeze --sticky` 固化进跑测脚本。
+1. **进程崩溃（`Broken pipe`）**：`LocalHttp` 的假服务在请求线程里往已关闭的 socket 写，谁碰上它谁被
+   带走（三次全量都在第 15 例，一次在第 9 例，`04g` 又在第 15 例）。我没有动 `net` 的 `LocalHttp`
+   （超出改动范围），所以**一次 invocation 跑完 25 例**目前做不到。要彻底解决，需要在 `LocalHttp.serve`
+   里吞掉 `IOException`（或改用 `java.net.http` / 加线程池与关闭握手）。
+2. **#11 / #15 在修复前后的说法原来错了（2026-10-19 已更正）**：原先写「修复前的对照全量
+   （`hang-record/02`）里它们通过」。对照归档原文：那次跑的是 b6dbc6c（含第 5 条实现），#11 失败
+   （现场逐字节相同）、#15 通过。现在的判定是：#11 为测例假红（已在测例侧改稳，单类两轮 + 全量都过）、
+   #15 为脚手架崩溃（单类三次都过）。依据见 `04e-follow-class-rerun.md`。
+3. **`04g` 里 #2 通过（4424ms），`hang-record/10` 里同一条失败（22155ms）**：云端假服务那一族在真机上
+   有偶发性，与本次改动无关，本次没有追。
+4. `cached_apps_freezer` 我**没有**改（仍是 `device_default`）；如果后续仍偶发冻住，可以考虑把它临时改成
+   `disabled`（可回退），或把 `am unfreeze --sticky` 固化进跑测脚本（本次四轮都用它兜底，都没触发冻结）。
