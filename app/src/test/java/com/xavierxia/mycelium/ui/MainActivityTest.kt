@@ -46,8 +46,8 @@ class MainActivityTest {
     @Test
     fun threeSpacesAreReachableAndTheUpdateCheckStaysOnMine() {
         compose.onAllNodesWithText("圆桌")[0].assertIsDisplayed()
-        compose.onNodeWithText("导入角色包").assertIsDisplayed()
-        compose.onNodeWithText("在电脑版知衍的角色页导出角色包，传到手机后在这里导入。").assertIsDisplayed()
+        compose.onNodeWithText("导入人物包").assertIsDisplayed()
+        compose.onNodeWithText("在电脑版知衍的人物页导出人物包，传到手机后在这里导入。").assertIsDisplayed()
 
         compose.onNodeWithText("炉边").performClick()
         compose.onNodeWithText("新建人物").assertIsDisplayed()

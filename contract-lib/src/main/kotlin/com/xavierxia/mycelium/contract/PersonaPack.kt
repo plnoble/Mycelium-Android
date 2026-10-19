@@ -50,15 +50,15 @@ fun readPersonaPack(bytes: ByteArray, schemaJson: String, openDatabase: (ByteArr
     val entries = try {
         readZipEntries(bytes)
     } catch (error: ZipException) {
-        throw PackRejected("角色包不是完整的 zip：${error.message}")
+        throw PackRejected("人物包不是完整的 zip：${error.message}")
     } catch (error: PackRejected) {
         throw error
     } catch (error: Exception) {
-        throw PackRejected("角色包读不出来：${error.message}")
+        throw PackRejected("人物包读不出来：${error.message}")
     }
     if (entries.map { it.first } != listOf("manifest.json", "persona.sqlite")) {
         throw PackRejected(
-            "角色包必须且只能按顺序包含 manifest.json 和 persona.sqlite，实际是 ${entries.map { it.first }}",
+            "人物包必须且只能按顺序包含 manifest.json 和 persona.sqlite，实际是 ${entries.map { it.first }}",
         )
     }
     val manifest = validateManifest(entries[0].second, schemaJson)
@@ -131,7 +131,7 @@ private fun readZipEntries(bytes: ByteArray): List<Pair<String, ByteArray>> {
     if (declared.map { it.first } != streamed.map { it.first } ||
         declared.zip(streamed).any { (left, right) -> !left.second.contentEquals(right.second) }
     ) {
-        throw PackRejected("角色包的目录和条目内容不一致")
+        throw PackRejected("人物包的目录和条目内容不一致")
     }
     return declared
 }
@@ -147,7 +147,7 @@ private fun readCentralDirectory(bytes: ByteArray): List<Pair<String, ByteArray>
     } catch (error: PackRejected) {
         throw error
     } catch (error: ZipException) {
-        throw PackRejected("角色包不是完整的 zip：${error.message}")
+        throw PackRejected("人物包不是完整的 zip：${error.message}")
     } finally {
         Files.deleteIfExists(file)
     }
@@ -164,12 +164,12 @@ private fun readLocalEntries(bytes: ByteArray): List<Pair<String, ByteArray>> =
     } catch (error: PackRejected) {
         throw error
     } catch (error: ZipException) {
-        throw PackRejected("角色包不是完整的 zip：${error.message}")
+        throw PackRejected("人物包不是完整的 zip：${error.message}")
     }
 
 private fun readNamedEntry(name: String, directory: Boolean, declaredSize: Long, bytes: java.io.InputStream): Pair<String, ByteArray> {
     if (directory || name.endsWith("/")) return name to ByteArray(0)
-    if (declaredSize > MAX_PACK_ENTRY_BYTES) throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+    if (declaredSize > MAX_PACK_ENTRY_BYTES) throw PackRejected("人物包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
     return name to readEntryBounded(bytes, name)
 }
 
@@ -182,7 +182,7 @@ private fun readEntryBounded(zip: java.io.InputStream, name: String): ByteArray 
         if (read < 0) break
         total += read
         if (total > MAX_PACK_ENTRY_BYTES) {
-            throw PackRejected("角色包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
+            throw PackRejected("人物包的 $name 超过 $MAX_PACK_ENTRY_BYTES 字节")
         }
         buffer.write(chunk, 0, read)
     }

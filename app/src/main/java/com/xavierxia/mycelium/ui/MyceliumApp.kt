@@ -255,7 +255,7 @@ private fun PersonaList(
                 notice = outcome.notice()
                 if (outcome is ImportOutcome.Imported) onChanged()
             } catch (failure: Exception) {
-                notice = failure.message ?: "角色包没有通过校验"
+                notice = failure.message ?: "人物包没有通过校验"
             } finally {
                 busy = false
             }
@@ -263,11 +263,11 @@ private fun PersonaList(
     }
     Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) {
-            Text(if (busy) "正在校验" else "导入角色包")
+            Text(if (busy) "正在校验" else "导入人物包")
         }
         notice?.let { Text(it) }
         if (personas.isEmpty()) {
-            Text("在电脑版知衍的角色页导出角色包，传到手机后在这里导入。")
+            Text("在电脑版知衍的人物页导出人物包，传到手机后在这里导入。")
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(personas, key = { it.personaId }) { persona ->
@@ -541,9 +541,9 @@ private fun MineScreen(
         item {
             TextButton(onClick = { page = "privacy" }) { Text("隐私记录") }
         }
-        item { Text("已导入的角色包", style = MaterialTheme.typography.titleMedium) }
+        item { Text("已导入的人物包", style = MaterialTheme.typography.titleMedium) }
         if (installed.isEmpty()) {
-            item { Text("还没有导入角色包。在圆桌页选择电脑版导出的文件。") }
+            item { Text("还没有导入人物包。在圆桌页选择电脑版导出的文件。") }
         }
         items(installed, key = { "${it.personaId}/${it.versionId}" }) { version ->
             Card(Modifier.fillMaxWidth()) {
