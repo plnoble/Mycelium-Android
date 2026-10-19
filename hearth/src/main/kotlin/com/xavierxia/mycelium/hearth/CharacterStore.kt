@@ -114,6 +114,41 @@ class CharacterStore(private val connect: () -> HearthSession) {
         write(session, id, draft, now, insert = false, ignoreExisting = false)
     }
 
+    /**
+     * Records that the user agreed to send this character's chats to [target].
+     *
+     * This is deliberately **not** [update]: only the confirmation itself is written
+     * (`cloud_confirmed_target` and `updated_at`), never the rest of the row, so a name, personality
+     * or model choice that was edited after the page made its snapshot is not put back. A null or
+     * blank [target] records no agreement at all, which is also how a character that was never asked
+     * looks.
+     *
+     * [valid] is asked **inside this write transaction**, after it is open and before any column is
+     * touched: the dialog can be dismissed, the page left or the character switched while the
+     * database is still opening or waiting for its write lock. When it says no, no column is written
+     * and false comes back. False also comes back when [id] is not in the table any more, so an
+     * abandoned confirmation can never fail the caller. Committing wins: once the transaction has
+     * committed, true comes back even if the stop lands on the way back.
+     */
+    fun confirmCloudTarget(
+        id: String,
+        target: String?,
+        now: String,
+        valid: () -> Boolean = { true },
+    ): Boolean = withSession(connect) { session ->
+        session.transaction {
+            if (!valid()) return@transaction false
+            if (session.query("SELECT id FROM characters WHERE id = ?", listOf(id)).isEmpty()) {
+                return@transaction false
+            }
+            session.exec(
+                "UPDATE characters SET cloud_confirmed_target = ?, updated_at = ? WHERE id = ?",
+                listOf(target?.trim().orEmpty(), now, id),
+            )
+            true
+        }
+    }
+
     /** A copy is a new character: it never inherits the cloud agreement of the one it came from. */
     fun copy(id: String, now: String): HearthCharacter = withSession(connect) { session ->
         val source = session.query("SELECT $COLUMNS FROM characters WHERE id = ?", listOf(id)).singleOrNull()

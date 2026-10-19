@@ -8,6 +8,7 @@ import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class LocalModelEngineTest {
     private class Descriptor : ModelFile {
@@ -48,6 +49,82 @@ class LocalModelEngineTest {
         }
     }
     private val model = ModelInfo("test", "test.gguf", ModelLocation.LOCAL)
+
+    /**
+     * native 侧最坏情况的加载：它只在自己的检查点看取消标记，所以「停止信号已经到了、加载却仍然
+     * 成功返回」完全可能。这个桥就照这个样子工作：等到停止信号，然后照常返回。
+     */
+    private class StopBlindLoadBridge(private val failWithLoadingStopped: Boolean = false) : EngineBridge {
+        val started = CountDownLatch(1)
+        private val stopped = AtomicBoolean(false)
+        val unloads = AtomicInteger()
+        val generates = AtomicInteger()
+        override fun begin() { stopped.set(false) }
+        override fun stop() { stopped.set(true) }
+        override fun load(fd: Int, threads: Int, context: Int) {
+            started.countDown()
+            if (failWithLoadingStopped) throw IllegalStateException("Loading stopped")
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!stopped.get() && System.nanoTime() < deadline) Thread.sleep(1)
+        }
+        override fun unload() { unloads.incrementAndGet() }
+        override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, callback: TokenCallback): LongArray {
+            generates.incrementAndGet()
+            callback.onStart(false)
+            return longArrayOf(1, 0, 0, 1, 0)
+        }
+    }
+
+    /**
+     * 加载返回之后、开始生成之前必须认下这一轮的停止：native 加载「照常成功」时引擎也不许留下
+     * 已加载的模型 —— 否则随后那次 generate 的 runNative 会把停止标记清掉，接着照样生成、照样入库。
+     * 这里同时钉住三件事：加载以失败收场、模型与文件描述符都被释放、后面那一步生成到不了 native。
+     */
+    @Test fun aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded() = runBlocking {
+        val bridge = StopBlindLoadBridge()
+        val engine = LocalModelEngine { bridge }
+        val file = Descriptor()
+        val loading = async(Dispatchers.Default) {
+            try {
+                engine.load(model, EngineOptions()) { file }
+                null
+            } catch (failure: Exception) {
+                failure
+            }
+        }
+        assertTrue(bridge.started.await(2, TimeUnit.SECONDS))
+        engine.stop()
+        val failure = loading.await()
+        assertTrue("停止之后这次加载必须以失败收场，实际 $failure", failure is IllegalStateException)
+        assertEquals("Loading stopped", failure?.message)
+        assertNull("停止过的加载不许留下已加载的模型", engine.loadedModel.value)
+        assertTrue("刚打开的描述符必须关掉", file.closed)
+        val generated = runCatching { engine.generate(listOf(ChatMessage(ChatRole.USER, "hi"))).toList() }
+        assertTrue("没有已加载的模型时生成必须失败", generated.isFailure)
+        assertEquals("不该真的开始生成", 0, bridge.generates.get())
+    }
+
+    /**
+     * 原 `Loading stopped` 异常路径：native 加载自己抛错也要清干净（模型、文件描述符），并把这次
+     * 失败原样交给调用方 —— 炉边据此把这一轮按「停止」收尾：问题回输入框、不入库。
+     */
+    @Test fun aNativeLoadingStoppedFailureReleasesTheModelAndTheFile() = runBlocking {
+        val bridge = StopBlindLoadBridge(failWithLoadingStopped = true)
+        val engine = LocalModelEngine { bridge }
+        val file = Descriptor()
+        val failure = try {
+            engine.load(model, EngineOptions()) { file }
+            null
+        } catch (failure: Exception) {
+            failure
+        }
+        assertTrue("`Loading stopped` 应该原样交给调用方，实际 $failure", failure is IllegalStateException)
+        assertEquals("Loading stopped", failure?.message)
+        assertNull(engine.loadedModel.value)
+        assertTrue("失败之后描述符必须关掉", file.closed)
+        assertEquals("不该真的开始生成", 0, bridge.generates.get())
+    }
+
     @Test fun streamsOrderedBodyAndClosesReplacedDescriptor() = runBlocking {
         val bridge = Bridge()
         val engine = LocalModelEngine { bridge }

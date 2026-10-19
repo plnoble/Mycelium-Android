@@ -1,0 +1,21 @@
+{
+  "name": "06-probe-unknown-old-shape",
+  "why": "Regression guard for the pre-fix bug: `ps -o WCHAN` prints the WCHAN column only, which has no PID/TID header and no per-thread row the old regex could match. The fixed parser must report PROBE-UNKNOWN and end as UNKNOWN (exit 5), never as `not frozen` and never as DONE.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 5,
+  "expectReport": [
+    "^PROBE-UNKNOWN .*reason=ps header has no PID column .header=.WCHAN.",
+    "^WATCHDOG .*probe=UNKNOWN",
+    "^VERDICT UNKNOWN exit=5 probe=UNKNOWN"
+  ],
+  "expectNoReport": ["run finished normally", "^DONE ", "^FREEZER ", "probe=NOT_FROZEN"],
+  "expectCommands": ["force-stop com.xavierxia.mycelium.debug"],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-only-derived.txt", "log": "log-running.txt" }
+  ]
+}

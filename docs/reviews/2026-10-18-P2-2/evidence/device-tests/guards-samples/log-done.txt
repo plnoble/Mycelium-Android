@@ -1,0 +1,10 @@
+﻿INSTRUMENTATION_STATUS: test=newTokensAreFollowedWhileTheViewportIsAtTheBottom
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 6.774
+
+OK (5 tests)
+
+
+INSTRUMENTATION_CODE: -1

@@ -1,0 +1,52 @@
+> Task :model-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:compileKotlin UP-TO-DATE
+> Task :model-api:compileJava NO-SOURCE
+> Task :model-api:processResources NO-SOURCE
+> Task :model-api:classes UP-TO-DATE
+> Task :model-api:jar UP-TO-DATE
+> Task :llm:preBuild UP-TO-DATE
+> Task :llm:preDebugBuild UP-TO-DATE
+> Task :llm:generateDebugResources UP-TO-DATE
+> Task :llm:packageDebugResources UP-TO-DATE
+> Task :llm:processDebugNavigationResources UP-TO-DATE
+> Task :llm:parseDebugLocalResources UP-TO-DATE
+> Task :llm:generateDebugRFile UP-TO-DATE
+> Task :llm:javaPreCompileDebug UP-TO-DATE
+> Task :llm:preDebugUnitTestBuild UP-TO-DATE
+> Task :llm:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :llm:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :llm:verifyOfflineDependencies
+> Task :llm:compileDebugKotlin
+> Task :llm:compileDebugJavaWithJavac NO-SOURCE
+> Task :llm:processDebugJavaRes UP-TO-DATE
+> Task :llm:bundleLibRuntimeToJarDebug
+> Task :llm:bundleLibCompileToJarDebug
+> Task :llm:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :llm:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :llm:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :llm:testDebugUnitTest FAILED
+
+LocalModelEngineTest > aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded FAILED
+    java.lang.AssertionError at LocalModelEngineTest.kt:83
+gradlew.bat : 
+所在位置 行:1 字符: 352
++ ... ence-logs'; & "$wd\gradlew.bat" --offline --console=plain -p $wd :llm ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+6 tests completed, 1 failed
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':llm:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///D:/Agent/Worktrees/Mycelium-Android/p2-2-evidence/llm/build/repo
+rts/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 4s
+18 actionable tasks: 5 executed, 13 up-to-date

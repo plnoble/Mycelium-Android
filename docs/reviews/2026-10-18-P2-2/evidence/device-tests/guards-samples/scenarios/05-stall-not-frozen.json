@@ -1,0 +1,23 @@
+{
+  "name": "05-stall-not-frozen",
+  "why": "Probe parses fine and shows ordinary wait channels, but the log stops growing: this is a stall without a freeze, so the guard must say so (exit 4) instead of calling it a freeze timeout.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 4,
+  "expectReport": [
+    "^WATCHDOG .*probe=NOT_FROZEN.*freeze attempts=0",
+    "^VERDICT STALL exit=4 probe=NOT_FROZEN"
+  ],
+  "expectNoReport": ["^FREEZER ", "run finished normally", "^DONE "],
+  "expectCommands": [
+    "force-stop com.xavierxia.mycelium.debug",
+    "force-stop com.xavierxia.mycelium.debug.test"
+  ],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" }
+  ]
+}

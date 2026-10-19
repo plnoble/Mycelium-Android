@@ -1,0 +1,114 @@
+> Task :contract:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :contract:compileKotlin UP-TO-DATE
+> Task :contract:compileJava NO-SOURCE
+> Task :contract:processResources NO-SOURCE
+> Task :contract:classes UP-TO-DATE
+> Task :contract:jar UP-TO-DATE
+> Task :model-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:compileKotlin UP-TO-DATE
+> Task :model-api:compileJava NO-SOURCE
+> Task :net:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :net:compileKotlin UP-TO-DATE
+> Task :net:compileJava NO-SOURCE
+> Task :net:processResources NO-SOURCE
+> Task :net:classes UP-TO-DATE
+> Task :net:jar UP-TO-DATE
+> Task :roundtable:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :roundtable:compileKotlin UP-TO-DATE
+> Task :roundtable:compileJava NO-SOURCE
+> Task :roundtable:processResources NO-SOURCE
+> Task :roundtable:classes UP-TO-DATE
+> Task :roundtable:jar UP-TO-DATE
+> Task :hearth:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :hearth:compileKotlin UP-TO-DATE
+> Task :hearth:compileJava NO-SOURCE
+> Task :hearth:processResources NO-SOURCE
+> Task :hearth:classes UP-TO-DATE
+> Task :hearth:jar UP-TO-DATE
+> Task :model-api:processResources NO-SOURCE
+> Task :model-api:classes UP-TO-DATE
+> Task :model-api:jar UP-TO-DATE
+> Task :app:copyContractAssets UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :llm:preBuild UP-TO-DATE
+> Task :llm:preDebugBuild UP-TO-DATE
+> Task :llm:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :llm:generateDebugResources UP-TO-DATE
+> Task :llm:packageDebugResources UP-TO-DATE
+> Task :llm:parseDebugLocalResources UP-TO-DATE
+> Task :llm:generateDebugRFile UP-TO-DATE
+> Task :llm:compileDebugKotlin UP-TO-DATE
+> Task :llm:javaPreCompileDebug UP-TO-DATE
+> Task :llm:compileDebugJavaWithJavac NO-SOURCE
+> Task :llm:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :llm:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :llm:extractDeepLinksDebug UP-TO-DATE
+> Task :llm:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :llm:mapDebugSourceSetPaths UP-TO-DATE
+> Task :llm:compileDebugLibraryResources UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :llm:generateDebugAssets UP-TO-DATE
+> Task :llm:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:mergeDebugUnitTestManifest UP-TO-DATE
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :llm:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :llm:processDebugJavaRes UP-TO-DATE
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+
+R3Item2NavProbeTest > aSendWhileTheHistoryIsStillBeingReadIsRefused FAILED
+    java.lang.AssertionError at R3Item2NavProbeTest.kt:157
+gradlew.bat : 
+所在位置 行:1 字符: 352
++ ... ence-logs'; & "$wd\gradlew.bat" --offline --console=plain -p $wd :app ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2 tests completed, 1 failed
+
+> Task :app:testDebugUnitTest FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///D:/Agent/Worktrees/Mycelium-Android/p2-2-evidence/app/build/repo
+rts/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 12s
+58 actionable tasks: 4 executed, 54 up-to-date
