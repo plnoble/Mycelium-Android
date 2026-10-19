@@ -56,3 +56,22 @@
 - **不在冲突清单、但两边都改过的**是 `net/src/main/kotlin/com/xavierxia/mycelium/net/Gateway.kt`（git 自动合上了）。合并结果**两边都保留**：`main` 侧的连接/读取超时归一化与取消闸门（`check()` / `startingConnection`）、本分支侧的文件下载入口；并把白名单抽成 `HostPolicy` 接口、由 `AllowedHosts` 实现，好让下载的跳转走查（`HopWalker`）**每一跳用同一套策略**；`Update` 用途补上 GitHub 发布下载真正跳到的域名。
 - 合并之后需要一次接线收口：`f74e63e` 把下载路径接到合并进来的同一套取消闸门与超时归一化上（下一节）。
 - **冲突解决只动了上面这两个文件**；合并里出现的其余改动都是 `main` 侧原样带入的。合并后的门禁读数见第四节。
+
+## 三、Gateway 取消语义的核对结论
+
+**结论一句话**：文件下载现在走的是与云端请求**同一套**取消闸门与**同一套**超时归一化；「取消就尽快结束、且不在对端留下正文」这条保证在下载路径上有测例支撑，唯一进不去的角落（与 `cancel()` 抢同一把锁的那段竞态）如实记为未覆盖，不当成已覆盖。
+
+- **接线**（`f74e63e`）：下载的跳转走查（`Download.kt` 的 `HopWalker`）此前直接调 `HttpURLConnection` 的裸方法，绕过了网关的 `call.check()` / `startingConnection`。该提交把下载接到 `GatewayCall.bodyStream` 与 `startingConnection` 上，并把连接/读取超时归一化一起套用：**0 / 600000 落到下载的 socket 上是 15000 / 30000**，`0` 不再等于「永远等」。改动只在这两个文件（`Download.kt` 13 行、`Gateway.kt` 26 行），**没有改生产里的并发结构**。
+- **判别力测例**（`0bb81f9`，新增 `net/src/test/kotlin/com/xavierxia/mycelium/net/DownloadCancelGateTest.kt`，5 例）：
+  - `aStopBeforeTheStatusIsFetchedMeansThePeerNeverAcceptsAConnection`：在走查取状态之前能卡住的最晚时点（连接对象已登记）取消 → 假对端的 `accepts` 与已完成请求都是 0；同一条测例末尾用真 socket「连上但一声不吭」自证夹具（`accepts=1`、`count=0`），把「没连」与「连了但没写」真正分开，而不是只看字节数。
+  - `aStopWhileTheBodyStreamIsBeingOpenedLeavesZeroBodyBytesOnTheWire`：卡在「已过检查、正在取正文流」时取消 → 连接已经发起（`connects=1`）而正文仍是零字节、以 `GatewayCancelled` 结束、取消到返回 < 2s；同接线不取消时正文完整送达（阳性对照）。
+  - `aStopWhileTheStatusIsBeingFetchedEndsTheWaitAndWritesNothing`：卡在取状态、建连在飞时取消 → `GatewayCancelled`、< 2s 返回、目标文件不存在、连接被断开。
+  - `aDownloadThatIsNotStoppedCompletesThroughTheSameGate`：不取消时整包下载完整成功（闸门没有把正常路径堵死）。
+  - `theDownloadPutsBoundedTimeoutsOnItsConnection`：上一条超时归一化的读数。
+  - 配套：`net/src/testFixtures/.../LocalHttp.kt` **新增** `accepts` 计数（纯新增字段，既有语义不变；原先的 `count` 只在请求行到达后才计数，区分不了「没连」和「连了但没写」）。
+- **判别力实证**（同一 worktree、`--offline :net:test --tests "*DownloadCancelGateTest"`、每次单独跑、跑完 `git checkout` 还原）：
+  - 两处一起改回裸调用 → **1 failed**：`aStopWhileTheBodyStreamIsBeingOpenedLeavesZeroBodyBytesOnTheWire`，`expected: <0> but was: <36>`；
+  - 只改回裸 `connection.outputStream` → 同一例同样失败；
+  - 只改回裸 `connection.responseCode` → **5 例全绿**。原因如实记录：走查在它前面紧挨着 `call.check()`，对 GET 而言裸调用只在「与 `cancel()` 抢同一把锁」的那段竞态里才有区别，确定性的测例进不去那段竞态 —— **这一条不当成已覆盖**。
+- **本步实测**：`:net:test --offline` **55 例、0 失败 0 错误 0 跳过**（`DownloadCancelGateTest` 5、`DownloadGatewayTest` 29、`GatewayTest` 18、`LocalHttpTest` 2、`AuditLogTest` 1）。
+- **已知残留（沿用 P2-2 裁定，本包没有改变它）**：`download()` 发的是 GET、`DownloadRequest` 没有请求正文，`DownloadRun` 交给走查的 body 恒为 `null`，所以「正在取正文流」那一段在下载路径上**不可达**（生产里的 `readFollowingRedirects` 也全是 GET）；它目前只由走查的元数据用途带 body 时到达，测例是直接驱动走查才覆盖到的。同时，**平台限制那条残留同样适用于下载**：停止恰好落在「建连刚启动」的极窄窗口时，可能要等到连接超时才结束（P2-2 已把这条裁定为已知残留，不换 HTTP 库）。
