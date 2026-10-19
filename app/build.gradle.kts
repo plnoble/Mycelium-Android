@@ -197,4 +197,6 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-idling-resource:3.7.0")
     androidTestImplementation(project(":contract"))
     androidTestImplementation(project(":hearth"))
+    // 假服务 LocalHttp 从 :net 的生产源码集搬到了它的 testFixtures，测试专用、不进生产 jar。
+    androidTestImplementation(testFixtures(project(":net")))
 }

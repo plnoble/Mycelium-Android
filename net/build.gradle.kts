@@ -1,5 +1,9 @@
 plugins {
     kotlin("jvm")
+    // 测试假服务（LocalHttp）搬进 testFixtures 源码集：它只随 net-test-fixtures 变体发布，
+    // 生产 jar 里不再有它，但它仍能被本模块的测试、:roundtable 的测试和 :app 的 androidTest
+    // 通过 testFixtures(project(":net")) 共用。
+    id("java-test-fixtures")
 }
 
 // Same version resolution as :contract. The Android plugin does not publish a version Gradle can

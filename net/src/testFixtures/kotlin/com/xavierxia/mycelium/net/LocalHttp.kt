@@ -1,6 +1,7 @@
 package com.xavierxia.mycelium.net
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
@@ -10,6 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
     private val server = ServerSocket(0)
     private val calls = mutableListOf<HttpCall>()
+    private val problems = mutableListOf<Throwable>()
     val count = AtomicInteger()
 
     val port: Int = server.localPort
@@ -19,15 +21,36 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
             while (!server.isClosed) {
                 val socket = try {
                     server.accept()
-                } catch (_: Exception) {
+                } catch (_: IOException) {
+                    // close() is what makes accept fail; the server is shutting down and so is the loop.
+                    break
+                } catch (problem: Exception) {
+                    record(problem)
                     break
                 }
-                Thread { serve(socket) }.start()
+                Thread {
+                    // 服务线程的顶层：这里接住一切，不许再往外走。Android 上任意线程的未捕获异常
+                    // 都会杀掉整个进程——真机上就是一次 instrumentation 跑不完。
+                    try {
+                        serve(socket)
+                    } catch (_: IOException) {
+                        // 客户端断开、连接被取消：这条连接到此为止，安静收尾。
+                    } catch (problem: Exception) {
+                        record(problem)
+                    }
+                }.start()
             }
         }.apply { isDaemon = true }.start()
     }
 
     fun calls(): List<HttpCall> = synchronized(calls) { calls.toList() }
+
+    /**
+     * Everything the service threads caught instead of rethrowing. A client that hangs up is not a
+     * problem (see [serve]), so this stays empty for the ordinary "the peer went away" cases; a
+     * broken scripted handler shows up here rather than taking the whole test process down.
+     */
+    fun problems(): List<Throwable> = synchronized(problems) { problems.toList() }
 
     override fun close() = server.close()
 
@@ -44,7 +67,10 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
             }
             val headerText = head.toString(StandardCharsets.UTF_8)
             val lines = headerText.split("\r\n", "\n")
-            val (method, path) = lines.first().split(" ").let { it[0] to it[1] }
+            // 连上就挂断、一个字节请求行都没发的客户端没有什么可回答的（它也不该算一次错误）。
+            val (method, path) = lines.first().split(" ").let { parts ->
+                if (parts.size < 2) return else parts[0] to parts[1]
+            }
             val headers = lines.drop(1).mapNotNull { line ->
                 val split = line.indexOf(':')
                 if (split > 0) line.substring(0, split).lowercase() to line.substring(split + 1).trim() else null
@@ -80,6 +106,12 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
             client.getOutputStream().write(statusHead.toByteArray(StandardCharsets.UTF_8))
             client.getOutputStream().write(bytes)
         }
+    }
+
+    private fun record(problem: Throwable) {
+        synchronized(problems) { problems += problem }
+        System.err.println("LocalHttp: the scripted peer caught ${problem.javaClass.name}: ${problem.message}")
+        problem.printStackTrace()
     }
 }
 
