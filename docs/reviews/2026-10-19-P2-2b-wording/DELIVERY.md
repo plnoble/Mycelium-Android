@@ -20,10 +20,11 @@
 | `app/src/main/java/com/xavierxia/mycelium/roundtable/PackLibrary.kt` | 导入被拒兜底「角色包没有通过校验」→「人物包没有通过校验」 |
 | `app/src/main/java/com/xavierxia/mycelium/roundtable/Roundtable.kt` | 「角色包太大」→「人物包太大」；「角色包超过 64 MB，没有导入」→「人物包超过 64 MB，没有导入」 |
 | `app/src/test/java/com/xavierxia/mycelium/ui/MainActivityTest.kt` | 与上面两条界面文字对应的断言同步改 |
+| `contract-lib/src/main/kotlin/com/xavierxia/mycelium/contract/PersonaPack.kt` | 8 处 `PackRejected` 报错文字「角色包…」→「人物包…」（统筹 2026-10-19 同意 A；只改文案，不动格式与契约） |
 | `docs/releases/v0.4.0.md` | 三处用户可见的「导入的角色包」→「导入的人物包」（0.4.0 还没打标签，发布说明是草稿） |
 | `docs/work-packages/P2-2b-release-ready.md` | 记一条「范围补充」，含改动清单与残留项 |
 
-**没改**：`contract/`（`SPEC.md`、`pack-db.sql`、`manifest.schema.json`）、`.mpack` 扩展名与内部名 `mycelium-persona-pack`、包内表结构、`:contract` 的实现与校验逻辑、导入与检索逻辑、圆桌与炉边的对话逻辑、版本号、发布流程。
+**没改**：`contract/`（`SPEC.md`、`pack-db.sql`、`manifest.schema.json`）、`.mpack` 扩展名与内部名 `mycelium-persona-pack`、包内表结构、`:contract` 的校验逻辑（只改了 8 句报错文案）、导入与检索逻辑、圆桌与炉边的对话逻辑、版本号、发布流程。
 
 ## 验证
 
@@ -43,13 +44,13 @@
 - **真机测试**：**未跑**。本次只改界面文字，不涉及权限、网络、存储、安装路径或布局，不需要真机；按安卓侧规则，真机与 JVM 结果分开写，这里不拿环境结果冒充真机。
 - **环境说明**：全新 worktree 里 `llm/vendor/` 不随仓库（`.gitignore` 第 43 行 `llm/vendor/`），所以：① 从主检出已准备好的那棵树复制了 169 MB 的 llama.cpp 源码进本 worktree，用 `-SkipLlamaPrepare` 跑；这份复制**不提交**、不进版本库。② `JAVA_HOME=D:\Development\Android-studio\jbr`（OpenJDK 25.0.3，见 `docs/tracks/A-圆桌.md` 记的路径）、`ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`；这两个环境变量在本机 shell 里默认是空的，门禁开头会直接退出，必须在跑之前显式设置。
 
-## 残留项（请统筹裁定）
+## 统筹裁定与收口（2026-10-19）
 
-1. **`:contract` 的报错文字仍说「角色包」，而且会显示给用户。** 共 **8 处**，全在 `contract-lib/src/main/kotlin/com/xavierxia/mycelium/contract/PersonaPack.kt`：第 53、57、61、134、150、167 行（「角色包不是完整的 zip…」「角色包读不出来…」「角色包必须且只能按顺序包含…」「角色包的目录和条目内容不一致」）与第 172、185 行（「角色包的 <条目> 超过 … 字节」）。链路已核实：`PackRejected` 消息 → `PackLibrary.importBytes` 装进 `ImportOutcome.Rejected(message)` → `MyceliumApp.kt` 第 728–736 行的 `notice()` 对 `Rejected` 直接返回 `message` → 界面 `notice` 文本。本次按用户裁定的范围**未改 `:contract`**；要连它一起改属于扩范围，需要另定（改了也不影响 `.mpack` 格式与契约本身，只是这 8 句文案）。
-2. 两处**非界面文字**仍写「角色包」，按最小改动未动：`app/build.gradle.kts` 第 168 行的注释（P0-7 说明）、`app/src/test/java/com/xavierxia/mycelium/roundtable/PackLibraryTest.kt` 第 66 行的测试用例标签「截断的角色包」。
-3. 其他文档里的「角色包」按契约/历史说明保留：`docs/MYCELIUM_INTEGRATION.md`（集成说明）、`docs/work-packages/P1-6-roundtable-skeleton.md` 与 `P1-7-roundtable-chat-cloud.md`（已合并包的历史任务书）、`contract/` 全部。发版说明 `docs/releases/v0.4.0.md` 因为是这一版要发出去的对外文字，已随本次改。
-4. 一处**相关措辞对齐**（超出「角色包→人物包」字面，请过目）：安卓端空态说明里的「电脑版知衍的**角色页**」改成「**人物页**」，因为 P0-23 之后电脑版导航就叫「人物」。若统筹认为这属于另一件事，回退这一处即可（只影响 `MyceliumApp.kt` 与那条断言）。
+1. **A 同意 → 已改完**：`:contract` 里 8 处会显示给用户的报错文字也统一成「人物包」，位置是 `contract-lib/src/main/kotlin/com/xavierxia/mycelium/contract/PersonaPack.kt` 第 53、57、61、134、150、167、172、185 行的 `PackRejected`（「…不是完整的 zip…」「…读不出来…」「…必须且只能按顺序包含…」「…的目录和条目内容不一致」「…的 <条目> 超过 … 字节」）。只改文案，不动格式、契约与包内 SQL；`PersonaPackTest` 只断言消息非空、不锁文案，测试不用改。这些文字确实会显示给用户，链路已核实：`PackRejected` → `PackLibrary.importBytes` 装进 `ImportOutcome.Rejected(message)` → `MyceliumApp.kt` 第 728–736 行 `notice()` 对 `Rejected` 直接返回 `message` → 界面文本。
+2. **B 同意 → 保留**：空态里的「电脑版知衍的**人物页**」保留（P0-23 之后电脑版导航就叫「人物」）。
+3. **C 不用改 → 保持原样**：`app/build.gradle.kts` 第 168 行的注释、`app/src/test/java/com/xavierxia/mycelium/roundtable/PackLibraryTest.kt` 第 66 行的测试用例标签「截断的角色包」。
+4. 其他文档里的「角色包」按契约/历史说明保留：`docs/MYCELIUM_INTEGRATION.md`（集成说明）、`docs/work-packages/P1-6-roundtable-skeleton.md` 与 `P1-7-roundtable-chat-cloud.md`（已合并包的历史任务书）、`contract/` 全部。发版说明 `docs/releases/v0.4.0.md` 因为是这一版要发出去的对外文字，已随本次改。
 
-## 合并建议
+## 合并
 
-把 `wp/P2-2b-persona-pack-wording` 合进 `wp/P2-2b-release-ready`，随 P2-2b 的方案审/全量审一起走；不需要为本项单开审核轮次。真机截图不需要（无界面布局变化，只是文案）。
+按统筹 2026-10-19 的分工（功能分支之间的合并由开发 agent 负责，统筹只合 `main`）：由我把 `wp/P2-2b-persona-pack-wording` 合进 `wp/P2-2b-release-ready`，P2-2b 全量审时再跑一次门禁。真机截图不需要（无界面布局变化，只是文案）。

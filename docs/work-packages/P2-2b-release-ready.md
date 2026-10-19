@@ -206,7 +206,8 @@
   - `PackLibrary.kt` / `Roundtable.kt`：导入失败兜底与 64 MB 上限提示改成「人物包」。
   - `app/src/test/.../MainActivityTest.kt`：对应的两条界面断言同步改。
   - `docs/releases/v0.4.0.md`：三处「导入的角色包」→「导入的人物包」（0.4.0 还没打标签，发布说明是草稿）。
-- **没改**：`contract/`（`SPEC.md`、`pack-db.sql`、`manifest.schema.json`）、`.mpack` 与内部名 `mycelium-persona-pack`、包内表结构、`:contract` 的校验实现、导入与检索逻辑、圆桌与炉边的对话逻辑。`app/build.gradle.kts` 里一处注释和 `PackLibraryTest` 里一个测试用例标签仍写「角色包」，都不是用户可见界面文字。
-- **残留不一致（请统筹定）**：`:contract` 里 `PackRejected` 的报错文字仍是「角色包…」，而它**确实会显示给用户**——`PackLibrary.importBytes` 把 `error.message` 装进 `ImportOutcome.Rejected`，`MyceliumApp.kt` 的 `notice()` 对 `Rejected` 直接返回 `message`。例如「角色包必须且只能按顺序包含 manifest.json 和 persona.sqlite」会照原样显示。本次按用户裁定的范围未改 `:contract`；要连它一起改属于扩范围，需要另定。
+- **统筹裁定（2026-10-19）**：A 同意——`:contract` 里 8 句用户看得见的报错文字也改成「人物包」，只改文字、不动格式与契约；B 同意——空态里的「人物页」保留；C 不用改——`app/build.gradle.kts` 的注释与 `PackLibraryTest` 的用例标签不动。`contract/` 与内部名 `mycelium-persona-pack` 照旧不动。
+- **没改**：`contract/`（`SPEC.md`、`pack-db.sql`、`manifest.schema.json`）、`.mpack` 与内部名 `mycelium-persona-pack`、包内表结构、`:contract` 的校验逻辑（只改了 8 句报错文案，见下）、导入与检索逻辑、圆桌与炉边的对话逻辑。`app/build.gradle.kts` 里一处注释和 `PackLibraryTest` 里一个测试用例标签仍写「角色包」（统筹裁定 C：不改）。
+- **按裁定 A 改掉的 8 句**：`contract-lib/src/main/kotlin/com/xavierxia/mycelium/contract/PersonaPack.kt` 第 53、57、61、134、150、167、172、185 行 `PackRejected` 的报错文字「角色包→人物包」。这些消息**确实会显示给用户**——`PackLibrary.importBytes` 把 `error.message` 装进 `ImportOutcome.Rejected`，`MyceliumApp.kt` 的 `notice()` 对 `Rejected` 直接返回 `message`。只改文字，不动格式、契约与包内 SQL；`PersonaPackTest` 只断言消息非空、不锁文案，测试无需改。
 - 证据：`docs/reviews/2026-10-19-P2-2b-wording/`（交付报告 + `check-all` 输出）。
 - 分支：`wp/P2-2b-persona-pack-wording`（从 `wp/P2-2b-release-ready` 尖端拉），合并进 `wp/P2-2b-release-ready` 即随本包一起审。
