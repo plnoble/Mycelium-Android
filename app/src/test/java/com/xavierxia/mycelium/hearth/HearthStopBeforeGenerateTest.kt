@@ -80,4 +80,36 @@ class HearthStopBeforeGenerateTest : HearthJvmTestCase() {
         assertEquals("停止之后问题应该回到输入框", "加载期复验：这句不该有回答", model.state.value.pendingQuestion)
         assertTrue("这一轮一个字都不该入库", log.conversations(character.id).isEmpty())
     }
+
+    /**
+     * 复审 r4 第 3 条：本轮停止必须**真的终止**这一轮本地生成任务。
+     *
+     * 原来本地 `stop()` 只设引擎标记：真引擎在本轮开头就会把它清掉（`runNative()` 清 Kotlin 的，
+     * `native.begin()` 清 native 的），`return@collect` 也只是不显示迟到的 token，并不终止生成，
+     * 页面于是要一直忙到推理自然结束。
+     *
+     * 这里把这一轮停在引擎里面（模型已加载、两次检查都过了、已经进入这一轮生成，但一个 token 都还
+     * 没吐），就在这一点按停止：任务必须被拆掉（[FakeLocalEngine.cancelled]），页面必须马上退出
+     * 忙碌 —— 假生成一直挂在原地，如果只是设了标记，它会在等待里超时，而不是变绿。
+     */
+    @Test
+    fun aStopAfterTheChecksPassTearsDownTheLocalGenerationInsteadOfWaitingForItToFinish() {
+        val character = newCharacter("生成中停止复验")
+        engine.preload(registeredModel)
+        openReady(character)
+        engine.tokens = listOf("不该出现的回答")
+        engine.holdNextGeneration()
+
+        model.send("生成中停止复验：这句不该有回答")
+        waitFor(what = "这一轮已经交给引擎（两次检查都过了）") { engine.generates.get() == 1 }
+
+        model.stop()
+        waitFor(what = "停止之后页面立刻退出忙碌") { !model.state.value.busy }
+
+        assertEquals("本轮停止必须真的拆掉这一轮的任务，而不只是设标记", 1, engine.cancelled.get())
+        assertEquals("这一轮不该自己走完", 0, engine.completed.get())
+        assertTrue("停止之后不该有 token 上屏", model.state.value.messages.none { it.text.contains("不该出现的回答") })
+        assertTrue("一个 token 都没有就停止，一个字都不该入库", log.conversations(character.id).isEmpty())
+        assertEquals("停止之后问题应该回到输入框", "生成中停止复验：这句不该有回答", model.state.value.pendingQuestion)
+    }
 }

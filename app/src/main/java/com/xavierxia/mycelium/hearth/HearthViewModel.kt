@@ -167,6 +167,17 @@ private data class Turn(
      */
     @Volatile
     var produced = false
+
+    /**
+     * The turn has handed its question to the engine: from this line on the only way to end it is to
+     * cancel the task, because the engine's own stop flag cannot carry this turn's intent across the
+     * startup it is about to run — `LocalModelEngine.runNative()` clears the Kotlin flag and
+     * `native.begin()` clears the native one, both *inside* this round. Before this line a stop only
+     * has to be recorded: the [HearthViewModel.stopBeforeGenerating] checks refuse the round, so a
+     * stop while the model is loading still keeps the model that load brought in.
+     */
+    @Volatile
+    var handedToEngine = false
 }
 
 class HearthViewModel @JvmOverloads constructor(
@@ -896,16 +907,22 @@ class HearthViewModel @JvmOverloads constructor(
     fun stop() {
         // Record the intent on the running turn first: an engine that fails while loading reports a
         // plain exception, and that must still end as a stop (question back, nothing stored).
-        activeTurn?.userStopped = true
-        when (currentChosen?.isCloud) {
-            // A cloud request is aborted where it is: disconnect the connection, then cancel the job
-            // so nothing that already arrived is shown or stored.
-            true -> {
-                cloudModel?.stop()
-                operation?.cancel()
-            }
-            else -> engine.stop()
-        }
+        val turn = activeTurn
+        turn?.userStopped = true
+        val cloud = currentChosen?.isCloud == true
+        // Both engines are told as well, so a native loop that is already running returns at its next
+        // checkpoint and a cloud request stops reading its socket.
+        if (cloud) cloudModel?.stop() else engine.stop()
+        // Cancelling the task is what ends *this* round once the engine holds it. A flag alone cannot:
+        // the startup this round is about to run clears it (`runNative()` the Kotlin one,
+        // `native.begin()` the native one), and `return@collect` only hides late tokens — it does not
+        // stop the native loop or take the page out of "busy" before the answer is finished. Cancelling
+        // the collecting coroutine tears the channelFlow down, which lets runNative() abort the native
+        // worker and lets startTurn() finish the turn as stopped straight away. A cloud request is
+        // always cancelled here, as before. A local stop before the engine was handed the question does
+        // not cancel: [stopBeforeGenerating] refuses that round at its next check, and cancelling a
+        // load there would throw away a model the load had just brought in.
+        if (cloud || turn?.handedToEngine == true) operation?.cancel()
     }
 
     override fun onCleared() {
@@ -988,18 +1005,33 @@ class HearthViewModel @JvmOverloads constructor(
         stopBeforeGenerating(turn)
         // The cloud model keeps its request on the caller's dispatcher, so the collection runs on IO;
         // the local engine switches by itself, so this is harmless for it.
-        withContext(Dispatchers.IO) {
-            stopBeforeGenerating(turn)
-            model.generate(messages, turn.character.parameters()).collect { delta ->
-                // A delta that arrives after the stop is not part of this answer any more: the turn
-                // keeps what it had produced *before* the stop, so this one is dropped instead of
-                // being shown or stored (and it no longer counts as "produced").
-                if (turn.userStopped) return@collect
-                // Marked before the delta reaches the screen or the buffer: from this point the turn
-                // has something to keep, which is what a stop is allowed to preserve.
-                turn.produced = true
-                onDelta(delta)
+        //
+        // From here the engine owns this round: a stop can no longer be carried by the engine's flag
+        // (this round's own startup clears it), so stop() cancels this task instead. Marked before the
+        // hand-off, not after the first token, because the window that matters is the hand-off itself:
+        // a stop that lands after the check inside the block below — or while the engine's channelFlow
+        // is only just starting — must still end the task, and cancelling a coroutine that has not
+        // reached the engine yet is the only thing that stops it from reaching it.
+        turn.handedToEngine = true
+        try {
+            withContext(Dispatchers.IO) {
+                stopBeforeGenerating(turn)
+                model.generate(messages, turn.character.parameters()).collect { delta ->
+                    // A delta that arrives after the stop is not part of this answer any more: the turn
+                    // keeps what it had produced *before* the stop, so this one is dropped instead of
+                    // being shown or stored (and it no longer counts as "produced").
+                    if (turn.userStopped) return@collect
+                    // Marked before the delta reaches the screen or the buffer: from this point the turn
+                    // has something to keep, which is what a stop is allowed to preserve.
+                    turn.produced = true
+                    onDelta(delta)
+                }
             }
+        } finally {
+            // The engine is done with this round. A stop that lands from here on has no running
+            // generation left to cancel — it must not cancel the write that is keeping whatever the
+            // turn had already produced before [finishTurn] decided what to store.
+            turn.handedToEngine = false
         }
     }
 

@@ -22,6 +22,7 @@ import java.time.temporal.ChronoUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -311,7 +312,12 @@ private class GatedSession(private val delegate: HearthSession, private val gate
  *
  * - [loadedModel] 有值就是「模型已经加载好」，页面会直接跳到生成，不调 [load]；
  * - [holdNextLoad] 让下一次加载挂住，[stop] 会把它放行并且**照常加载成功**（native 最坏的样子）；
- * - [tokens] 是这一轮会吐出来的正文。
+ * - [tokens] 是这一轮会吐出来的正文；
+ * - [holdNextGeneration] 让已经进入的这一轮生成停在原地：一个 token 都不吐，也不返回。真引擎在
+ *   本轮开头就把停止标记清掉了（`runNative()` 清 Kotlin 的，`native.begin()` 清 native 的），
+ *   所以 [stop] 只记下「引擎被要求停」，并不会让已经进入的这一轮自己结束 —— 这一轮只能靠**取消
+ *   收集任务**终止。用例因此能分辨「只是设了标记」和「任务真的被拆掉」：前者会让页面一直忙到推理
+ *   自然结束。
  */
 internal class FakeLocalEngine : LocalEngine {
     private val loaded = MutableStateFlow<ModelInfo?>(null)
@@ -323,10 +329,27 @@ internal class FakeLocalEngine : LocalEngine {
     val generates = AtomicInteger()
     val stops = AtomicInteger()
     val loadStarted = CountDownLatch(1)
+
+    /** 收集方把这一轮生成立刻拆掉（协程被取消）的次数。 */
+    val cancelled = AtomicInteger()
+
+    /** 这一轮生成自己走完（没有被取消）的次数。 */
+    val completed = AtomicInteger()
+
     private var loadGate: CompletableDeferred<Unit>? = null
+    private var generationGate: CompletableDeferred<Unit>? = null
 
     fun holdNextLoad() {
         loadGate = CompletableDeferred()
+    }
+
+    /** 让下一次生成停住：不吐 token、也不返回，直到收集方被取消或者 [releaseGeneration]。 */
+    fun holdNextGeneration() {
+        generationGate = CompletableDeferred()
+    }
+
+    fun releaseGeneration() {
+        generationGate?.complete(Unit)
     }
 
     fun preload(record: LocalModelRecord) {
@@ -348,6 +371,16 @@ internal class FakeLocalEngine : LocalEngine {
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> = flow {
         generates.incrementAndGet()
-        tokens.forEach { emit(it) }
+        val gate = generationGate
+        generationGate = null
+        try {
+            gate?.await()
+            tokens.forEach { emit(it) }
+            completed.incrementAndGet()
+        } catch (teardown: CancellationException) {
+            // 这一轮真的被拆掉了：收集协程被取消，生成不再继续。
+            cancelled.incrementAndGet()
+            throw teardown
+        }
     }
 }
