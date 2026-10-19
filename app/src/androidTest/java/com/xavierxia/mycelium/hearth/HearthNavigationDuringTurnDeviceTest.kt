@@ -556,8 +556,10 @@ class HearthNavigationDuringTurnDeviceTest {
             assertFalse("换过页面之后不该还挂着生成中", model.state.value.busy)
 
             // 第二轮：重新生成走的是 replaceTurn。这次把它的**写事务**停住，再在写事务等待期间导航：
-            // 数据库于是拒写，收尾只能走 NonCancellable 那条路（协程取消挡不住它），也就只有令牌能
-            // 拦住这一轮把旧回答盖到新页面上。停在读上是停不住这条路径的。
+            // 数据库于是拒写，改由收尾路径处理。用例验证的是：这一轮不会把旧回答盖到新页面上——库里
+            // 那一段仍是第一轮的回答，页面停在第三段。它**不**验证「收尾只能走 NonCancellable、只有
+            // 令牌能拦住」：导航取消本身也可能让 withContext 返回，之后才在入口令牌检查处退出，本用例
+            // 没有区分这两条路径，也没有断言收尾的经由。停在读上是停不住这条路径的。
             val third = log.append(character.id, null, "刷新窗口复验：第三段 $tag", thirdAnswer, "本机 · 测试", minutesAgo(10))
             model.openConversation(stored.id)
             waitUntil(20_000, "切回这一段") { model.state.value.openConversation == stored.id && !model.state.value.historyLoading }

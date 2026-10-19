@@ -287,10 +287,10 @@ typealias GatewayAbort = GatewayCall
  *    `aStopBeforeTheConnectionStartsMeansThePeerNeverSeesAConnect`. This does **not** generalise to
  *    "a stopped request never starts a connection": a stop that lands after the gate's check and
  *    before the platform call still lets that call run.
- *  * **Guaranteed, for one window: a stop during body streaming is caught before the body is
- *    written.** Every body byte passes a checkpoint that reads the stop first: before the stream is
- *    acquired, once more the moment it exists, and again before every write and every flush
- *    ([GatewayCall.bodyStream], `StoppedBodyStream`). Covered by
+ *  * **Guaranteed, for one window: a stop that lands while the body output stream is being acquired
+ *    is caught by the post-checks, so the body is not written.** Every body byte passes a checkpoint
+ *    reading the stop first — before the stream is acquired, once more the moment it exists, and
+ *    again before every write and every flush ([GatewayCall.bodyStream], `StoppedBodyStream`). Covered by
  *    `aStopInTheRegistrationWindowNeverWritesTheBody` and
  *    `aStopWhileTheConnectionIsBeingStartedEndsThatConnectAtOnce`. This does **not** generalise to
  *    "a stop at any time after the connection began writes no body": bytes already written, or being
