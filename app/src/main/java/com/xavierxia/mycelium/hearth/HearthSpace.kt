@@ -434,7 +434,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             conversationSegment = conversationSegment,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
-        if (!state.busy && !state.historyLoading && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
+        if (!state.busy && state.canSend && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = vm::regenerate) { Text("重新生成") }
             }
@@ -454,14 +454,21 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             if (state.busy) {
                 Button(onClick = vm::stop) { Text("停止") }
             } else {
-                Button(
-                    onClick = {
-                        val question = text
-                        setText("")
-                        vm.send(question)
-                    },
-                    enabled = text.isNotBlank() && !state.historyLoading,
-                ) { Text("发送") }
+                val row = composerRow(state, text)
+                Column(horizontalAlignment = Alignment.End) {
+                    // 历史没读出来：页面给出重试入口，而不是让发送按钮点了没反应。
+                    if (row.retryVisible) {
+                        TextButton(onClick = vm::retryHistory) { Text("历史没读出来，点这里重试") }
+                    }
+                    Button(
+                        onClick = { sendFromComposer(vm, text) { setText("") } },
+                        enabled = row.canSend,
+                    ) { Text("发送") }
+                    // 不能发的时候把原因说出来：页面和 ViewModel 用的是同一个判据。
+                    row.blockedReason?.let { reason ->
+                        Text(reason, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
     }
@@ -515,6 +522,35 @@ internal fun LazyListState.isAtContentBottom(): Boolean {
     val tolerance = minOf(last.size, viewport / 16)
     val contentBottom = last.offset + last.size
     return contentBottom <= info.viewportEndOffset - info.afterContentPadding + tolerance
+}
+
+/**
+ * 输入框这一行的判据，集中在一处：页面照它渲染，JVM 用例也断言它（[HearthState.canSend] 是页面与
+ * [HearthViewModel.send] 共用的同一个判据）。于是「发送按钮能点」就等于「这一句会真的被发出去」，
+ * 不会再有「按钮能点、没有请求、输入消失」那一态。
+ */
+internal data class ComposerRow(
+    /** 发送按钮可用：草稿非空，且这一页现在收得下这句话。 */
+    val canSend: Boolean,
+    /** 现在不能发的原因，显示在按钮下面；能发时为 null。 */
+    val blockedReason: String?,
+    /** 历史读失败：页面显示「历史没读出来，点这里重试」这个入口（[HearthViewModel.retryHistory]）。 */
+    val retryVisible: Boolean,
+)
+
+internal fun composerRow(state: HearthState, draft: String): ComposerRow = ComposerRow(
+    canSend = draft.isNotBlank() && state.canSend,
+    blockedReason = state.sendBlockedReason,
+    retryVisible = state.historyFailed,
+)
+
+/**
+ * 点「发送」这一下：只有 ViewModel 确实接受了这句话（[HearthViewModel.send] 返回 true）才清空输入
+ * 框。被拒（历史没读完 / 读失败 / 已经有一轮在跑）时草稿原样留在框里——先清空再发送正是本轮回归的
+ * 来源：按钮能点、没有请求，用户写的东西消失。
+ */
+internal fun sendFromComposer(vm: HearthViewModel, draft: String, clearDraft: () -> Unit) {
+    if (vm.send(draft)) clearDraft()
 }
 
 /**

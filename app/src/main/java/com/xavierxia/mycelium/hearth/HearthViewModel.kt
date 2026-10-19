@@ -81,7 +81,31 @@ data class HearthState(
     /** A cloud question held back until the user agrees to the receiving service. */
     val sendConfirm: PendingSend? = null,
     val notice: String? = null,
-)
+) {
+    /**
+     * Whether a question may be sent from what is on screen right now; when it may not, the one
+     * sentence that says why. This is the **only** readiness rule: [HearthViewModel.send] refuses on
+     * it and the page disables its send button on it, so a tappable button is a button that really
+     * sends. A page that decided for itself (the old `HearthSpace.kt` looked at [historyLoading]
+     * alone) could offer a send the view model then refused: the question vanished from the box,
+     * nothing was sent, and no retry was offered anywhere.
+     *
+     * Test mode reads and writes no stored history, so there is nothing for it to wait for:
+     * [HearthViewModel.setMode] clears both flags when it enters test mode. A switch back into
+     * immersive publishes [historyLoading] in the same update that publishes the mode, before its
+     * read starts, so there is no moment in either mode where the page looks ready while the history
+     * a send would be captured against is not there yet.
+     */
+    val sendBlockedReason: String?
+        get() = when {
+            historyFailed -> "历史没读出来，点这里重试"
+            historyLoading -> "正在读取历史，读完就能发"
+            else -> null
+        }
+
+    /** The page's send button is enabled on this, and [HearthViewModel.send] accepts on this. */
+    val canSend: Boolean get() = sendBlockedReason == null
+}
 
 private data class Snapshot(
     val characters: List<HearthCharacter>,
@@ -221,25 +245,27 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Whether the page may accept a send or a redo. Its own history has to be the history on screen:
-     * while that read is still out, or after it came back as a failure, a send would be captured
-     * against the conversation the page was showing before — one that belongs to another character.
-     * Test mode reads no stored history, so there is nothing to wait for there.
+     * Whether the page may accept a send or a redo. It is exactly the answer the page itself uses to
+     * decide whether its send button is tappable ([HearthState.canSend]) — one rule, asked in one
+     * place, so the page can never offer a send that is refused here.
+     *
+     * Its own history has to be the history on screen: while that read is still out, or after it came
+     * back as a failure, a send would be captured against the conversation the page was showing
+     * before — one that belongs to another character.
+     *
+     * Test mode is not a hole in this: it reads no stored history, and [setMode] clears the two
+     * flags when it enters test mode, so being in test mode is enough. The hole was the mode switch
+     * the other way — [setMode] used to keep the mode on TEST until the read came back, which made
+     * "test mode" a name for "immersive page whose history is not here yet". The mode is now
+     * published together with [HearthState.historyLoading], before the read starts, so a switch into
+     * immersive is refused exactly like any other read.
      */
-    private fun historyReady(): Boolean {
-        val current = mutable.value
-        if (current.mode == HearthMode.TEST) return true
-        return !current.historyLoading && !current.historyFailed
-    }
+    private fun historyReady(): Boolean = mutable.value.canSend
 
     /**
      * Reads the page's history again after a failed read, and is what the page offers instead of a
-     * send while [HearthState.historyFailed] is true. It takes the page over like any other move, so
-     * a turn that was still finishing is refused rather than shown over the history it belongs to.
-     */
-    /**
-     * Reads the page's history again after a failed read, and is what the page offers instead of a
-     * send while [HearthState.historyFailed] is true. It takes the page over like any other move: the
+     * send while [HearthState.historyFailed] is true (the retry entrance next to the composer). It
+     * takes the page over like any other move: the
      * new read owns the screen from its first line, the page is usable again straight away, and any
      * turn that was still finishing is refused by the token instead of being shown over the history
      * this read is about to put there.
@@ -592,23 +618,52 @@ class HearthViewModel @JvmOverloads constructor(
         if (mutable.value.mode == mode) return@launch
         abandonTurn()
         if (mode == HearthMode.TEST) {
+            // Test mode reads and writes no stored history, so the state of the stored read must not
+            // follow it in: a failed immersive read would otherwise leave the test page unable to
+            // send even though nothing on this page is waiting for the database. Clearing the two
+            // flags here is what makes "being in test mode" enough for [HearthState.canSend].
             mutable.update {
-                it.copy(mode = mode, openConversation = null, messages = emptyList(), streaming = null, streamLabel = null, droppedTurns = 0, pendingQuestion = null, notice = null)
+                it.copy(
+                    mode = mode,
+                    openConversation = null,
+                    messages = emptyList(),
+                    streaming = null,
+                    streamLabel = null,
+                    droppedTurns = 0,
+                    pendingQuestion = null,
+                    notice = null,
+                    historyLoading = false,
+                    historyFailed = false,
+                )
             }
             return@launch
         }
-        // Back from test mode: read the stored history again, and refuse a send until it is here.
-        loadHistory(mutable.value.openCharacter) { state, history ->
-            state.copy(
+        // Back from test mode. The page is immersive from this line on: the mode is published in the
+        // same update that says its history is still being read, and that update goes out before the
+        // read starts. Keeping the mode on TEST until the read came back (what this used to do) left
+        // a window where the page was already the immersive one — the next send would be captured as
+        // a test-mode turn, never stored, and the read that landed right after would wipe it off the
+        // screen. Now a send in that window is refused until the stored history is actually here.
+        mutable.update {
+            it.copy(
                 mode = mode,
-                conversations = history.conversations,
-                openConversation = history.conversationId,
-                messages = history.messages,
+                openConversation = null,
+                messages = emptyList(),
                 streaming = null,
                 streamLabel = null,
                 droppedTurns = 0,
                 pendingQuestion = null,
                 notice = null,
+                historyLoading = true,
+                historyFailed = false,
+            )
+        }
+        // Read the stored history again, and refuse a send until it is here.
+        loadHistory(mutable.value.openCharacter) { state, history ->
+            state.copy(
+                conversations = history.conversations,
+                openConversation = history.conversationId,
+                messages = history.messages,
                 historyLoading = false,
             )
         }
@@ -674,25 +729,36 @@ class HearthViewModel @JvmOverloads constructor(
 
     // --- generation ----------------------------------------------------------
 
-    /** Streams an answer for [text]. Stopping keeps whatever was written so far. */
-    fun send(text: String) {
+    /**
+     * Streams an answer for [text]. Stopping keeps whatever was written so far.
+     *
+     * @return whether the question was accepted. A page must clear its draft only on true — a refused
+     * question stays in the box, which is what makes a failed history read (or a page that is still
+     * reading) cost the user nothing. Clearing first and asking afterwards is exactly how a send that
+     * was refused turned into "the button worked, nothing was sent, my text is gone".
+     */
+    fun send(text: String): Boolean {
         // Until the conversation that is open now has its own history, a send would be captured
         // against the one the page is leaving (and its read would be thrown away). A read that failed
         // counts as not ready too: the page has no target, so there is nothing to send into. Refused,
         // not redirected: the question stays in the box for the user to send when the page is ready.
-        if (!historyReady()) return
-        startTurn(text, mutable.value.mode, mutable.value.openConversation)
+        if (!historyReady()) return false
+        return startTurn(text, mutable.value.mode, mutable.value.openConversation)
     }
 
     /**
      * Starts a turn in [mode] inside [conversationId]. A confirmed cloud question passes the mode and
      * the conversation it was written in, so a mode switch while the dialog was up cannot move it.
+     *
+     * @return whether the turn was taken on. A cloud question that still needs the user's agreement
+     * is taken on too: it is held in [HearthState.sendConfirm], and cancelling that dialog puts the
+     * question back in the box ([dismissSendConfirm]).
      */
-    private fun startTurn(text: String, mode: HearthMode, conversationId: String?) {
+    private fun startTurn(text: String, mode: HearthMode, conversationId: String?): Boolean {
         val current = mutable.value
-        val character = current.openCharacter ?: return
+        val character = current.openCharacter ?: return false
         val question = text.trim()
-        if (question.isEmpty() || operation?.isActive == true) return
+        if (question.isEmpty() || operation?.isActive == true) return false
         if (character.modelKind == ModelKind.CLOUD) {
             // Nothing leaves the phone until this exact receiver has been agreed to. One read of the
             // settings decides it; a changed service or address asks here, where the user is
@@ -700,17 +766,17 @@ class HearthViewModel @JvmOverloads constructor(
             val service = cloudSettings.service(character.serviceId)
             if (service == null) {
                 mutable.update { it.copy(notice = "这个人物选的云端服务已经不在了，请在人物编辑里重新选") }
-                return
+                return false
             }
             val target = cloudTarget(service.id, service.baseUrl)
             if (character.cloudConfirmedTarget != target) {
                 mutable.update {
                     it.copy(sendConfirm = PendingSend(character, question, mode, conversationId, target, generationToken), notice = null)
                 }
-                return
+                return true
             }
         }
-        val chosen = choose(character) ?: return
+        val chosen = choose(character) ?: return false
         val turn = Turn(character, mode, conversationId, question, chosen)
         val token = beginGeneration()
         val buffer = StringBuilder()
@@ -765,6 +831,7 @@ class HearthViewModel @JvmOverloads constructor(
                 }
             }
         }
+        return true
     }
 
     /** Redoes the last answer. Stopping keeps whatever was written so far. */
