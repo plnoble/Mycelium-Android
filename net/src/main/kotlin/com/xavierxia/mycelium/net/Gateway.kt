@@ -103,6 +103,20 @@ data class GatewayRequest(
     }
 }
 
+/**
+ * Bounded the way the platform needs it: a non-positive value means "wait forever" there, and an
+ * unbounded connect attempt is an unbounded wait for a stop that lands mid-connect. The gateway's
+ * own exchange and the file downloader both ask here, so the two paths cannot drift apart.
+ */
+internal fun boundedConnectTimeout(ms: Int): Int =
+    ms.takeIf { it > 0 }
+        ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
+        ?: GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS
+
+/** A per-read bound, the same way: 0 means "wait forever" on the platform. */
+internal fun boundedReadTimeout(ms: Int): Int =
+    ms.takeIf { it > 0 } ?: GatewayRequest.DEFAULT_READ_TIMEOUT_MS
+
 data class GatewayResponse(
     val status: Int,
     val body: String,
@@ -380,14 +394,10 @@ class OutboundGateway(
             // and an unbounded connect attempt is an unbounded wait for a stop that lands
             // mid-connect. This bounds that one TCP connect attempt; it is not a deadline for the
             // whole call, because the TLS handshake, the read and any further route attempt after a
-            // failure each carry their own wait.
-            connection.connectTimeout = request.connectTimeoutMs
-                .takeIf { it > 0 }
-                ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
-                ?: GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS
-            connection.readTimeout = request.readTimeoutMs
-                .takeIf { it > 0 }
-                ?: GatewayRequest.DEFAULT_READ_TIMEOUT_MS
+            // failure each carry their own wait. The file downloader asks for the same bound through
+            // the same two functions, so the two paths cannot drift apart.
+            connection.connectTimeout = boundedConnectTimeout(request.connectTimeoutMs)
+            connection.readTimeout = boundedReadTimeout(request.readTimeoutMs)
             connection.instanceFollowRedirects = false
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             // A stop that landed while the socket was being opened, or while the switch was being

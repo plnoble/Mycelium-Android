@@ -153,8 +153,8 @@ internal class HopWalker(
             contacted += uri.host.orEmpty()
             try {
                 connection.requestMethod = method
-                connection.connectTimeout = connectTimeoutMs
-                connection.readTimeout = readTimeoutMs
+                connection.connectTimeout = boundedConnectTimeout(connectTimeoutMs)
+                connection.readTimeout = boundedReadTimeout(readTimeoutMs)
                 connection.instanceFollowRedirects = false
                 connection.setRequestProperty("Accept-Encoding", "identity")
                 headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
@@ -163,10 +163,15 @@ internal class HopWalker(
                 if (body != null) {
                     connection.doOutput = true
                     call.check()
-                    connection.outputStream.use { it.write(body) }
+                    // The same gate the gateway's own exchange uses: a stop that wins the lock means
+                    // the stream — and the connection behind it — is never created, and every write
+                    // asks the switch again. A download must not open its own way around it.
+                    call.bodyStream { connection.outputStream }.use { it.write(body) }
                     call.check()
                 }
-                val status = connection.responseCode
+                // Reaching for the status is what starts the connection on a request without a body,
+                // so it passes the same gate as [GatewayCall.bodyStream].
+                val status = call.startingConnection { connection.responseCode }
                 if (status in 300..399) {
                     // The redirect response itself is never read; only its Location matters.
                     if (followed >= MAX_REDIRECTS) {
