@@ -30,27 +30,36 @@ data class GatewayRequest(
     val headers: Map<String, String> = emptyMap(),
     val body: String? = null,
     /**
-     * How long the platform may spend establishing the connection, in milliseconds.
+     * How long the platform may spend on the TCP connect of one connection attempt, in
+     * milliseconds.
      *
-     * This is not only a network policy. A stop cannot interrupt a `connect()` that has already
-     * started (see [OutboundGateway]), so this value is also the worst extra wait a stop can inherit
-     * before the request actually ends. [DEFAULT_CONNECT_TIMEOUT_MS] is picked from both sides:
-     * smaller values kill handshakes on slow or congested mobile links, where DNS plus TCP plus TLS
-     * on a bad link regularly exceeds ten seconds, and larger ones leave a stopped request sitting
-     * on a socket that is still being established.
+     * This is a connection policy, not a deadline for the whole call. Two different things are easy
+     * to confuse here, so they are written apart:
      *
-     * The platform's own default is 0, which means *no limit at all* — measured on this machine:
-     * `getConnectTimeout()` reads 0 on a freshly opened connection. A non-positive value is
-     * therefore replaced by [DEFAULT_CONNECT_TIMEOUT_MS], and a value above [MAX_CONNECT_TIMEOUT_MS]
-     * is capped there, so the wait a stop can inherit is always finite and bounded whatever a caller
-     * passes.
+     *  * **What this value is.** The platform applies it to the TCP connect of one attempt; a
+     *    non-positive value is replaced by [DEFAULT_CONNECT_TIMEOUT_MS] and one above
+     *    [MAX_CONNECT_TIMEOUT_MS] is capped there. The platform's own default is 0, which means *no
+     *    limit at all* — measured on this machine: `getConnectTimeout()` reads 0 on a freshly opened
+     *    connection. Normalising it is what keeps a single connect attempt from waiting forever.
+     *  * **What it is not.** It is **not** a hard upper bound on the whole call, and it says nothing
+     *    about the time from a stop to the end of the task. The TLS handshake and the response read
+     *    have their own timeouts ([readTimeoutMs]), and a connect that fails may be followed by
+     *    further attempts at the same or another route, each with its own wait. A stopped request
+     *    whose connect is already in flight therefore keeps the value as a *per-attempt* bound on
+     *    that step, not as a bound on the request as a whole.
+     *
+     * [DEFAULT_CONNECT_TIMEOUT_MS] is picked from both sides: smaller values kill handshakes on slow
+     * or congested mobile links, where DNS plus TCP plus TLS on a bad link regularly exceeds ten
+     * seconds, and larger ones leave a stopped request sitting on a socket that is still being
+     * established.
      */
     val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     /**
      * How long one read may block once the connection is up, in milliseconds. 60s covers a
-     * non-streaming chat completion. It does not lengthen cancellation: a stop disconnects the
-     * connection, which is what ends a blocked read at once. A non-positive value means "no limit"
-     * on the platform as well and is replaced by [DEFAULT_READ_TIMEOUT_MS].
+     * non-streaming chat completion. A non-positive value means "no limit" on the platform as well
+     * and is replaced by [DEFAULT_READ_TIMEOUT_MS]. This is a per-read bound, not a deadline for the
+     * whole call or for a stop: a stop disconnects the connection, which normally ends a blocked
+     * read, but whether that happens at once depends on the platform.
      */
     val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
     /**
@@ -82,9 +91,10 @@ data class GatewayRequest(
 
         /**
          * The ceiling on a caller-supplied connect timeout. A stop that lands while the connection
-         * is being started has to wait out this call, so no single request may ask for a longer
-         * window than this. It is twice the default, which leaves room for a deliberately patient
-         * caller without letting the window grow without bound.
+         * is being started may have to wait out that attempt, so no single request may ask for a
+         * longer per-attempt window than this. It is twice the default, which leaves room for a
+         * deliberately patient caller without letting the window grow without bound. It bounds one
+         * attempt, not the whole call: later attempts and the TLS/read phases have their own waits.
          */
         const val MAX_CONNECT_TIMEOUT_MS = 30_000
 
@@ -103,9 +113,11 @@ class GatewayRejected(message: String) : Exception(message)
 
 /**
  * Thrown by a cancel checkpoint instead of sending anything else, and reported for a request whose
- * bytes were already on the wire when the stop arrived — there the closed socket's own failure is
- * translated into this one, so a stopped request always ends with the same clear exception. The
- * audit log records it as a failed request, exactly as it records a stopped request in flight.
+ * bytes were already on the wire when the stop arrived — there the failure that ends the in-flight
+ * I/O is translated into this one, so a stopped request that fails still ends with the same clear
+ * exception. It is not thrown for a request that had already finished: a stop after the last byte
+ * cannot turn a completed exchange into a failure. The audit log records the exception as a failed
+ * request, exactly as it records a stopped request in flight.
  */
 class GatewayCancelled(message: String) : Exception(message)
 
@@ -120,19 +132,25 @@ class GatewayCancelled(message: String) : Exception(message)
  *
  *  * a stop that wins the lock makes [startingConnection] refuse, so the platform call that starts
  *    the connection is never made at all;
- *  * a stop that loses it finds the connection registered and disconnects it at once — the stop is
- *    not queued behind the blocking connect.
+ *  * a stop that loses it finds whatever connection is registered and immediately attempts to
+ *    disconnect it; the stop is not queued behind the blocking connect, but it also cannot veto a
+ *    platform call the gate has already been allowed to make.
  *
- * From there the flag keeps applying: [attach] closes a connection that appeared after the stop, the
- * gateway's own checkpoints throw instead of sending, [bodyStream] reads the switch again the moment
- * the output stream exists, and `StoppedBodyStream` asks before every write and every flush. A stop
- * that lands while the blocking read is waiting closes the connection, the only thing that ends it.
+ * The first branch is a guarantee only for stops that reach the lock before [startingConnection]'s
+ * check; a stop that arrives after that check, while the connection object exists but no engine does,
+ * is the residual window this class cannot close (see [OutboundGateway]).
+ *
+ * From there the flag keeps applying: [attach] disconnects a connection that appeared after the stop
+ * (a no-op while the platform has no engine, like any disconnect at that point), the gateway's own
+ * checkpoints throw instead of sending, [bodyStream] reads the switch again the moment the output
+ * stream exists, and `StoppedBodyStream` asks before every write and every flush. A stop that lands
+ * while the blocking read is waiting attempts to close the connection, which is what can end it.
  *
  * The lock is deliberately never held across the blocking connect, so a stop never waits for the
  * network: its only wait is the few instructions of the other side's critical section. Serialising
  * the stop *behind* the connect — what holding the lock across it would do — would leave the socket
- * alive after the stop for as long as that ROM's connect takes to time out, so the short wait is the
- * right price: correctness first, cancel latency second.
+ * alive after the stop for as long as that connect takes to finish or time out, so the short wait is
+ * the right price: correctness first, cancel latency second.
  */
 class GatewayCall {
     private val cancelled = AtomicBoolean(false)
@@ -153,9 +171,10 @@ class GatewayCall {
     /**
      * Marks this request cancelled and closes the connection when one is already in use. The mark and
      * the disconnect happen under [decision], the same lock [startingConnection] takes to decide
-     * whether the connection may start, so the two outcomes are exhaustive: a stop that gets there
-     * first means no connection is ever started, and a stop that gets there second disconnects the
-     * connection that was just allowed to start.
+     * whether the connection may start, so a stop that reaches the gate first means no connection is
+     * ever started. A stop that never reaches the gate before the gate's check still disconnects a
+     * connection that has already been registered; what it cannot do is stop the platform call that
+     * the gate has already been allowed to make.
      */
     fun cancel() {
         synchronized(decision) {
@@ -176,12 +195,14 @@ class GatewayCall {
      * The connection-start gate: runs [connect] — the platform call that establishes the connection
      * (`getOutputStream`, `getResponseCode`, `getInputStream`) — unless a stop has already won.
      *
-     * Checkpoints alone cannot cover this point: a check in front of the start can be followed by a
-     * pause, and a `disconnect()` during that pause is a no-op on a connection that has not started,
-     * so the paused thread would come back and start the connection anyway. Here the decision to
-     * start and the decision to stop are one critical section with [cancel], so either the stop was
-     * first and [connect] is never invoked, or the start was first and the stop disconnects the
-     * connection at once.
+     * The guarantee is limited to that: a stop that arrives *before this check* is never overtaken,
+     * but a stop that arrives after it returns and before the platform call is actually made is not
+     * covered. `disconnect()` is a no-op on a connection with no engine yet, so a stop in that gap
+     * cannot veto the call, and the request is started after all. Whether the platform can then end
+     * that in-flight call immediately depends on the implementation: once an engine exists,
+     * `disconnect()` reaches it and can cancel the connection and close the underlying socket, but
+     * this implementation cannot promise that every start window is covered or that an in-flight
+     * connect ends at once.
      */
     internal fun <T> startingConnection(connect: () -> T): T {
         synchronized(decision) {
@@ -200,9 +221,9 @@ class GatewayCall {
      * because `connection.outputStream` is where a real connection is established: a stop that won
      * the decision means the stream — and the connection behind it — is never created. The switch is
      * read once more the moment the stream exists, so a stop that landed while it was being opened
-     * still wins before the first body byte, and the stream that goes back asks the same switch
-     * before every write and every flush. The switch only ever goes from false to true, so a stop
-     * that has been seen once is seen by every checkpoint after it.
+     * is caught before the first body byte even when the connection did start anyway — what that
+     * checkpoint stops is the body, not the socket. The stream that goes back asks the same switch
+     * before every write and every flush, so no further byte leaves once the stop is seen.
      */
     internal fun bodyStream(open: () -> OutputStream): OutputStream {
         val stream = startingConnection(open)
@@ -258,32 +279,41 @@ typealias GatewayAbort = GatewayCall
  * Stated precisely, because the three statements have different strengths and only the first two
  * are covered by tests ([GatewayTest]):
  *
- *  * **Guaranteed: a stop that lands before the connection starts is never overtaken.** The decision
- *    to stop and the decision to start the connection are one critical section
- *    ([GatewayCall.startingConnection]), so a stop that gets there first means the platform call
- *    behind `getOutputStream`, `getResponseCode` and `getInputStream()` is never invoked and no
- *    socket is opened. Covered by `aCancelledRequestNeverOpensAConnection` and
- *    `aStopBeforeTheConnectionStartsMeansThePeerNeverSeesAConnect`.
- *  * **Guaranteed: a stop that lands after the connection has started disconnects it, and no body
- *    byte is written.** The stop calls `disconnect()` on the registered connection, and every body
- *    byte passes a checkpoint that reads the stop first: before the stream is acquired, once more
- *    the moment it exists, and again before every write and every flush ([GatewayCall.bodyStream],
- *    `StoppedBodyStream`). Covered by `aStopInTheRegistrationWindowNeverWritesTheBody` and
- *    `aStopWhileTheConnectionIsBeingStartedEndsThatConnectAtOnce`.
- *  * **Not guaranteed: a stop cannot interrupt a `connect()` that has already begun.** Once that
- *    platform call is running, only its own return, its own failure or its timeout ends it.
- *    `HttpURLConnection` offers no hook for it. On Android the connection implementation returns
- *    immediately from `disconnect()` while no engine exists yet — so a stop inside that window
- *    closes nothing, and the connection starts anyway — and a thread interrupt does not abort a
- *    blocking socket connect. A stop that lands between the gate and the running `connect()`
- *    therefore waits for that call, and [GatewayRequest.connectTimeoutMs] is the only bound on the
- *    wait. No test claims this branch: a fixture must not be given a cancellation hook the platform
- *    does not have.
+ *  * **Guaranteed, for one window: a stop that reaches the start gate before its check means the
+ *    connection is never started.** The decision to stop and the decision to start the connection
+ *    share one critical section ([GatewayCall.startingConnection]), so a stop that gets there first
+ *    means the platform call behind `getOutputStream`, `getResponseCode` and `getInputStream()` is
+ *    never invoked and no socket is opened. Covered by `aCancelledRequestNeverOpensAConnection` and
+ *    `aStopBeforeTheConnectionStartsMeansThePeerNeverSeesAConnect`. This does **not** generalise to
+ *    "a stopped request never starts a connection": a stop that lands after the gate's check and
+ *    before the platform call still lets that call run.
+ *  * **Guaranteed, for one window: a stop during body streaming is caught before the body is
+ *    written.** Every body byte passes a checkpoint that reads the stop first: before the stream is
+ *    acquired, once more the moment it exists, and again before every write and every flush
+ *    ([GatewayCall.bodyStream], `StoppedBodyStream`). Covered by
+ *    `aStopInTheRegistrationWindowNeverWritesTheBody` and
+ *    `aStopWhileTheConnectionIsBeingStartedEndsThatConnectAtOnce`. This does **not** generalise to
+ *    "a stop at any time after the connection began writes no body": bytes already written, or being
+ *    written when the stop arrives, cannot be recalled.
+ *  * **Not guaranteed: a stop cannot be promised to cover every start window or to end an in-flight
+ *    `connect()` at once.** Once that platform call is running, this implementation has no direct
+ *    handle on it: on its own the call ends only when it returns, fails or times out, and a thread
+ *    interrupt does not abort a blocking socket connect. `disconnect()` may or may not reach it,
+ *    depending on whether the platform has created an engine yet. On Android the connection implementation returns
+ *    immediately from `disconnect()` while no engine exists yet, so a stop inside that window closes
+ *    nothing and the connection starts anyway; in the same implementation the branch where the engine
+ *    does exist routes `disconnect()` to `httpEngine.cancel()`, whose lower layers can cancel the
+ *    connection and close the underlying socket. So the honest statement is that this implementation
+ *    guarantees coverage of neither all start windows nor an immediate end to an in-flight connect. A
+ *    stop that lands between the gate and the running `connect()` therefore may have to wait for that
+ *    call; [GatewayRequest.connectTimeoutMs] bounds one TCP connect attempt, not the whole call, so it
+ *    is not a deadline for that wait. No test claims this branch: a fixture must not be given a
+ *    cancellation hook the platform does not have.
  *
  * Holding [GatewayCall]'s lock across the blocking `connect()` was considered and rejected. It would
  * queue the stop *behind* the very call it wants to end, leaving the socket alive with the stop
- * already requested until that ROM's connect times out. That is strictly worse than the short wait
- * this design costs, so the lock is held only for the decision itself.
+ * already requested until that connect finishes or times out. That is strictly worse than the short
+ * wait this design costs, so the lock is held only for the decision itself.
  */
 class OutboundGateway(
     private val hosts: AllowedHosts,
@@ -347,7 +377,10 @@ class OutboundGateway(
         return try {
             connection.requestMethod = request.method
             // Both values are bounded before they reach the platform: 0 means "wait forever" there,
-            // and an unbounded connect is an unbounded wait for a stop that lands mid-connect.
+            // and an unbounded connect attempt is an unbounded wait for a stop that lands
+            // mid-connect. This bounds that one TCP connect attempt; it is not a deadline for the
+            // whole call, because the TLS handshake, the read and any further route attempt after a
+            // failure each carry their own wait.
             connection.connectTimeout = request.connectTimeoutMs
                 .takeIf { it > 0 }
                 ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
@@ -364,8 +397,9 @@ class OutboundGateway(
                 connection.doOutput = true
                 // The acquisition passes the connection-start gate, so a stop that won the decision
                 // means the stream is never created and the connection behind it never starts; a
-                // stop that lands while the stream is being opened is read by bodyStream's second
-                // checkpoint before the first body byte. Either way not one body byte leaves.
+                // stop that lands while the stream is being opened — even one that let the
+                // connection start — is read by bodyStream's second checkpoint before the first body
+                // byte. Either way the stop is seen before this write begins.
                 call.bodyStream { connection.outputStream }
                     .use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
                 // The body is on the wire; a stop must still catch whatever comes back.
