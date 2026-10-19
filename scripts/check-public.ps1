@@ -23,6 +23,18 @@
   Other local absolute paths ([drive]:\...) are only listed, so the coordinator can look at them
   one by one; they do not change the exit code.
 
+  The coordinator accepted that a known set of commits already recorded in this branch's history
+  stay there without being rewritten. Those commits are listed, one full commit id per line, in an
+  in-repository list file (default: scripts\accepted-history-commits.txt, see
+  -AcceptedHistoryFile). A hit inside one of them is reported as [accepted-history] and is listed,
+  not blocking. The list covers the history only: every file tracked at HEAD is still checked
+  strictly, so a hit at HEAD blocks even when the commit that introduced the text is in the list.
+  A missing list file, a line that is not a full commit id, a list that holds no id, or an id that
+  names no commit of this repository ends the run with exit code 1: reading any of those as
+  "nothing accepted" would turn an accepted history back into a blocking failure without a reason.
+  The list file carries the acceptance date and the reason in '#' comment lines, so a comment never
+  affects the parse.
+
   Output never prints the text that matched: only the category, the file and the line number.
   A local denylist hit is reported as a line number only, without the word. The report prints the
   baseline ref and its SHA, the HEAD SHA and the number of commits in the range, so an empty range
@@ -51,6 +63,13 @@
   Local word list, one word per line, '#' starts a comment. Default:
   <repository>\.local\public-denylist.txt. The file is never committed.
 
+.PARAMETER AcceptedHistoryFile
+  In-repository list of commits whose historical changes are accepted: one full 40-character commit
+  id per line, '#' starts a comment (a whole line, or a trailing one that carries the acceptance
+  date and the reason). Default: <repository>\scripts\accepted-history-commits.txt. Read only when
+  the git history is scanned; -ScanDirectory does not use it. A missing list, a malformed line, an
+  empty list or an id that names no commit here is an error, never a silently empty list.
+
 .PARAMETER Full
   Print every finding instead of the first 20 lines of each category.
 #>
@@ -59,6 +78,7 @@ param(
     [switch]$SelfTest,
     [string]$ScanDirectory = "",
     [string]$DenylistFile = "",
+    [string]$AcceptedHistoryFile = "",
     [switch]$Full
 )
 
@@ -70,6 +90,9 @@ $printLimit = 20
 if ($Full) { $printLimit = 100000 }
 if ([string]::IsNullOrWhiteSpace($DenylistFile)) {
     $DenylistFile = Join-Path $repoRoot ".local\public-denylist.txt"
+}
+if ([string]::IsNullOrWhiteSpace($AcceptedHistoryFile)) {
+    $AcceptedHistoryFile = Join-Path $repoRoot "scripts\accepted-history-commits.txt"
 }
 $directoryMode = -not [string]::IsNullOrWhiteSpace($ScanDirectory)
 
@@ -132,15 +155,16 @@ $sensitiveNames = @(
     "id_rsa", "id_ed25519"
 )
 
-$categoryOrder = @("private-key", "token", "user-path", "sensitive-file", "local-denylist", "unreadable", "local-path")
+$categoryOrder = @("private-key", "token", "user-path", "sensitive-file", "local-denylist", "unreadable", "local-path", "accepted-history")
 $categoryBlocking = @{
-    "private-key"    = $true
-    "token"          = $true
-    "user-path"      = $true
-    "sensitive-file" = $true
-    "local-denylist" = $true
-    "unreadable"     = $true
-    "local-path"     = $false
+    "private-key"      = $true
+    "token"            = $true
+    "user-path"        = $true
+    "sensitive-file"   = $true
+    "local-denylist"   = $true
+    "unreadable"       = $true
+    "local-path"       = $false
+    "accepted-history" = $false
 }
 
 # --- findings -----------------------------------------------------------------
@@ -148,12 +172,41 @@ $categoryBlocking = @{
 $script:findings = @()
 $script:seenFindings = @{}
 
+# Where the current scan unit comes from ("head", "history" or "directory"), and whether the commit
+# under scan is on the accepted-history list. Both travel with the finding, so the report can tell
+# an accepted historical hit from a hit that still blocks. Only a history finding can be accepted,
+# and the accepted list is only consulted for a category that would otherwise block.
+$script:findingScope = "head"
+$script:findingAccepted = $false
+
 function Add-Finding {
     param([string]$Category, [string]$Location)
     $key = $Category + "|" + $Location
     if ($script:seenFindings.ContainsKey($key)) { return }
     $script:seenFindings[$key] = $true
-    $script:findings += [pscustomobject]@{ Category = $Category; Location = $Location }
+    $script:findings += [pscustomobject]@{
+        Category = $Category
+        Location = $Location
+        Scope    = $script:findingScope
+        Accepted = $script:findingAccepted
+    }
+}
+
+# A finding is reported under its own category, except an accepted historical hit: that one is
+# reported under the "accepted-history" category, so the report says "this hit is on the accepted
+# list" instead of "this whole category is tolerated".
+function Get-FindingBucket {
+    param([object]$Finding)
+    if ($Finding.Accepted) { return "accepted-history" }
+    return $Finding.Category
+}
+
+# True when the finding must fail the run: its category blocks and the hit is not an accepted
+# historical one. A hit at HEAD is never accepted, because the list is never consulted there.
+function Test-FindingBlocking {
+    param([object]$Finding)
+    if ($Finding.Accepted) { return $false }
+    return [bool]$categoryBlocking[$Finding.Category]
 }
 
 # --- helpers ------------------------------------------------------------------
@@ -254,6 +307,50 @@ function Read-Denylist {
         $words.Add($word)
     }
     return $words.ToArray()
+}
+
+# Reads the accepted-history list: one full 40-character commit id per line, with '#' starting a
+# comment (the whole line, or a trailing one that carries the acceptance date and the reason; the
+# parse drops everything from the first '#'). Nothing here is silent: a missing file, a line that is
+# not a commit id, a list that holds no id, and an id that names no commit of this repository all
+# end the run with a clear message. A list that quietly read as empty would turn the accepted
+# history back into a blocking failure with no hint about why, which is exactly what this list
+# exists to prevent.
+function Read-AcceptedHistory {
+    param([string]$Path)
+    if (!(Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Stop-WithError "accepted-history list not found: $Path (create it, or pass -AcceptedHistoryFile)"
+    }
+    $accepted = @{}
+    $order = New-Object System.Collections.Generic.List[string]
+    $number = 0
+    foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        $number = $number + 1
+        $text = $line
+        $commentIndex = $text.IndexOf("#")
+        if ($commentIndex -ge 0) { $text = $text.Substring(0, $commentIndex) }
+        $text = $text.Trim()
+        if ($text.Length -eq 0) { continue }
+        if ($text -notmatch '^[0-9a-fA-F]{40}$') {
+            Stop-WithError ("accepted-history list " + $Path + " line " + $number + " is not a full 40-character commit id")
+        }
+        $id = $text.ToLowerInvariant()
+        if ($accepted.ContainsKey($id)) { continue }
+        $accepted[$id] = $true
+        $order.Add($id)
+    }
+    if ($order.Count -eq 0) {
+        Stop-WithError ("accepted-history list " + $Path + " holds no commit id; an empty list is refused instead of being read as 'nothing is accepted'")
+    }
+    # A well-formed id that names no commit is a typo in the list, not an accepted commit: say so
+    # instead of letting it match nothing and have the run fail on that commit later.
+    foreach ($id in $order) {
+        $probe = Invoke-Git @("rev-parse", "--verify", "--quiet", ($id + "^{commit}"))
+        if ($probe.ExitCode -ne 0) {
+            Stop-WithError ("accepted-history list " + $Path + " names " + $id + ", which is not a commit of this repository")
+        }
+    }
+    return [pscustomobject]@{ Path = $Path; Map = $accepted; Order = $order.ToArray() }
 }
 
 # --- self test ----------------------------------------------------------------
@@ -371,11 +468,13 @@ function Invoke-SelfTest {
             @{ Name = "denylist-miss-passes"; Dir = "deny-clean"; Deny = $true; Expect = 0; Category = ""; Forbid = $sampleDenyWord }
         )
 
-        # Known-clean real files: the scanner itself and the two documents that quote its own
-        # patterns. A pass here is the proof that the scanner does not match its own pattern text.
+        # Known-clean real files: the scanner itself, the two documents that quote its own patterns and
+        # the accepted-history list. A pass here is the proof that the scanner does not match its own
+        # pattern text or the list file.
         $knownFiles = @(
             @{ Name = "scanner-does-not-match-itself"; Path = $scriptPath },
             @{ Name = "plan-document-passes"; Path = (Join-Path $repoRoot "docs\reviews\2026-10-18-P2-2b\PLAN.md") },
+            @{ Name = "accepted-history-list-passes"; Path = $AcceptedHistoryFile },
             @{ Name = "work-package-document-passes"; Path = (Join-Path $repoRoot "docs\work-packages\P2-2b-release-ready.md") }
         )
         foreach ($known in $knownFiles) {
@@ -408,6 +507,190 @@ function Invoke-SelfTest {
                 }
             }
             $checks.Add([pscustomobject]@{ Name = $sample.Name; Passed = $passed; Detail = $detail; Output = $result.Text })
+        }
+
+        # --- the accepted-history list against a real git history -----------------
+        #
+        # -ScanDirectory never scans a history, so the list is proven against small throwaway git
+        # repositories: this script is copied into each one (so it finds that repository as its own),
+        # the sample commits are made there and the list files stay outside the repository, where
+        # they cannot make the working tree dirty. The bad text is built from the same fragments as
+        # the samples above, so this file still never carries the pattern it hunts.
+
+        function Read-ChildLog {
+            param([string]$OutFile, [string]$ErrFile)
+            $text = ""
+            if (Test-Path -LiteralPath $OutFile) {
+                $stdout = Get-Content -LiteralPath $OutFile -Raw -Encoding UTF8
+                if ($null -ne $stdout) { $text = $stdout }
+            }
+            if (Test-Path -LiteralPath $ErrFile) {
+                $stderr = Get-Content -LiteralPath $ErrFile -Raw -Encoding UTF8
+                if ($null -ne $stderr) { $text = $text + "`n" + $stderr }
+            }
+            return $text
+        }
+
+        function Invoke-GitInRepo {
+            param([string]$RepoPath, [string[]]$Arguments)
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+                $output = & git -C $RepoPath @Arguments 2>$null
+                $code = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previous
+            }
+            if ($null -eq $code) { $code = -1 }
+            return [pscustomobject]@{ Output = @($output | Where-Object { $null -ne $_ }); ExitCode = $code }
+        }
+
+        function Invoke-RepoChild {
+            param([string]$RepoPath, [string]$AcceptedFile, [int]$Index)
+            $outFile = Join-Path $selfTestRoot ("repo-out-" + $Index + ".txt")
+            $errFile = Join-Path $selfTestRoot ("repo-err-" + $Index + ".txt")
+            $childScript = Join-Path $RepoPath "scripts\check-public.ps1"
+            $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $childScript + '"'))
+            if (![string]::IsNullOrWhiteSpace($AcceptedFile)) {
+                $arguments += @("-AcceptedHistoryFile", ('"' + $AcceptedFile + '"'))
+            }
+            $process = Start-Process -FilePath $hostExe -ArgumentList $arguments -NoNewWindow -Wait -PassThru `
+                -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+            return [pscustomobject]@{
+                ExitCode = $process.ExitCode
+                Text = (Read-ChildLog -OutFile $outFile -ErrFile $errFile)
+            }
+        }
+
+        # One throwaway repository with this script inside it: the copy is committed with the base
+        # commit, so the tree stays clean afterwards (a dirty tree is refused before the history is
+        # scanned, which would make every case here fail for the wrong reason).
+        function New-SampleRepo {
+            param([string]$Name)
+            $repoPath = Join-Path $selfTestRoot $Name
+            New-Item -ItemType Directory -Force -Path (Join-Path $repoPath "scripts") | Out-Null
+            Copy-Item -LiteralPath $scriptPath -Destination (Join-Path $repoPath "scripts\check-public.ps1") -Force
+            foreach ($arguments in @(
+                    @("init", "-q"),
+                    @("config", "user.email", "check-public-selftest@example.invalid"),
+                    @("config", "user.name", "check-public self test"),
+                    @("config", "core.autocrlf", "false"),
+                    @("config", "commit.gpgsign", "false"),
+                    @("symbolic-ref", "HEAD", "refs/heads/main"),
+                    @("add", "-A"),
+                    @("commit", "-q", "-m", "base"),
+                    @("checkout", "-q", "-b", "work"))) {
+                $result = Invoke-GitInRepo -RepoPath $repoPath -Arguments $arguments
+                if ($result.ExitCode -ne 0) { throw ("self test: git " + ($arguments -join " ") + " failed in " + $Name) }
+            }
+            return $repoPath
+        }
+
+        function Save-SampleCommit {
+            param([string]$RepoPath, [string]$Message)
+            foreach ($arguments in @(@("add", "-A"), @("commit", "-q", "-m", $Message))) {
+                $result = Invoke-GitInRepo -RepoPath $RepoPath -Arguments $arguments
+                if ($result.ExitCode -ne 0) { throw ("self test: git " + ($arguments -join " ") + " failed in " + $RepoPath) }
+            }
+            $head = Invoke-GitInRepo -RepoPath $RepoPath -Arguments @("rev-parse", "HEAD")
+            return (@($head.Output) | Select-Object -First 1).Trim()
+        }
+
+        function Add-SampleCommit {
+            param([string]$RepoPath, [string]$RelativePath, [string]$Content, [string]$Message)
+            $samplePath = Join-Path $RepoPath $RelativePath
+            $parent = Split-Path -Parent $samplePath
+            if (!(Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+            [System.IO.File]::WriteAllText($samplePath, $Content, (New-Object System.Text.UTF8Encoding($false)))
+            return Save-SampleCommit -RepoPath $RepoPath -Message $Message
+        }
+
+        function Remove-SampleCommit {
+            param([string]$RepoPath, [string]$RelativePath, [string]$Message)
+            $removed = Invoke-GitInRepo -RepoPath $RepoPath -Arguments @("rm", "-q", "--", $RelativePath)
+            if ($removed.ExitCode -ne 0) { throw ("self test: git rm failed for " + $RelativePath) }
+            return Save-SampleCommit -RepoPath $RepoPath -Message $Message
+        }
+
+        # A list file for one case: comment lines, then one id per line, some with a trailing comment,
+        # because the parse must survive both kinds of comment.
+        function New-Manifest {
+            param([string]$Name, [string[]]$Lines)
+            $manifestPath = Join-Path $selfTestRoot $Name
+            $text = "# accepted-history self-test sample`n" + "# 2026-10-19 a comment never changes the parse`n"
+            foreach ($line in $Lines) { $text = $text + $line + "`n" }
+            [System.IO.File]::WriteAllText($manifestPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+            return $manifestPath
+        }
+
+        # Repository A: the bad line is added and removed again, so HEAD is clean and the hit exists in
+        # the history only - the shape of the commits this list exists for.
+        $historyRepo = New-SampleRepo -Name "accepted-history-repo"
+        $historyForbid = $sampleDrive + ":" + "\" + "Users" + "\" + $sampleUser + "\" + "history-only.txt"
+        $addedSha = Add-SampleCommit -RepoPath $historyRepo -RelativePath "notes/history-only.txt" `
+            -Content ($historyForbid + "`n") -Message "add history sample"
+        $removedSha = Remove-SampleCommit -RepoPath $historyRepo -RelativePath "notes/history-only.txt" -Message "remove history sample"
+
+        # Repository B: the bad line is added and stays at HEAD. The adding commit is on the list, so
+        # the run must still fail: the list never covers a tracked file at HEAD.
+        $headRepo = New-SampleRepo -Name "head-hit-repo"
+        $headForbid = $sampleDrive + ":" + "\" + "Users" + "\" + $sampleUser + "\" + "head-only.txt"
+        $headSha = Add-SampleCommit -RepoPath $headRepo -RelativePath "notes/head-only.txt" `
+            -Content ($headForbid + "`n") -Message "add head sample"
+
+        $baseSha = (@((Invoke-GitInRepo -RepoPath $historyRepo -Arguments @("rev-parse", "main")).Output) | Select-Object -First 1).Trim()
+        $manifestAccepted = New-Manifest -Name "manifest-accepted.txt" -Lines @(
+            ($addedSha + "  # 2026-10-19 accepted: the reason lives in this comment"),
+            ($removedSha + "  # 2026-10-19 accepted: the removal diff carries the same line"))
+        $manifestUnlisted = New-Manifest -Name "manifest-unlisted.txt" -Lines @($baseSha)
+        $manifestHead = New-Manifest -Name "manifest-head.txt" -Lines @($headSha)
+        $manifestBadFormat = New-Manifest -Name "manifest-bad-format.txt" -Lines @("not-a-commit-id")
+        $manifestEmpty = New-Manifest -Name "manifest-empty.txt" -Lines @()
+        $manifestUnknown = New-Manifest -Name "manifest-unknown.txt" -Lines @("f" * 40)
+        $manifestAbsent = Join-Path $selfTestRoot "manifest-absent.txt"
+
+        $repoCases = @(
+            @{ Name = "accepted-history-hit-is-listed"; Repo = $historyRepo; Manifest = $manifestAccepted; Expect = 0
+                MustHave = @("accepted-history"); Forbid = @($historyForbid) },
+            @{ Name = "history-hit-outside-list-fails"; Repo = $historyRepo; Manifest = $manifestUnlisted; Expect = 1
+                MustHave = @("[user-path]"); Forbid = @($historyForbid) },
+            @{ Name = "head-hit-fails-even-if-listed"; Repo = $headRepo; Manifest = $manifestHead; Expect = 1
+                MustHave = @("accepted-history", "[user-path]"); Forbid = @($headForbid) },
+            @{ Name = "missing-accepted-list-fails"; Repo = $historyRepo; Manifest = $manifestAbsent; Expect = 1
+                MustHave = @("accepted-history list not found"); Forbid = @() },
+            @{ Name = "malformed-accepted-list-fails"; Repo = $historyRepo; Manifest = $manifestBadFormat; Expect = 1
+                MustHave = @("is not a full 40-character commit id"); Forbid = @() },
+            @{ Name = "empty-accepted-list-fails"; Repo = $historyRepo; Manifest = $manifestEmpty; Expect = 1
+                MustHave = @("holds no commit id"); Forbid = @() },
+            @{ Name = "unknown-commit-in-list-fails"; Repo = $historyRepo; Manifest = $manifestUnknown; Expect = 1
+                MustHave = @("is not a commit of this repository"); Forbid = @() }
+        )
+
+        foreach ($case in $repoCases) {
+            $index = $index + 1
+            $result = Invoke-RepoChild -RepoPath $case.Repo -AcceptedFile $case.Manifest -Index $index
+            $passed = $true
+            $detail = "exit code $($result.ExitCode), expected $($case.Expect)"
+            if ($result.ExitCode -ne $case.Expect) { $passed = $false }
+            if ($passed) {
+                foreach ($needle in $case.MustHave) {
+                    if ($result.Text.IndexOf($needle, [System.StringComparison]::Ordinal) -lt 0) {
+                        $passed = $false
+                        $detail = "exit code $($result.ExitCode) as expected, but '$needle' was not reported"
+                        break
+                    }
+                }
+            }
+            if ($passed -and $case.Forbid.Length -gt 0) {
+                foreach ($forbidden in $case.Forbid) {
+                    if ($result.Text.IndexOf($forbidden, [System.StringComparison]::Ordinal) -ge 0) {
+                        $passed = $false
+                        $detail = "exit code $($result.ExitCode) as expected, but the matched text was printed"
+                        break
+                    }
+                }
+            }
+            $checks.Add([pscustomobject]@{ Name = $case.Name; Passed = $passed; Detail = $detail; Output = $result.Text })
         }
 
         # The samples must not survive the test: a sample left on disk would be a secret-like file
@@ -494,6 +777,10 @@ if ($directoryMode) {
         Stop-WithError "the working tree has uncommitted changes; this check reports on HEAD and refuses to run on a dirty tree (commit or stash first)"
     }
 
+    # The accepted-history list is read, and refused when it is missing or malformed, before any
+    # scan runs: a list that failed silently would look like "nothing is accepted".
+    $acceptedHistory = Read-AcceptedHistory -Path $AcceptedHistoryFile
+
     # The file list comes from HEAD, not from the index: together with the dirty-tree refusal above,
     # the working tree is identical to HEAD here, so a file's content is the content of the commit
     # under test.
@@ -521,8 +808,13 @@ if ($directoryMode) {
     $range = Invoke-Git @("log", "--format=%H", ($base + "..HEAD"))
     if ($range.ExitCode -ne 0) { Stop-WithError "git log failed for $base..HEAD" }
     $commits = @($range.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    # Only the history is judged against the accepted list, and only for the commits on it: a hit
+    # inside one of those is listed, every other commit keeps its old, blocking verdict.
+    $acceptedInRange = @($commits | Where-Object { $acceptedHistory.Map.ContainsKey($_) })
+    $script:findingScope = "history"
     foreach ($sha in $commits) {
         $shortSha = $sha.Substring(0, 7)
+        $script:findingAccepted = $acceptedHistory.Map.ContainsKey($sha)
         $diff = Invoke-Git @("show", "--format=", "--unified=0", "--no-color", $sha)
         if ($diff.ExitCode -ne 0) { Stop-WithError "git show failed for $shortSha" }
         $units = New-Object System.Collections.Generic.List[object]
@@ -565,15 +857,19 @@ if ($directoryMode) {
         }
         Test-ScanUnits -Units $units.ToArray() -DenyWords $denyWords
     }
+    $script:findingScope = "head"
+    $script:findingAccepted = $false
     Write-Host "check-public: tracked files: $($trackedFiles.Count) ($scannedFiles scanned, $skippedBinary skipped as binary)"
     Write-Host ("check-public: baseline: " + $base + " " + (@((Invoke-Git @("rev-parse", $base)).Output) | Select-Object -First 1))
     Write-Host ("check-public: HEAD: " + (@((Invoke-Git @("rev-parse", "HEAD")).Output) | Select-Object -First 1))
     Write-Host "check-public: history: $($commits.Count) commit(s) in $base..HEAD"
+    Write-Host ("check-public: accepted-history list: " + $acceptedHistory.Path + " (" + $acceptedHistory.Order.Count + " commit(s), " + $acceptedInRange.Count + " inside this range)")
     if ($commits.Count -eq 0) {
         Write-Host "check-public: note: the range is empty because HEAD equals the baseline; an empty range says nothing about the history that was already published"
     } else {
         Write-Host "check-public: note: the range covers every commit between the baseline and HEAD; a commit outside it is not judged here"
     }
+    Write-Host "check-public: note: the accepted-history list covers those commits in the history only; every tracked file at HEAD is still checked strictly"
 }
 
 Write-Host ""
@@ -582,9 +878,17 @@ if ($denyWords.Count -gt 0) { $denyReport = "$($denyWords.Count) word(s)" }
 Write-Host "check-public: local denylist: $denyReport"
 
 # --- report -------------------------------------------------------------------
+#
+# A finding blocks when its category blocks and it is not an accepted historical hit. Accepted hits
+# share one bucket ("accepted-history") in the listings below; the counts by original category are
+# printed at the end, so "user-path" keeps its own number next to the accepted ones.
 
-$blockingFindings = @($script:findings | Where-Object { $categoryBlocking[$_.Category] })
-$listedFindings = @($script:findings | Where-Object { -not $categoryBlocking[$_.Category] })
+$blockingFindings = @($script:findings | Where-Object { Test-FindingBlocking $_ })
+$listedFindings = @($script:findings | Where-Object { -not (Test-FindingBlocking $_) })
+$acceptedCount = @($script:findings | Where-Object { $_.Accepted }).Count
+$historyFindings = @($script:findings | Where-Object { $_.Scope -eq "history" })
+$headFindings = @($script:findings | Where-Object { $_.Scope -eq "head" })
+$historyOutside = @($historyFindings | Where-Object { -not $_.Accepted }).Count
 
 Write-Host ""
 Write-Host "== blocking findings =="
@@ -613,7 +917,7 @@ if ($listedFindings.Count -eq 0) {
     Write-Host "  (none)"
 } else {
     foreach ($category in $categoryOrder) {
-        $entries = @($listedFindings | Where-Object { $_.Category -eq $category })
+        $entries = @($listedFindings | Where-Object { (Get-FindingBucket $_) -eq $category })
         if ($entries.Count -eq 0) { continue }
         Write-Host ("  [{0}] {1} finding(s)" -f $category, $entries.Count)
         $shown = 0
@@ -632,19 +936,34 @@ Write-Host ""
 Write-Host "== summary =="
 Write-Host ("  {0,-16} {1,-8} {2,5}" -f "category", "verdict", "count")
 foreach ($category in $categoryOrder) {
-    $entries = @($script:findings | Where-Object { $_.Category -eq $category })
+    $entries = @($script:findings | Where-Object { (Get-FindingBucket $_) -eq $category })
     $verdict = "listed"
     if ($categoryBlocking[$category]) { $verdict = "blocks" }
     Write-Host ("  {0,-16} {1,-8} {2,5}" -f $category, $verdict, $entries.Count)
+}
+
+# The accepted-history row above is one bucket; the accepted hits still belong to the category whose
+# rule they matched, so that count is printed separately instead of disappearing into the bucket.
+$acceptedByCategory = @()
+foreach ($category in $categoryOrder) {
+    if ($category -eq "accepted-history") { continue }
+    $count = @($script:findings | Where-Object { $_.Accepted -and $_.Category -eq $category }).Count
+    if ($count -gt 0) { $acceptedByCategory += ($category + " " + $count) }
+}
+Write-Host ""
+Write-Host ("check-public: findings by scope: HEAD {0}, history {1}" -f $headFindings.Count, $historyFindings.Count)
+Write-Host ("check-public: accepted-history hits: {0}; history hits outside the list: {1}" -f $acceptedCount, $historyOutside)
+if ($acceptedByCategory.Count -gt 0) {
+    Write-Host ("check-public: accepted-history hits by category: " + ($acceptedByCategory -join ", "))
 }
 
 Write-Host ""
 if ($blockingFindings.Count -gt 0) {
     Write-Host ("check-public: FAIL: {0} blocking finding(s) must be fixed before pushing" -f $blockingFindings.Count) -ForegroundColor Red
     if ($listedFindings.Count -gt 0) {
-        Write-Host ("check-public: {0} local path(s) are listed for review and are not a failure" -f $listedFindings.Count)
+        Write-Host ("check-public: {0} finding(s) are listed for review and are not a failure" -f $listedFindings.Count)
     }
     exit 1
 }
-Write-Host ("check-public: PASS: no blocking finding; {0} local path(s) listed for review" -f $listedFindings.Count)
+Write-Host ("check-public: PASS: no blocking finding; {0} finding(s) listed for review" -f $listedFindings.Count)
 exit 0
