@@ -12,7 +12,20 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
     private val server = ServerSocket(0)
     private val calls = mutableListOf<HttpCall>()
     private val problems = mutableListOf<Throwable>()
+
+    /** HTTP requests that arrived complete enough to have a request line. */
     val count = AtomicInteger()
+
+    /**
+     * TCP connections accepted, whether or not the client ever sent a request line.
+     *
+     * [count] cannot tell "never connected" apart from "connected and hung up without a request",
+     * because the accept itself only shows up when a request line arrives. A test that has to show a
+     * stop before the connection is started needs this counter; a test that tells the two apart
+     * against a real client can open a socket, write nothing, and watch this go up while [count]
+     * stays at zero.
+     */
+    val accepts = AtomicInteger()
 
     val port: Int = server.localPort
 
@@ -28,6 +41,7 @@ class LocalHttp(private val handler: (HttpCall) -> HttpReply) : AutoCloseable {
                     record(problem)
                     break
                 }
+                accepts.incrementAndGet()
                 Thread {
                     // 服务线程的顶层：这里接住一切，不许再往外走。Android 上任意线程的未捕获异常
                     // 都会杀掉整个进程——真机上就是一次 instrumentation 跑不完。
