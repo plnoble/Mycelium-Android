@@ -70,8 +70,7 @@
 5. 原生回 `{count, generated, prompt_ms, generation_ms, cancelled, reusedTokens, readTokens}`。Kotlin 用**原生回的** `reusedTokens/readTokens` 记账（不是自己算的那个数）。
 6. **缓存是否继续可用**的判据（完成、停止、出错各一条）：
    - 正常结束且 `readTokens == tokens.size - reusedTokens`（提示确实读完了）→ `cacheOwner = key`、`cachedPrompt = tokens`；否则作废（见 3.5）。
-   - `key == null` 的轮次：不复用，也不接管缓存 —— 但要把已有的缓存**作废**吗？不：`null` 只是「这一轮别复用」，已有缓存留给下一次带键的轮次仍然安全（前缀比对会兜住）。实现上把「null 轮次」当成「`reuse = 0` 的一轮」，完成后按上一条更新 `cachedPrompt = tokens`（`cacheOwner` 保持原样，不要被 null 覆盖），这样「不传键行为完全一样」只体现在**不复用**上。
-     - 保守起见先选更简单的口径（写进实现注释）：**`key == null` 的轮次既不读也不写缓存状态**，`cacheOwner`/`cachedPrompt` 原样不动。这样「不传键 = 完全不影响缓存状态」，最容易论证，也好写测例。
+   - `key == null` 的轮次：**不复用，也不读不写缓存状态**（`cacheOwner`/`cachedPrompt` 原样不动）。这样「不传键 = 完全不影响缓存状态也完全不复用」，最容易论证，也好写测例。
 
 C++ 侧（`engine.cpp`）：
 
@@ -128,25 +127,25 @@ C++ 侧（`engine.cpp`）：
 
 **第 1 步（任务书第 1、5 步）引擎保留缓存 + 统计**
 - 改 `EngineBridge`/`NativeBridge`：加 `tokenize()`、`generate` 加 `reuseTokens`、数组改 7 项。
-- `LocalModelEngine`：加 `cachedPrompt`/`cacheOwner`/`loadedModelId`（本步先不接键，只按「同模型内允许比对」跑）；写「最长公共前缀 + 三道夹」。
+- `model-api`：`GenerationParameters` 加 `cacheKey: String? = null` + 校验 —— **复用的闸门就是它**，所以第 1 步就得先把它加上，否则「复用」没有开关、「不传键行为完全一样」也无法从第一个提交起成立。（键本身的校验测例也在本步。）
+- `LocalModelEngine`：加 `cachedPrompt`/`cacheOwner`；写「最长公共前缀 + 三道夹」；**键为 null 时 `reuse = 0`，且不读也不写缓存状态**。
 - `GenerationStats` 加 `reusedPromptTokens`/`readPromptTokens`；`lastStats` 用原生读数。
 - 改 `engine.cpp`：`tokenize` JNI、`generate` 加 `jint reuseTokens`、`llama_memory_seq_rm` 裁剪 + `clear` 退回、`readTokens`/7 项返回、`load`/`clear` 清状态。
 - 改 `llm/README.md` 里「每次生成先清空 KV」那句。
-- 测例（新文件 `llm/src/test/java/.../PromptCacheTest.kt` 或并入现文件，用假桥）：
-  - `reusesTheCommonPrefixOfTheSamePrompt`：同一段提示连发两轮 → 第二轮桥收到的 `reuseTokens` = 公共前缀长度、`readPromptTokens` = 差额、`reusedPromptTokens` = 复用数。
+- 测例（新文件 `llm/src/test/java/.../PromptCacheTest.kt`，用假桥）：
+  - `reusesTheCommonPrefixOfTheSamePrompt`：同一段提示同一个键连发两轮 → 第二轮桥收到的 `reuseTokens` = 公共前缀长度、`readPromptTokens` = 差额、`reusedPromptTokens` = 复用数。
   - `growsOnlyOverTheNewTail`：第二轮多了一问一答 → 复用数 = 上一轮提示的完整长度（前缀没变的部分），实读数 = 新增部分的长度。
-  - `neverReusesMoreThanTheCachedPrefix` / `alwaysLeavesAtLeastOneTokenToDecode`：夹子生效（假桥故意报回不一致的读数时也能看出夹住了）。
+  - `neverReusesMoreThanTheCachedPrefix` / `alwaysLeavesAtLeastOneTokenToDecode`：夹子生效。
   - `promptMillisCountsOnlyTheReadPart`：计时口径。
-- 判别力：把公共前缀算成「整段长度」→ 上面第 2 条变红；把夹子去掉 → 第 3 条变红。两次都还原后重跑全绿。
+  - `noCacheKeyNeverReusesAndLeavesTheCacheAlone`：不传键连发两轮 → 两轮都整段读；随后带键的一轮仍能复用（证明 null 轮次没搅乱状态）。
+- 判别力：把公共前缀算成「整段长度」→ 上面第 2 条变红；把夹子去掉 → 第 3 条变红；把 null 闸门去掉 → 第 5 条变红。还原后重跑全绿。
 
-**第 2 步（任务书第 2、3 步）缓存键与失效**
-- `model-api`：`GenerationParameters` 加 `cacheKey: String? = null` + 校验；`ChatModelTest` 补键的校验测例（空串/超长被拒；默认 null）。
-- `LocalModelEngine`：键相同才允许比对；键不同 → 清状态并接管；`load()`/`unload()` 一律清；`key == null` 的轮次不读不写缓存状态。
+**第 2 步（任务书第 2 步）什么时候必须整段重读**
+- `LocalModelEngine`：键不同 → 清状态并接管；`load()`/`unload()` 一律清；历史被截断（前缀变短）→ 只复用真实公共前缀。
 - 测例：
   - `aDifferentCacheKeyStartsFromScratch`：键不同（提示前缀相同）→ 第二轮 `reuseTokens == 0`。
   - `aReloadStartsFromScratch`：`load()` 另一个模型（或同一个模型再 `load`）→ `reuseTokens == 0`。
   - `anUnloadStartsFromScratch`。
-  - `noCacheKeyNeverReusesAndLeavesTheCacheAlone`：不传键连发两轮 → 两轮都是整段读；随后带键的一轮仍能复用（证明 null 轮次没把状态搅乱）。
   - `aTruncatedPromptReusesOnlyTheUnchangedPrefix`：把最老的轮次丢掉 → 复用数 = 新的公共前缀长度（人物设定那段仍在），不等于上一轮提示长度。
 - 判别力：把键比较写成恒真 → 第 1 条变红；把 `load` 的清状态去掉 → 第 2 条变红。
 
