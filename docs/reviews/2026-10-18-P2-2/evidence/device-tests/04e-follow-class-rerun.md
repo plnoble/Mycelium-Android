@@ -43,10 +43,14 @@
 | `04b` | 测例已改 + 判据改回旧语义（一行 mutation，第 3 节） | `Tests run: 10, Failures: 1` —— 判别力实证 |
 | `04c` | 测例已改 + 实现还原（`git diff` 只剩测例文件） | `OK (10 tests)`，`Time: 11.234` |
 | `04d` | 同 `04c` 重复一次 | `OK (10 tests)`，`Time: 11.278` |
-| `04g` | 同 `04c`，跑全量（不带 `-e class`） | #1–#11 与 #12–#14 通过（**#11 通过，1045ms**），#15 跑到 356ms 时进程被 `Broken pipe` 带走，后面 10 例没跑 |
+| `04g` | 同 `04c`，跑全量（不带 `-e class`） | 前 15 例里 **12 通过**（含 **#11 通过，1045ms**）、**#4 assumption 跳过**（`code=-4`，5ms）、**#10 失败**（10ms，本地模型未登记）、**#15 在 356ms 时被 `Broken pipe` 带走（进程崩溃）**，其后 10 例（#16–#25）未运行（逐例见 `04g-full-suite-after-test-fix-timings.md`） |
 
-主机侧守卫（`scripts/guards.ps1`，2 分钟日志不增长就 force-stop）在四轮里都判
-`DONE … run finished normally`：没有触发冻结器、没有 force-stop（`04f-guards-follow-class.txt`）。
+主机侧守卫（**当时那一版** `scripts/guards.ps1`，2 分钟日志不增长就 force-stop）在四轮里都写了
+`DONE … run finished normally`，四轮都没有 force-stop（`04f-guards-follow-class.txt`）。**但那一版脚本的
+`DONE` 只表示「日志里出现了任意一个 `INSTRUMENTATION_CODE`」，不能当「正常跑完」的证据**——`04f` 的
+`== E ==` 对应的就是本表的 `04g`，它实际以 `CODE: 0` + `Process crashed.` 收场；冻结检测那一半当时也因
+`$pid` 与 WCHAN 解析缺陷从未真正生效（见 `README.md` 第 4.1 节）。脚本已在 2026-10-19 修好，并做了样例驱动的
+文本级验证（`guards-selftest.ps1`）。
 
 ## 2. 两例的失败原文
 
