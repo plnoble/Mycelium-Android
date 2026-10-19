@@ -37,6 +37,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -357,6 +358,14 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
     val setText: (String) -> Unit = { value -> if (inTest) testText = value else immersiveText = value }
     var historyOpen by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<HearthConversation?>(null) }
+    // 会话段身份（P2-2 复审 r3 第 5 条）：每次「切走这一段对话」的导航 +1，落库（null → 真实 ID）
+    // 不动它。ChatTimeline 只按它判断要不要重置跟随，不再用「null + 消息为空」猜首次落库。
+    var conversationSegment by remember(character.id) { mutableLongStateOf(0L) }
+    // 导航到另一段对话：先记下这次切换，再交给 ViewModel。新对话、切模式、打开历史都走这里。
+    val navigate: (() -> Unit) -> Unit = { action ->
+        conversationSegment += 1L
+        action()
+    }
     // Leaving test mode takes its draft with it.
     LaunchedEffect(state.mode) { if (state.mode != HearthMode.TEST) testText = "" }
     // A turn that produced nothing puts its question back here, so stopping early loses nothing.
@@ -374,13 +383,13 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                 if (character.modelKind == ModelKind.CLOUD) {
                     Text("云端", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
-                TextButton(onClick = vm::newConversation) { Text("新对话") }
+                TextButton(onClick = { navigate(vm::newConversation) }) { Text("新对话") }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("沉浸模式", style = MaterialTheme.typography.bodySmall)
                 Switch(
                     checked = state.mode == HearthMode.TEST,
-                    onCheckedChange = { on -> vm.setMode(if (on) HearthMode.TEST else HearthMode.IMMERSIVE) },
+                    onCheckedChange = { on -> navigate { vm.setMode(if (on) HearthMode.TEST else HearthMode.IMMERSIVE) } },
                 )
                 Text("测试模式", style = MaterialTheme.typography.bodySmall)
             }
@@ -403,7 +412,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                             Text(
                                 conversation.title.ifBlank { "未命名" },
                                 modifier = Modifier.weight(1f).clickable {
-                                    vm.openConversation(conversation.id)
+                                    navigate { vm.openConversation(conversation.id) }
                                     historyOpen = false
                                 },
                             )
@@ -422,6 +431,7 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             greeting = character.greeting,
             character = character,
             conversationId = state.openConversation,
+            conversationSegment = conversationSegment,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
         if (!state.busy && !state.historyLoading && state.messages.lastOrNull()?.role == ChatRole.ASSISTANT) {
@@ -476,7 +486,12 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
             title = { Text("删除这段对话？") },
             text = { Text("「${conversation.title.ifBlank { "未命名" }}」里的消息会一起删除。") },
             confirmButton = {
-                TextButton(onClick = { vm.deleteConversation(conversation.id); removing = null }) { Text("删除") }
+                TextButton(onClick = {
+                    // 删掉的正是当前这段对话：下一页会是别的对话或新对话，算一次导航。
+                    if (conversation.id == state.openConversation) conversationSegment += 1L
+                    vm.deleteConversation(conversation.id)
+                    removing = null
+                }) { Text("删除") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } },
         )
@@ -503,7 +518,7 @@ internal fun LazyListState.isAtContentBottom(): Boolean {
 }
 
 /**
- * 一段对话的跟随状态（P2-2 复审 r2 第 6 条）。状态和「谁在改它」绑在同一份对象上：手势协程引用
+ * 一段对话的跟随状态（P2-2 复审 r2 第 6 条，r3 第 5 条）。状态和「谁在改它」绑在同一份对象上：手势协程引用
  * 的是这个对象本身，而不是某一次组合里的局部变量，所以换会话以后不会再写到上一段对话的状态里。
  */
 private class TimelineFollowState {
@@ -513,28 +528,33 @@ private class TimelineFollowState {
     var followTail by mutableStateOf(true)
     var userDragging by mutableStateOf(false)
     var dragSessions by mutableIntStateOf(0)
-    // 上一次认到的会话 ID，以及那一段屏幕上有没有消息。普通字段：它们只是认领时的依据，
+    // 上一次认到的会话段身份：会话 ID 加上上层给的段序号。普通字段：它们只是认领时的依据，
     // 不该因为写入而触发重组。
     private var knownConversationId: String? = null
-    private var knownHadMessages = false
+    private var knownSegment: Long? = null
 
     /**
-     * 按当前这一帧的参数认领这段对话。判定依据：
-     * - ID 没变：还是同一段对话（包括它落库前后的 null 与真实 ID 两种写法），状态照旧。
-     * - null → 真实 ID：这是这一段对话第一次落库。沉浸模式下它还没存过任何一轮，屏幕上也只有
-     *   这一条正在写的回答，用户上翻的位置必须保留，所以不重置。屏幕上已经有消息却还挂在 null 上
-     *   的，是「测试模式 · 不留记录」的临时内容（沉浸模式下 null 时消息列表一定是空的），它换成
-     *   真实会话时算换了一段。
-     * - 真实 ID → 另一段真实 ID，或真实 ID → null（新对话、清空、切测试模式）：真的换了，重置。
+     * 按当前这一帧的身份认领这段对话（P2-2 复审 r3 第 5 条）。判据只有上层的会话段身份，
+     * 不再看「ID 是不是 null、消息列表是不是空」：
+     * - [conversationSegment] 没变：还是同一段对话。ID 从 null 变成真实值是这一段第一次落库
+     *   （沉浸模式下它还没存过任何一轮，屏幕上只有正在写的这条回答），用户上翻的位置必须保留。
+     * - [conversationSegment] 变了：导航到了另一段对话——新对话、清空、切测试模式、打开别的历史，
+     *   一律重置。哪怕切走前这一段还没落库（ID 是 null、消息为空）也一样；r3 第 5 条的窗口正是
+     *   把这种「未保存的新对话切到历史」误判成了首次落库。
+     * 兜底：上层漏给新段序号时，真实 ID 之间的切换、真实 ID → null 仍按切换处理。数据库里的落库
+     * 只会把 null 写成真实 ID，不会把一个真实 ID 换成另一个，所以这两条不是「首次落库」。
      */
-    fun claim(conversationId: String?, hasMessages: Boolean) {
+    fun claim(conversationId: String?, conversationSegment: Long) {
         val previousId = knownConversationId
-        val previousHadMessages = knownHadMessages
+        val previousSegment = knownSegment
         knownConversationId = conversationId
-        knownHadMessages = hasMessages
-        if (previousId == conversationId) return
-        if (previousId == null && conversationId != null && !previousHadMessages) return
-        reset()
+        knownSegment = conversationSegment
+        if (previousSegment == null) return // 第一次认领：状态本来就是新的一段。
+        if (previousSegment != conversationSegment) {
+            reset()
+            return
+        }
+        if (previousId != null && previousId != conversationId) reset()
     }
 
     /** 回到「跟着最新一条走」的起点。 */
@@ -551,7 +571,9 @@ private class TimelineFollowState {
  * 状态一直粘着，只有用户自己回到底部才恢复跟随，流式追加新内容不会把它改回去。
  *
  * 跟随状态属于「这一段对话」，不属于会话 ID：会话 ID 会在第一次回答落库时从 null 变成真实值
- * （P2-2 复审 r2 第 6 条），那不是换会话。判断和重置都交给 [TimelineFollowState.claim]。
+ * （P2-2 复审 r2 第 6 条），那不是换会话。身份由上层一起给出：[conversationId] 加
+ * [conversationSegment]——后者每次导航 +1、落库不动它，所以「首次落库」和「导航切走」不用再
+ * 靠「null + 消息为空」猜（P2-2 复审 r3 第 5 条）。判断和重置都交给 [TimelineFollowState.claim]。
  */
 @Composable
 internal fun ChatTimeline(
@@ -561,16 +583,17 @@ internal fun ChatTimeline(
     greeting: String,
     character: HearthCharacter,
     conversationId: String?,
+    conversationSegment: Long,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
     // 换人物就换一份状态；会话身份真的变了由 claim 就地重置（首次落库不算）。手势协程引用的是
     // 这份对象本身，所以它改的永远是当前这一段对话的状态，不会像过去那样抓住上一段的旧状态。
     val follow = remember(listState, character.id) { TimelineFollowState() }
-    // 认领这一段对话：会话 ID、或者「这一段屏幕上有没有消息」变了就重新认一次。它放在最前面，
-    // 换会话时状态先重置好，后面的协程再按新的一段跑。
-    LaunchedEffect(follow, conversationId, messages.isNotEmpty()) {
-        follow.claim(conversationId, messages.isNotEmpty())
+    // 认领这一段对话：会话 ID 或上层的段序号变了就重新认一次（段序号由上层在每次导航时 +1）。
+    // 它放在最前面，换会话时状态先重置好，后面的协程再按新的一段跑。
+    LaunchedEffect(follow, conversationId, conversationSegment) {
+        follow.claim(conversationId, conversationSegment)
     }
     // isScrollInProgress 连程序自己的滚动动画也算，所以「谁在滚」只看列表收到的拖拽手势。
     LaunchedEffect(listState, follow) {

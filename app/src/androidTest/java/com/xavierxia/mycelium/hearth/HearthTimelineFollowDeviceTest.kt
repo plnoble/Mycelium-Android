@@ -39,6 +39,8 @@ class HearthTimelineFollowDeviceTest {
     private var messages: List<HearthMessage> by mutableStateOf(emptyList())
     private var streaming: String? by mutableStateOf(null)
     private var conversationId: String? by mutableStateOf("a")
+    // 上层的会话段身份（P2-2 复审 r3 第 5 条）：每次导航 +1，落库不动它。
+    private var conversationSegment: Long by mutableStateOf(0L)
 
     private val character = HearthCharacter(
         id = "c1",
@@ -70,6 +72,7 @@ class HearthTimelineFollowDeviceTest {
                 greeting = character.greeting,
                 character = character,
                 conversationId = conversationId,
+                conversationSegment = conversationSegment,
                 modifier = Modifier.fillMaxSize(),
                 listState = listState,
             )
@@ -119,6 +122,17 @@ class HearthTimelineFollowDeviceTest {
     }
 
     private fun atBottom(): Boolean = listState.isAtContentBottom()
+
+    /**
+     * 上层的导航：换到另一段对话，会话段身份 +1（真实调用点是 HearthSpace 里的 `navigate`，打开历史、
+     * 新对话、切模式都走它）。首次落库不是导航，段身份不动。
+     */
+    private fun navigateTo(id: String?, nextMessages: List<HearthMessage>, nextStreaming: String? = null) {
+        conversationSegment += 1L
+        conversationId = id
+        messages = nextMessages
+        streaming = nextStreaming
+    }
 
     /** 不带容差：内容底边真的在视口里，一行都没被挡在下面。 */
     private fun tailVisible(): Boolean {
@@ -242,8 +256,7 @@ class HearthTimelineFollowDeviceTest {
         userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
         assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
 
-        conversationId = "b"
-        messages = longHistory(20) + assistantMessage("B 里最后一条")
+        navigateTo("b", longHistory(20) + assistantMessage("B 里最后一条"))
         settle()
         assertTrue("换对话以后应该看到新那段的最新一条：${viewport()}", tailVisible())
         rule.onNodeWithText("B 里最后一条").assertIsDisplayed()
@@ -266,8 +279,7 @@ class HearthTimelineFollowDeviceTest {
         assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
 
         // 换到 B：状态按新的一段重建，先跟到底部。
-        conversationId = "b"
-        messages = longHistory(20) + assistantMessage("B 里最后一条")
+        navigateTo("b", longHistory(20) + assistantMessage("B 里最后一条"))
         settle()
         assertTrue("换对话以后应该跟到新那段的最新一条：${viewport()}", tailVisible())
 
@@ -287,9 +299,13 @@ class HearthTimelineFollowDeviceTest {
     /**
      * P2-2 复审 r2 第 6 条第二个窗口：第一次回答落库时，会话 ID 从 null 变成数据库 ID，那不是
      * 换会话。改前会被当成切换，把用户在这条长回答里的上翻状态重置掉，视口又被拉回底部。
+     *
+     * P2-2 复审 r3 第 5 条后判据换成会话段身份：落库**不动**段序号，所以这里全程不碰
+     * [conversationSegment]；换成 r3 第 5 条那种「未保存的新对话 → 已有历史 B」的导航时，
+     * 上层会把段序号 +1（见 openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail）。
      */
     @Test
-    fun theFirstSavedAnswerKeepsAnUpScrolledViewport() {
+    fun theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport() {
         conversationId = null
         messages = emptyList()
         streaming = longAnswer(60)
@@ -303,7 +319,7 @@ class HearthTimelineFollowDeviceTest {
         assertTrue("用户应该停在长回答中间：${viewport()}", listState.firstVisibleItemScrollOffset > 0)
         assertFalse("用户上翻以后不该还算在底部：${viewport()}", atBottom())
 
-        // 第一次落库：会话 ID 从 null 变成真实 ID，回答同时也进了消息列表。这不是换会话。
+        // 第一次落库：会话 ID 从 null 变成真实 ID，回答同时也进了消息列表。段序号不动，这不是换会话。
         conversationId = "saved-1"
         messages = listOf(userMessage("第一问"), assistantMessage(longAnswer(60)))
         streaming = null
@@ -317,6 +333,40 @@ class HearthTimelineFollowDeviceTest {
         streaming = longAnswer(30, prefix = "第二轮在写")
         settle()
         assertEquals("首次落库后上翻状态没保持住：${viewport()}", firstAfter, measuredFirst())
+    }
+
+    /**
+     * P2-2 复审 r3 第 5 条（新回归）：未保存的新对话里，首轮长回答还在流式生成、用户已经上翻，
+     * 这时打开一段已有历史 B。旧判据只看「原 ID 是 null、原消息列表为空」，把这次导航也当成
+     * 首次落库，于是保留 followTail=false，B 的最新内容不再自动跟随。
+     *
+     * 断言：段身份 +1（导航）以后必须重置——视口跟到 B 的末尾（`tailVisible()`），B 里后来
+     * 到达的内容也继续自动跟随。
+     */
+    @Test
+    fun openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail() {
+        conversationId = null
+        messages = emptyList()
+        streaming = longAnswer(60)
+        setContent()
+
+        // 摆成「用户在还没落库的新对话里、跟着这条长回答上翻」的样子。
+        rule.runOnIdle { listState.requestScrollToItem(0, 100_000) }
+        settle()
+        userScrollsBack(pixels = 700f, durationMillis = 5_000)
+        assertFalse("用户上翻以后不该还在底部：${viewport()}", atBottom())
+
+        // 打开已有历史 B：这是导航（上层段身份 +1），不是这段新对话的首次落库。
+        navigateTo("b", longHistory(20) + assistantMessage("B 的最后一条"))
+
+        assertTrue("打开已有历史 B 以后必须跟到 B 的末尾：${viewport()}", tailVisible())
+        rule.onNodeWithText("B 的最后一条").assertIsDisplayed()
+
+        // B 里后来的内容也要继续跟着走：旧判定会让这里停在原地上不动。
+        messages = messages + assistantMessage("B 里又到一条")
+        settle()
+        assertTrue("B 里的新内容没有自动跟随：${viewport()}", tailVisible())
+        rule.onNodeWithText("B 里又到一条").assertIsDisplayed()
     }
 
     /**
@@ -335,12 +385,34 @@ class HearthTimelineFollowDeviceTest {
         assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
 
         // 换成另一段对话，消息条数一模一样。
-        conversationId = "b"
-        messages = longHistory(20) + assistantMessage("B 的最后一条")
+        navigateTo("b", longHistory(20) + assistantMessage("B 的最后一条"))
         settle()
 
         assertNotEquals("换会话以后视口还停在 A 的位置：${viewport()}", indexBefore, listState.firstVisibleItemIndex)
         assertTrue("换会话以后应该跟到 B 的最新一条：${viewport()}", tailVisible())
+        rule.onNodeWithText("B 的最后一条").assertIsDisplayed()
+    }
+
+    /**
+     * 兜底：上层漏给新段序号时，真实 ID 之间的切换照样算导航——数据库里的落库只会把 null 写成
+     * 真实 ID，不会把一个真实 ID 换成另一个，所以这不是「首次落库」。
+     */
+    @Test
+    fun switchingConversationIdsWithinTheSameSegmentStillResets() {
+        conversationId = "a"
+        messages = longHistory(20) + assistantMessage("A 的最后一条")
+        setContent()
+        assertTrue("一开始应该跟到底部：${viewport()}", atBottom())
+
+        userScrollsBack(pixels = 1_500f, durationMillis = 6_000)
+        assertFalse("用户应该已经离开底部：${viewport()}", atBottom())
+
+        // 段序号故意不动，只把 ID 换成另一个真实 ID（A → B）。
+        conversationId = "b"
+        messages = longHistory(20) + assistantMessage("B 的最后一条")
+        settle()
+
+        assertTrue("同一段里换到另一个真实 ID 没有重置：${viewport()}", tailVisible())
         rule.onNodeWithText("B 的最后一条").assertIsDisplayed()
     }
 
