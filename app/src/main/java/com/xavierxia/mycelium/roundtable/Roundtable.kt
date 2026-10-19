@@ -30,7 +30,7 @@ class Roundtable(context: Context) {
             context.contentResolver.openInputStream(uri)?.use { it.readAtMost(MAX_WHOLE_PACK_BYTES) }
                 ?: return ImportOutcome.Rejected("没有读到选择的文件")
         } catch (rejected: PackTooLarge) {
-            return ImportOutcome.Rejected(rejected.message ?: "角色包太大")
+            return ImportOutcome.Rejected(rejected.message ?: "人物包太大")
         } catch (failure: Exception) {
             return ImportOutcome.Rejected("没有读到选择的文件")
         }
@@ -61,7 +61,7 @@ class Roundtable(context: Context) {
 /** Same ceiling as one zip entry. The whole file is read before unzipping, so it is capped here too. */
 internal const val MAX_WHOLE_PACK_BYTES = 64L * 1024 * 1024
 
-private class PackTooLarge : Exception("角色包超过 64 MB，没有导入")
+private class PackTooLarge : Exception("人物包超过 64 MB，没有导入")
 
 private fun InputStream.readAtMost(limit: Long): ByteArray {
     val output = ByteArrayOutputStream()

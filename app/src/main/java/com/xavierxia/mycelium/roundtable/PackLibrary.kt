@@ -55,7 +55,7 @@ class PackLibrary(private val root: File, private val schemaJson: String) {
         val pack = try {
             readPersonaPack(bytes, schemaJson, openDatabase)
         } catch (error: PackRejected) {
-            return ImportOutcome.Rejected(error.message ?: "角色包没有通过校验")
+            return ImportOutcome.Rejected(error.message ?: "人物包没有通过校验")
         }
         val existing = readIndex()
         val same = existing.firstOrNull {
