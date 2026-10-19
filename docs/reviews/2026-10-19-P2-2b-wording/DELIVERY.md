@@ -28,18 +28,25 @@
 
 ## 验证
 
-- **JVM 测试（本包门禁）**：在全新 worktree 里对已提交版本 `f1bb2d8` 跑 `scripts/check-all.ps1 -SkipLlamaPrepare`，原始输出见同目录 `check-all.txt`，退出码 `check-all-exit.txt`。结果：**已通过**。
+- **JVM 测试（本包门禁）**：在全新 worktree 里跑 `scripts/check-all.ps1 -SkipLlamaPrepare` 两轮，原始输出见同目录 `check-all.txt`（最新一轮）、`check-all-exit.txt`。结果：**两轮都通过**。
+
+  | 轮次 | 被验提交 | 内容 | 结果 |
+  |---|---|---|---|
+  | 第 1 轮 | `f1bb2d8` | 界面 5 处 + 运行时提示 3 处 + 断言 + 发版说明 | PASS（253 任务执行、20 up-to-date） |
+  | 第 2 轮 | `4da756c` | 加改 `:contract` 8 句报错文字（统筹同意 A） | PASS（32 任务执行、241 up-to-date） |
+
+  两轮的数字一致：
 
   | 项 | 结果 |
   |---|---|
-  | gradle 退出码 | 0（253 个任务执行、20 个 up-to-date） |
+  | gradle 退出码 | 0 |
   | 单元测试 | **316 个用例，0 失败、0 错误** —— `:app` 170、`:contract` 22、`:hearth` 39、`:llm` 11、`:model-api` 3、`:net` 43、`:roundtable` 28 |
   | lint | `:app` debug 0 错 0 警；release 0 错 0 警 |
-  | 产物 | `app-debug.apk` 59.7 MiB（已签名）、`app-debug-androidTest.apk` 2.7 MiB（已签名）、`app-release-unsigned.apk` 38.9 MiB（未签名） |
+  | 产物 | `app-debug.apk` 59.7–59.8 MiB（已签名）、`app-debug-androidTest.apk` 2.7 MiB（已签名）、`app-release-unsigned.apk` 38.9 MiB（未签名） |
   | 警告 | 待修警告 0；llama.cpp 约定豁免 0；Kotlin 编译错误 0 |
   | 结论 | **PASS：0 失败、0 警告、exit 0** |
 
-  取证口径：门禁报告自记「commit f1bb2d8」；跑完当时 `git status --porcelain` 只有本证据目录是未跟踪的（`?? docs/reviews/2026-10-19-P2-2b-wording/`），也就是**代码树正好是 `f1bb2d8`**，没有夹带未提交的代码改动。
+  取证口径：门禁报告分别自记「commit f1bb2d8」「commit 4da756c」；两轮跑完当时 `git status --porcelain` 都只有本证据目录是未跟踪的（`?? docs/reviews/2026-10-19-P2-2b-wording/`），也就是**代码树正好是被验提交**，没有夹带未提交的代码改动。`docs/tracks/开发线.md` 的记录提交（`13dc3c6`）只动文档，不影响门禁结论；P2-2b 全量审时还会在合并后的分支上再跑一次。
 - **界面断言**：`MainActivityTest` 里断言「导入人物包」与「在电脑版知衍的人物页导出人物包，传到手机后在这里导入。」，随 `:app` 的 170 个用例一起跑过（0 失败）。
 - **真机测试**：**未跑**。本次只改界面文字，不涉及权限、网络、存储、安装路径或布局，不需要真机；按安卓侧规则，真机与 JVM 结果分开写，这里不拿环境结果冒充真机。
 - **环境说明**：全新 worktree 里 `llm/vendor/` 不随仓库（`.gitignore` 第 43 行 `llm/vendor/`），所以：① 从主检出已准备好的那棵树复制了 169 MB 的 llama.cpp 源码进本 worktree，用 `-SkipLlamaPrepare` 跑；这份复制**不提交**、不进版本库。② `JAVA_HOME=D:\Development\Android-studio\jbr`（OpenJDK 25.0.3，见 `docs/tracks/A-圆桌.md` 记的路径）、`ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`；这两个环境变量在本机 shell 里默认是空的，门禁开头会直接退出，必须在跑之前显式设置。
