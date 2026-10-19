@@ -145,8 +145,10 @@
 - **真机四类九例全过**（runner `com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`）：
   `HearthCloudStopDeviceTest` `OK (1 test)` 8.316 s、`HearthCloudReconfirmDeviceTest` `OK (1 test)` 3.537 s、
   `HearthNavigationDuringTurnDeviceTest` `OK (2 tests)` 3.339 s、`HearthTimelineFollowDeviceTest` `OK (5 tests)` 5.804 s。
-  **这四段输出当时没有落盘成文件**（复审 `REVIEW-r2.md` 第 7 条已指出）：仓库与证据目录里搜不到，只能按 4.3
-  的复跑命令自行复现；本报告这一行属**当时会话转述、无法独立复核**。
+  **这四段输出（2026-10-18 22:35 那一轮）本身仍未落盘成文件**（复审 `REVIEW-r2.md` 第 7 条已指出），本报告
+  这一行仍属**当时会话转述、无法独立复核**。**2026-10-19 补**：这四个类此后又做过一次「有界化」复跑，原始
+  输出已按类归档（`docs/reviews/2026-10-18-P2-2/evidence/device-tests/`，39 个文件），覆盖 4.4 列出的四个类，
+  逐例结果与限制见 **4.6**；那是另一次运行，不是 22:35 那一轮。
 - **正式版对照**：装调试包前后 `dumpsys package com.xavierxia.mycelium` 的读数一致——`versionName=0.1.1`、
   `versionCode=2`、`lastUpdateTime=2026-10-10 05:23:04`、`firstInstallTime=2026-10-10 05:14:52`。但这次
   **同样没有把 `dumpsys` 原文落盘归档**：仓库、`p2-2-work` 与正式证据目录里都搜不到任何 P2-2 时点的
@@ -162,22 +164,25 @@
 「改坏 → 只跑相关用例 → 抓失败原文 → 还原 → 复绿」重跑并归档的原文，用的都是**已入库的 JVM 用例**）；
 **第 2 条只有临时 JVM 复刻件**（Robolectric + JDBC 的最小复刻件，本轮临时新写、**未入库到源码树**，源码归档在
 `evidence/r3-logs/item2-probe-source.kt`；它证明那两条断言对这段守卫有判别力，**不等于已入库的真机用例在本机
-跑红过**）；**第 5、6 条为原则通过、无额外实证**（r3 维持通过，本轮没有另做变异实验）；**第 8 条本轮没有取得
-判别力证据**（只有真机用例，`TimelineFollowState` 是 `HearthSpace.kt` 的文件私有类、判别点是 Compose 协程的 key，
-JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」）；**真机 androidTest 的运行输出仍未归档**。
+跑红过**）；**第 5、6 条为原则通过、无额外实证**（r3 维持通过，本轮没有另做变异实验）；**第 8 条「首次保存 vs
+导航」那一半 2026-10-19 已在真机上取得实证，「手势协程与状态同键」那一半仍无变异实验**（`TimelineFollowState`
+是 `HearthSpace.kt` 的文件私有类、判别点是 Compose 协程的 key，JVM 侧无对应测例可跑；不是「改坏却不红」，
+是「没跑成」，故那一半标**未验证**）；**真机 androidTest 的运行输出此后已归档**（2026-10-19
+的有界化复跑，`evidence/device-tests/`，39 个文件；见 4.6。归档的是 2026-10-19 那一轮，不是 2026-10-18 22:35 那一轮）。
 上述归档文件为 **`docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`**（原始控制台输出与失败
-摘要在同目录 `evidence/r3-logs/`），逐条边界与原因如实记在该文件。本节各行已改为指向归档；仍拿不到原文的
-（真机 androidTest 运行输出）在各行内单独标明。
+摘要在同目录 `evidence/r3-logs/`），逐条边界与原因如实记在该文件。本节各行已改为指向归档；表内标注的
+「设备输出」原文见 4.6 的归档目录（该文件第 1 节末与第 10 节仍写着「设备输出仍未归档」，那是它 2026-10-19
+05:30 归档时的状态，已被 4.6 的归档取代）。
 
 | 复审条 | 问题要点（复审原话要点） | 改在哪里 | 提交 | 判别力实证 / 证据 |
 |---|---|---|---|---|
 | 1（P1） | `call.check()` 返回后、`connection.outputStream` 真正建连之前仍可被取消；`disconnect()` 对还没建连的连接是空操作，恢复后照样建连并写完正文 | `:net` `GatewayCall.bodyStream` **把取流本身变成检查点**：取流前读一次开关（已取消就根本不建连），取到流后再读一次；返回的流包成**每次 `write`/`flush` 都复验开关**的写入流，取消后 **`close` 不 flush**，交给 `finally` 的 `disconnect()` 收尾。开关只从 false 变 true，所以任何后续动作都必须重新验证，被挂起期间到达的取消不会被落掉 | `42fee21` | 新增受控用例 `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`（`FrozenPeer` 把 `getOutputStream()` 卡在「已进入取流、尚未建连」处），断言原文 `assertEquals(0, service.bytes, "取消之后假服务收到了正文：${service.body}")`，并断言网关以 `GatewayCancelled` 在 2 秒内返回、连接被断开；同一接线另有放行正向对照（`正常正文` 确实送达）。**判别力实证原文（提交 `42fee21`）**：临时去掉 `bodyStream` 的后置检查与写入流守卫 → 该用例失败：`取消之后假服务收到了正文：{messages:[...]} ==> expected: <0> but was: <64>`，随后还原。`:net:test` 15、`:roundtable:test` 28、`:contract:test` 22，合计 65，**0 失败 0 错误 0 跳过** |
-| 2（P1） | `openConversation(B)` 等 `log.messages(B)` 期间目标仍是旧会话 A，此时发送会把新问题发给并保存到 A；`finishTurn` 第 757–759 行、`replaceTurn` 第 805–808 行在最后一次读取后没有复检令牌 | `openConversation` 在切换开始时**同步把目标定到新会话**并标记 `historyLoading`；历史读取期间 `send`/`regenerate` 一律拒绝；`loadConversation`/`setMode` 复用 `loadHistory`（读取失败也会解除等待，不会把发送键永久禁用）；`finishTurn`/`replaceTurn` 在最后两次读取之后**各复检一次令牌**（`NonCancellable` 收尾不能靠普通协程取消兜底）；`HearthViewModel` 增加可注入的会话开关（生产行为不变），供真机测试把某一次读停住 | `bfa9217` | 新增真机三例：`HearthNavigationDuringTurnDeviceTest.aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected`、`comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere`、`aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened`；`HearthSpace` 的发送键/重新生成在读取期间禁用。**设备输出仍未归档，无法独立复核**（复跑命令见 4.3/4.4）。**判别力实证已补**（`evidence/discriminating-experiments.md` 第 2 条）：一次性工作树里用 Robolectric + JDBC 停读夹具复刻该设备用例的那两条断言，改回旧写法后两条都红——`切换开始时就该把目标定到新的一段 expected:<[older]> but was:<[newest]>`、`历史还没就绪时不该开始任何一轮（notice） expected null, but was:<先在「我的 → 本地模型」导入一个模型，再和人物聊天>`；只去掉「历史就绪前拒发」时，目标断言仍绿、拒发断言单独红。**注意**：该复刻件是本轮临时新写的 JVM 件、没有入库到源码树（源码归档在 `evidence/r3-logs/item2-probe-source.kt`），所以它证明的是「这两条断言对这段守卫有判别力」，不等于「已入库的那条真机用例在本机跑红过」 |
+| 2（P1） | `openConversation(B)` 等 `log.messages(B)` 期间目标仍是旧会话 A，此时发送会把新问题发给并保存到 A；`finishTurn` 第 757–759 行、`replaceTurn` 第 805–808 行在最后一次读取后没有复检令牌 | `openConversation` 在切换开始时**同步把目标定到新会话**并标记 `historyLoading`；历史读取期间 `send`/`regenerate` 一律拒绝；`loadConversation`/`setMode` 复用 `loadHistory`（读取失败也会解除等待，不会把发送键永久禁用）；`finishTurn`/`replaceTurn` 在最后两次读取之后**各复检一次令牌**（`NonCancellable` 收尾不能靠普通协程取消兜底）；`HearthViewModel` 增加可注入的会话开关（生产行为不变），供真机测试把某一次读停住 | `bfa9217` | 新增真机三例：`HearthNavigationDuringTurnDeviceTest.aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected`、`comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere`、`aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened`；`HearthSpace` 的发送键/重新生成在读取期间禁用。**设备原始输出已归档**：单类复跑 `HearthNavigationDuringTurnDeviceTest` **OK (5 tests)** `Time: 22.187`（`device-tests/01-*`），这三例在分批跑 B 里也都通过（`device-tests/02b-*`，逐例见 `03-timings-single-class.md`/`03e`）。**判别力实证已补**（`evidence/discriminating-experiments.md` 第 2 条）：一次性工作树里用 Robolectric + JDBC 停读夹具复刻该设备用例的那两条断言，改回旧写法后两条都红——`切换开始时就该把目标定到新的一段 expected:<[older]> but was:<[newest]>`、`历史还没就绪时不该开始任何一轮（notice） expected null, but was:<先在「我的 → 本地模型」导入一个模型，再和人物聊天>`；只去掉「历史就绪前拒发」时，目标断言仍绿、拒发断言单独红。**注意**：该复刻件是本轮临时新写的 JVM 件、没有入库到源码树（源码归档在 `evidence/r3-logs/item2-probe-source.kt`），所以它证明的是「这两条断言对这段守卫有判别力」，不等于「已入库的那条真机用例在本机跑红过」 |
 | 3（P1） | 事务内校验读的 `generationToken` 是未同步的普通字段；且 `AbandonedWriteTest` 的 latch 第一次放行的是 schema 检查事务，**把 `valid()` 移出写入事务该测试仍可能通过** | `:hearth` `ConversationLog` 抽出 `HearthSession.writeTurn(valid, block)`：**`valid()` 固定在写入事务打开之后、写第一行之前**；`append`/`replaceLastAnswer`（**`redo` 走同一条路**）统一走它；KDoc 写明边界规则（事务一旦提交就以提交为准，返回值不再撤回）。`HearthViewModel` 的 `generationToken` 改 **`AtomicInteger`**（`generation.get()` / `incrementAndGet()`），并把「开始先发布新令牌、取消/离页先递增再取消、最后一个递增者赢、已提交的写不回滚」写进注释 | `6fd00c8`（hearth 半边，含 `redo` 路径）+ `c91eaaa`（令牌改原子变量） | 夹具 `GatedWriteSession` **只拦真正的写入事务、放过每次开会话先跑的 schema 检查事务**（正是复审第 3 条要求的阻塞位置），断言原文：`assertNull(writing.get(20, TimeUnit.SECONDS), "作废的一轮不该被存下来")`、`assertTrue(gate.validSawWriteTransaction, "valid() 必须在写入事务内被问到")`、`assertEquals(0, gate.writes, "作废的一轮一行都不该写")`；另补 `redo` 作废/成功、完整内容与时间戳比较、写入次数、提交完成后才取消四类用例。判别力：把 `valid()` 挪到写入事务之前 → 该用例失败。**判别力实证原文已补**（`evidence/discriminating-experiments.md` 第 3 条，2026-10-19 复跑）：`:hearth:test --tests "*AbandonedWriteTest"` 5 例中 4 例红——`作废的一轮不该被存下来 ==> expected: <null> but was: <5409d3ce-9a12-4757-a9b7-af33362d2870>`（`AbandonedWriteTest.kt:52`）、`valid() 必须在写入事务内被问到`（`:98`/`:198`）、`作废的重做不该算成功`（`:145`）；还原后 5 例全绿。`:hearth:test` **46 用例，0 失败 0 错误 0 跳过** |
-| 4（P1） | 确认状态的数据库更新仍可在取消后完成，甚至用旧人物快照覆盖后来编辑的字段 | 新增 `CharacterStore.confirmCloudTarget(id, target, now, valid)`：在**该方法自己的事务边界内**判定 `valid()`，为 false 就**一列不改**并返回 false；只写 `cloud_confirmed_target` 与 `updated_at`，不再整条人物快照 `update`（`update` 语义不变）。`HearthViewModel.confirmSend` 改走它：`characters.confirmCloudTarget(pending.character.id, pending.target, now(), ::stillWanted)` | `6fd00c8`（store 半边）+ `e152472`（接线与设备用例重写） | `hearth/CloudConfirmTargetTest` 四类：取消、窄更新（含 SQL 列断言）、null 目标、人物不存在；真机用例重写为 `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything`（进测试模式 → 用 `GatedHearthSessions` 把确认写事务停住 → 取消弹窗/离页并在停住期间改名字 → 放行 → 断言没有请求、确认字段未被改写、改过的名字仍在、没有建出对话）。**设备输出仍未归档，无法独立复核**；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 4 条）：去掉事务内的 `valid()` 判定后 `aConfirmationCancelledWhileTheWriteWaitsChangesNothing` 变红，失败原文 `org.opentest4j.AssertionFailedError: 取消之后的确认不该算数`（`CloudConfirmTargetTest.kt:51`），同轮 `AbandonedWriteTest` 5 例 0 失败；还原后 4 例全绿 |
-| 7（P2） | JNI 加载已经成功、主线程尚未恢复时点停止：`userStopped=true` 但 `engine.load()` 不一定抛异常，随后仍会 `generate()`，`runNative()` 清掉停止标记后继续生成并入库 | `LocalModelEngine.load`：native 加载「照常成功」返回后**复检停止标记**，命中就抛 `Loading stopped` 并卸掉模型/关掉描述符（别让下一次 `generate` 的 `runNative` 把标记清掉后照常生成）；`HearthViewModel.stream` 本地分支在**加载返回、开始生成之前再问一次本轮停止意图**（`turn.userStopped`），命中即中止这一轮；`startTurn` 同步登记 `activeTurn`，使「发出后、任务第一行之前」按下的停止也落在本轮；`Turn.produced` 记录是否产出过 token，`stillCommittable` 明确「`userStopped` 且没有产出过的本地回答不入库」，已流式产出的部分仍然保留 | `c91eaaa` | 新增 JVM 用例（`:llm`）：`LocalModelEngineTest.aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded`（加载期间停止但加载仍成功 → 加载失败 + 不留已加载模型 + 描述符关闭 + 生成到不了 native）、`aNativeLoadingStoppedFailureReleasesTheModelAndTheFile`（native 抛 `Loading stopped` → 同样清干净并原样上抛）。新增真机用例 `HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（需要已登记模型，否则 `assume` 跳过）→ **设备输出仍未归档，无法独立复核**；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 5 条）：去掉 `load` 返回后的停止复检，`aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded` 变红，失败原文 `java.lang.AssertionError: 停止之后这次加载必须以失败收场，实际 null`（`LocalModelEngineTest.kt:98`），同轮其余 5 例通过；还原后 6 例全绿。`:llm:testDebugUnitTest` **13 用例** |
-| 8（P2） | 记忆键与手势监听协程的键不一致，换会话后仍操作旧状态；首次保存（会话 ID 从 null 变成真实 ID）被当成切换会话而重置上翻 | `HearthSpace.kt` 新增 **`TimelineFollowState`**：跟随状态由一份跟着「人 + 这一段对话」走的对象持有，手势协程引用的是**对象本身**（状态与键同源），不再抓住上一次组合的局部状态；会话身份用 `claim` 判定——真人 ID → 另一段真人 ID、或真人 ID → null（新对话/清空/切测试模式）才重置，`null -> 真实 ID`（这一段对话第一次落库）**保留上翻位置**；跟滚动的协程按 segment 重跑，条数一样的两段对话之间切换也会跟到新的一段 | `3bfbdc3` | `HearthTimelineFollowDeviceTest` 补三例：`scrollingBackInsideTheSecondConversationKeepsTheViewportStill`、`theFirstSavedAnswerKeepsAnUpScrolledViewport`、`switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail`（**设备输出仍未归档，无法独立复核**）。**本条本轮没有取得判别力证据**：`TimelineFollowState` 是 `HearthSpace.kt` 的文件私有类、判别点又是 Compose 协程的 key（`LaunchedEffect(listState, follow)`），JVM 侧没有可跑的对应测例，本轮又不连设备——如实记在 `evidence/discriminating-experiments.md` 第 6 条（不是「改坏却不红」，是「没跑成」，所以既不能说有判别力也不能说没有）|
-| 9（P2） | 仍声称「9 条全部整改」；审计原文被错误描述为缺失；`20-testmode-turn.png` 仍含系统通知 | 撤回「9 条已全部整改并通过整树与真机复验」；审计原文按实物更正并归档到 `docs/reviews/2026-10-18-P2-2/evidence/`；`20-testmode-turn.png` 改标「仍含系统『旁路充电』通知，只作进入测试模式的辅助证据」；正式版包信息与设备输出原文改标「未归档，无法复核」；1500 token 测速继续标「无法验证」 | `b9efc1d` | 本报告 3.3、3.4、4.5、第九节与 9.1 的对应改写；`evidence/` 下 `audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md` |
+| 4（P1） | 确认状态的数据库更新仍可在取消后完成，甚至用旧人物快照覆盖后来编辑的字段 | 新增 `CharacterStore.confirmCloudTarget(id, target, now, valid)`：在**该方法自己的事务边界内**判定 `valid()`，为 false 就**一列不改**并返回 false；只写 `cloud_confirmed_target` 与 `updated_at`，不再整条人物快照 `update`（`update` 语义不变）。`HearthViewModel.confirmSend` 改走它：`characters.confirmCloudTarget(pending.character.id, pending.target, now(), ::stillWanted)` | `6fd00c8`（store 半边）+ `e152472`（接线与设备用例重写） | `hearth/CloudConfirmTargetTest` 四类：取消、窄更新（含 SQL 列断言）、null 目标、人物不存在；真机用例重写为 `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything`（进测试模式 → 用 `GatedHearthSessions` 把确认写事务停住 → 取消弹窗/离页并在停住期间改名字 → 放行 → 断言没有请求、确认字段未被改写、改过的名字仍在、没有建出对话）。**设备原始输出已归档**：`aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 在单类复跑与分批跑 B 里都通过（6106ms / 6119ms；`device-tests/01-*`、`02b-*`），它也是最初那次 16 分钟挂死的那一例；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 4 条）：去掉事务内的 `valid()` 判定后 `aConfirmationCancelledWhileTheWriteWaitsChangesNothing` 变红，失败原文 `org.opentest4j.AssertionFailedError: 取消之后的确认不该算数`（`CloudConfirmTargetTest.kt:51`），同轮 `AbandonedWriteTest` 5 例 0 失败；还原后 4 例全绿 |
+| 7（P2） | JNI 加载已经成功、主线程尚未恢复时点停止：`userStopped=true` 但 `engine.load()` 不一定抛异常，随后仍会 `generate()`，`runNative()` 清掉停止标记后继续生成并入库 | `LocalModelEngine.load`：native 加载「照常成功」返回后**复检停止标记**，命中就抛 `Loading stopped` 并卸掉模型/关掉描述符（别让下一次 `generate` 的 `runNative` 把标记清掉后照常生成）；`HearthViewModel.stream` 本地分支在**加载返回、开始生成之前再问一次本轮停止意图**（`turn.userStopped`），命中即中止这一轮；`startTurn` 同步登记 `activeTurn`，使「发出后、任务第一行之前」按下的停止也落在本轮；`Turn.produced` 记录是否产出过 token，`stillCommittable` 明确「`userStopped` 且没有产出过的本地回答不入库」，已流式产出的部分仍然保留 | `c91eaaa` | 新增 JVM 用例（`:llm`）：`LocalModelEngineTest.aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded`（加载期间停止但加载仍成功 → 加载失败 + 不留已加载模型 + 描述符关闭 + 生成到不了 native）、`aNativeLoadingStoppedFailureReleasesTheModelAndTheFile`（native 抛 `Loading stopped` → 同样清干净并原样上抛）。新增真机用例 `HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（需要已登记模型，否则 `assume` 跳过）→ **设备原始输出已归档**：该例在真机上走 JUnit assumption **跳过**（`code=-4`，28ms；`device-tests/02b-*`、`03e`），原因是真机只登记了 `copied:false` 的外置 SAF 模型、私有目录无模型文件；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 5 条）：去掉 `load` 返回后的停止复检，`aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded` 变红，失败原文 `java.lang.AssertionError: 停止之后这次加载必须以失败收场，实际 null`（`LocalModelEngineTest.kt:98`），同轮其余 5 例通过；还原后 6 例全绿。`:llm:testDebugUnitTest` **13 用例** |
+| 8（P2） | 记忆键与手势监听协程的键不一致，换会话后仍操作旧状态；首次保存（会话 ID 从 null 变成真实 ID）被当成切换会话而重置上翻 | `HearthSpace.kt` 新增 **`TimelineFollowState`**：跟随状态由一份跟着「人 + 这一段对话」走的对象持有，手势协程引用的是**对象本身**（状态与键同源），不再抓住上一次组合的局部状态；会话身份用 `claim` 判定——真人 ID → 另一段真人 ID、或真人 ID → null（新对话/清空/切测试模式）才重置，`null -> 真实 ID`（这一段对话第一次落库）**保留上翻位置**；跟滚动的协程按 segment 重跑，条数一样的两段对话之间切换也会跟到新的一段 | `3bfbdc3` | `HearthTimelineFollowDeviceTest` 补三例：`scrollingBackInsideTheSecondConversationKeepsTheViewportStill`、`theFirstSavedAnswerKeepsAnUpScrolledViewport`、`switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail`。**设备原始输出已归档**：单类复跑 `HearthTimelineFollowDeviceTest` **OK (10 tests)**，连跑两次 `Time: 11.234` / `11.278`（`device-tests/04c`/`04d`），全量里第 11 例也通过（`04g`）。**判别力实证按两半分**：**「首次保存 vs 导航」那一半已有真机实证**——把 `TimelineFollowState.claim()` 改回旧判据（`if (previousId == null && conversationId != null) return`）后 `openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` 立刻真红，现场是导航**之后**的布局（`total=41`、`lastIndex=22`、`atBottom=false`；`device-tests/04b`，详见 `evidence/discriminating-experiments.md` 第 6.1 节）；**「手势协程与状态同键」那一半仍无变异实验**（未恢复 `remember(…, conversationId)` + `LaunchedEffect(listState)` 的旧写法），如实标**未验证** |
+| 9（P2） | 仍声称「9 条全部整改」；审计原文被错误描述为缺失；`20-testmode-turn.png` 仍含系统通知 | 撤回「9 条已全部整改并通过整树与真机复验」；审计原文按实物更正并归档到 `docs/reviews/2026-10-18-P2-2/evidence/`；`20-testmode-turn.png` 改标「仍含系统『旁路充电』通知，只作进入测试模式的辅助证据」；正式版包信息与设备输出原文改标「未归档，无法复核」；1500 token 测速继续标「无法验证」 | `b9efc1d` | 本报告 3.3、3.4、4.5、第九节与 9.1 的对应改写；`evidence/` 下 `audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md`（2026-10-19 补：设备测例输出此后已归档，见 4.6；`dumpsys package` 原文仍未归档，见 9.1 第 4 项） |
 
 **第二轮整改后的测试真实数字**（最终门禁，见第十节）：`:hearth` **46**（此前 39）、`:net` **15**、
 `:roundtable` **28**、`:app` **27**、`:contract` **22**、`:llm` **13**、`:model-api` **3**，**合计 154 用例 0 失败**。
@@ -189,13 +194,17 @@ JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」�
 （`AbandonedWriteTest`、`CloudConfirmTargetTest`、`LocalModelEngineTest`）。**第 2 条不是重跑入库用例**：它只有真机
 用例，本轮另写了一个**临时 JVM（Robolectric + JDBC）复刻件**来验那两条断言，该复刻件**没有入库到源码树**（源码归档在
 `evidence/r3-logs/item2-probe-source.kt`），所以它证明的是「这两条断言对这段守卫有判别力」，**不等于「已入库的真机
-用例在本机跑红过」**。**第 5、6 条为原则通过、无额外实证**：r3 维持通过，本轮没有另做变异实验。**第 8 条本轮没有取得
-判别力证据**（只有真机用例；`TimelineFollowState` 是 `HearthSpace.kt` 的私有类、判别点是 Compose 的 key，JVM 侧无对应
-测例可跑）——不是「改坏却不红」，是「没跑成」，因此对它既不能说有判别力也不能说没有。上述原文见
+用例在本机跑红过」**。**第 5、6 条为原则通过、无额外实证**：r3 维持通过，本轮没有另做变异实验。**第 8 条的判别力实证
+按两半分**：「首次保存 vs 导航」那一半 2026-10-19 已在真机上取得实证（改回旧判据 → `#11` 真红，`device-tests/04b`）；
+「手势协程与状态同键」那一半仍**未验证**——对 JVM 侧不可达（`TimelineFollowState` 是 `HearthSpace.kt` 的私有类、判别点是
+Compose 的 key），本轮也没有做恢复旧写法的变异实验，不是「改坏却不红」，是「没跑成」。上述原文见
 **`docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`**（原始控制台输出与失败摘要同目录 `evidence/r3-logs/`）。
-**本轮新增/改写的真机用例（androidTest）运行输出仍未归档**（含第 2 条对应的那条用例）：本轮不连设备、不推送，
-复跑命令见 4.3/4.4。本节此前「每条都验过判别力」以及「第 2、4、7、8 条都找不到、标未归档无法复核」的说法均作废。
-本轮**没有出现「改坏却不红」的情形**：实际跑到的第 2（临时复刻件）、3、4、7 条改坏后都变红；第 8 条是没跑成，不是不红。
+**本轮新增/改写的真机用例（androidTest）运行输出已归档**（2026-10-19 的有界化复跑：`evidence/device-tests/`，
+39 个文件，见 4.6；含第 2、4、7、8 条对应的那些用例。`discriminating-experiments.md` 第 1 节末与第 10 节里
+「设备输出仍未归档」是该文件 2026-10-19 05:30 归档时的状态，已被 4.6 的归档取代）。本节此前「每条都验过判别力」
+以及「第 2、4、7、8 条都找不到、标未归档无法复核」的说法均作废。
+本轮**没有出现「改坏却不红」的情形**：实际跑到的第 2（临时复刻件）、3、4、7 条改坏后都变红；第 8 条「首次保存
+vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协程与状态同键」那一半是没跑成，不是不红，标**未验证**。
 
 ### 3.6 审核状态（截至本报告更新时）
 
@@ -315,6 +324,82 @@ JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」�
 **token 数、读提示耗时、生成耗时的明细在任何归档文件里都找不到**，上表只能算当时会话转述，
 **标为「无法验证」，不作为本包交付证据**（复审 `REVIEW-r2.md` 第 7 条要求继续这样标）。
 
+### 4.6 真机 androidTest 有界化复跑与归档（2026-10-19）
+
+**归档位置**：`docs/reviews/2026-10-18-P2-2/evidence/device-tests/`，**39 个文件**（统计口径
+`Get-ChildItem -Recurse -File`：`device-tests/` 根下 26 个、`hang-record/` 10 个、`scripts/` 3 个）。含单类/分批/全量
+原始输出（`adb shell am instrument -w -r` 原文，仅每行加主机侧毫秒时间戳）与去时间戳版本、逐例耗时表
+（`03*`、`04*`）、挂死现场记录（`hang-record/`）、主机侧守卫与跑测脚本（`scripts/guards.ps1`、
+`run-timestamped.ps1`、`extract-timings.ps1`）、判定文件（`04e-follow-class-rerun.md`）与目录说明（`README.md`）。
+设备 NX809J（Red Magic，Android 16，arm64），时间 2026-10-19 11:36–12:03（Asia/Shanghai）；只安装/运行
+`com.xavierxia.mycelium.debug` 与 `…debug.test`。
+
+**挂死根因：进程冻结器，不是用例死锁。** 用户那次「16 分钟没有任何输出、两个进程都活着」的现场，是 Android 的
+进程冻结器把 instrumentation 进程整个挂起：`dumpsys activity` 里 `isFrozen=true`，该进程**每个线程**的 `WCHAN`
+都是 `do_freezer_trap`；`am unfreeze` 之后同一轮在数秒内继续跑完（`Tests run: 25, Failures: 7`）。因此**所有等待
+必须有界**，且**硬上限只能在主机侧**——进程被冻住时进程内的看门狗线程也一起冻住，**进程内超时不会到点**
+（`hang-record/01`–`03`，`device-tests/README.md` 第 3 节）。
+
+**设备测例的有界化改动**（只动 `app/src/androidTest` 的 4 个测试文件，实现未改；提交 `bce89e8`、`204c7c1`）：
+闸门内部放行等待有界（`PARK_LIMIT_MS = 60_000L`，到点自己兜底放行并打日志）；所有等待带明确超时，失败信息里
+带页面状态与**全部线程栈**；删掉「用 `Thread.sleep` 当同步」的写法（第 5、6、7、8 例，改用
+`awaitCallFinished` + `expectNothingFor`，只保留 `waitUntil` 50ms / `expectNothingFor` 25ms 的轮询间隔）；
+闸门一律在 `finally` 里放行（`hold?.letGo()` + `gates?.releaseAll()`）；新增用例级 4 分钟上限
+（`BoundedDeviceTest(timeoutMs = 240_000)`，超时打印全部线程栈后判失败、后续用例照跑）；另修掉一个会让 `send`
+被静默丢掉的夹具竞态（ViewModel 刚建出来时 `!historyLoading` 即为 `false`，改用 `awaitOpenCharacter()` 等到
+「人物已打开 + 这一段历史读完」，并用 `sendOrFail()` 把静默失败变成带页面状态的断言）。
+
+**真机结果（原始输出已归档）**：
+
+| 运行 | 结果 | 出处 |
+|---|---|---|
+| 单类复跑 `HearthNavigationDuringTurnDeviceTest` | **OK (5 tests)**，`Time: 22.187`，0 失败 | `01-single-class-…-timed.txt`、`03-timings-single-class.md` |
+| 单类复跑 `HearthTimelineFollowDeviceTest` | **OK (10 tests)**，连跑两次 `Time: 11.234` / `11.278` | `04c`/`04d` |
+| 25 例并集 | **通过 19 / 失败 5 / 跳过 1 / 挂死 0** | `03e-timings-all-25-cases.md`（结果来自 3 次 invocation 的并集） |
+
+原挂死用例 `HearthNavigationDuringTurnDeviceTest#aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 在单类
+复跑与分批跑 B 里都通过（6106/6119ms），断言未放宽。
+
+**两例误归因的更正**（原写作「缺本地模型」）：`HearthTimelineFollowDeviceTest#openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail`
+（全量第 11 例）是**测试脆弱**——`navigateTo` 只写状态不等重组，断言读到导航前那一帧（`total=1`、`lastSize=3952`）；
+`#15 scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive` 是**脚手架崩溃**——别的类泄漏的
+`LocalHttp` 后台线程抛 `SocketException: Broken pipe` 把进程带走，不是它的断言。**都不是回归，也与模型无关**；
+判别力实证见 3.5 表第 8 行与 `04e-follow-class-rerun.md`。
+
+**仍然存在的限制（如实记）**：
+
+1. **一次 invocation 跑完全部 25 例做不到**：全量跑到当时那一例时，`LocalHttp.serve` 在请求线程里往已关闭的
+   socket 写、非主线程未捕获 `SocketException: Broken pipe` 把进程带走（三次全量都停在第 15 例附近、一次停在
+   第 9 例，`04g` 又在第 15 例）；修它要动 `net` 的 **main** 源集（测试假服务器位于生产源码集，这本身也是 P2-2b
+   方案审已点出的问题），本轮未改。25 例结论由多次 invocation 的**并集**给出，**不是**一次性全量（`hang-record/08`）。
+2. **4 例与真机本地模型有关**：3 例失败——`HearthPromptSpeedDeviceTest#threeRunsWithAnAbout1500TokenPrompt`
+   （第 10 例，10ms 即失败）、`LocalModelDeviceTest#loadStreamStopUnloadWithUserSelectedModel`（第 21 例）、
+   `LongGenerationDeviceTest#generate256Tokens`（第 22 例）——原因是真机只登记了一个 7.4GB 的**外置 SAF** 模型
+   （`copied:false`，`content://…Qwen3.5-9B-…gguf`），应用私有目录里没有模型文件；另 1 例
+   `HearthLocalStopDuringLoadDeviceTest#stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（第 4 例）为 JUnit
+   assumption **跳过**（`code=-4`）。这 4 例与本次改动无关。**顺带**：第 10 例就是 4.5 那张测速表对应的测例，
+   它在这轮复跑里 10ms 即失败，所以 4.5 **继续标「无法验证」**。
+3. **复审第 8 条「手势协程与状态同键」那一半仍无变异实验**：2026-10-19 只证明了「首次保存 vs 导航」那一半
+   （`04b`），另一半如实标**未验证**。
+4. **2026-10-18 22:35 那一轮四类九例的输出（4.4 的表）仍未归档**，4.4 的耗时只算当时转述；本节归档的是
+   2026-10-19 的另一次复跑。
+
+**为规避冻结做过的、可回退的设备操作（如实记）**：
+
+- 每轮开跑后 `adb shell am unfreeze --sticky com.xavierxia.mycelium.debug`（`guards.txt` 记 5 次 `STICKY` 解冻；
+  `scripts/run-timestamped.ps1` 已把它固化进跑测流程）。该操作是**进程/UID 级、内存态**，`am force-stop` 掉
+  该调试包或重启设备即失效，不落盘。
+- 一次 `adb shell pm clear com.xavierxia.mycelium.debug`（清掉前几次崩溃留下的测试数据，让复跑从干净状态开始）。
+- `cached_apps_freezer` **未改**（仍是 `device_default`）；`svc power stayon` **未改**（值本来就是 `15`）；
+  输入法与其它系统设置**未动**。
+- 正式版 `com.xavierxia.mycelium`（`versionName=0.1.1` / `versionCode=2` / `lastUpdateTime=2026-10-10 05:23:04`）
+  在开工前与收工后**两次核对一致**，**未安装、未覆盖、未卸载**（`device-tests/README.md` 第 1、7 节、
+  `04e-follow-class-rerun.md` 第 1 节）。
+
+**本节更正的方法与局限**：本节（含 3.4、3.5、第八、九节与 9.1 的对应改写）是 2026-10-19 **只改文档**的一轮——
+未跑 Gradle、未联网、未连接设备、未 push、未改源码；正文里的结果、文件名、提交号均逐项对照
+`evidence/device-tests/` 的已归档文件与 `git log` 复核，evidence 目录内容一字未动。
+
 ## 五、隐私与出网
 
 - **默认本地**：不开云端不出网；飞行模式下本地模型照常对话（第一轮走查）。
@@ -382,11 +467,11 @@ JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」�
 | （复审第二次·无人值守） | 02:07:36 开始（`p2-2-work/review-r2-wait.log`），审核目标 `cb6c2db`，02:15:26 结束、报告 13087 字节 | `REVIEW-r2.md`：**结论需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**（该报告已随 `e6c1d65` 入库） |
 | （本轮证据更正） | 归档审计原文附件、撤回「9 条全部整改」与「当时没存下来」、更正截图与包信息表述、测速继续标无法验证 | `docs/reviews/2026-10-18-P2-2/evidence/`（`audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md`）、本报告 3.3 / 3.4 / 4.5 / 第八、九节与 9.1 |
 | `6fd00c8` | 复审第 3、4 条的 hearth 半边：`writeTurn` 把 `valid()` 放进写入事务（含 `redo` 路径）、`confirmCloudTarget` 事务内判有效性且只写确认列 | `hearth/AbandonedWriteTest`、`hearth/CloudConfirmTargetTest`；`:hearth:test` 46 用例 0 失败 |
-| `3bfbdc3` | 复审第 8 条：跟随状态与手势协程同键（`TimelineFollowState.claim`），首次保存不再重置上翻 | `HearthTimelineFollowDeviceTest` 补 3 例（设备输出未归档） |
+| `3bfbdc3` | 复审第 8 条：跟随状态与手势协程同键（`TimelineFollowState.claim`），首次保存不再重置上翻 | `HearthTimelineFollowDeviceTest` 补 3 例；设备输出已归档（单类 **OK (10 tests)**，`Time: 11.234`/`11.278`，`evidence/device-tests/04c`/`04d`；判别力见 3.5 第 8 行） |
 | `42fee21` | 复审第 1 条：取消状态延续到建连之前（`GatewayCall.bodyStream` 取流检查点 + 写入流每次 write/flush 复验、取消后不 flush） | `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`；判别力原文见 3.5 |
-| `bfa9217` | 复审第 2 条：切历史先固定目标、历史就绪前拒绝发送、收尾刷新复检令牌 | `HearthNavigationDuringTurnDeviceTest` 补 3 例（设备输出未归档） |
-| `e152472` | 复审第 4 条：`confirmSend` 改走 `confirmCloudTarget(id, target, now, ::stillWanted)`，取消后一列不改 | `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 重写（设备输出未归档） |
-| `c91eaaa` | 复审第 3、7 条：`generationToken` 改 `AtomicInteger`；加载返回后先问停止意图、本地回答没产出就不落库 | `llm/LocalModelEngineTest` 新增 2 例；`HearthLocalStopDuringLoadDeviceTest`（设备输出未归档） |
+| `bfa9217` | 复审第 2 条：切历史先固定目标、历史就绪前拒绝发送、收尾刷新复检令牌 | `HearthNavigationDuringTurnDeviceTest` 补 3 例（设备输出已归档：单类 **OK (5 tests)** `Time: 22.187`，`evidence/device-tests/01-*`、`02b-*`） |
+| `e152472` | 复审第 4 条：`confirmSend` 改走 `confirmCloudTarget(id, target, now, ::stillWanted)`，取消后一列不改 | `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 重写（设备输出已归档：单类与分批跑 B 均通过，6106/6119ms，`evidence/device-tests/01-*`、`02b-*`） |
+| `c91eaaa` | 复审第 3、7 条：`generationToken` 改 `AtomicInteger`；加载返回后先问停止意图、本地回答没产出就不落库 | `llm/LocalModelEngineTest` 新增 2 例；`HearthLocalStopDuringLoadDeviceTest`（设备输出已归档：真机 assumption 跳过，`code=-4`，28ms，`evidence/device-tests/02b-*`） |
 | `b9efc1d` | 复审第 9 条：证据更正与撤回过头表述（docs only） | 本报告 3.3 / 3.4 / 4.5 / 第九节与 9.1、`evidence/` |
 | `e6c1d65` | 复审报告 `REVIEW-r2.md` 入库（docs only），当时本分支 tip | `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`（13087 字节） |
 | （第二轮整改后·最终门禁） | 全新 worktree detached `c91eaaa`，`check-all.ps1` 与 `check-all.sh` 均通过 | **154 用例 0 失败**、lint 0 error / 0 warning；`p2-2-work/gate-final-ps1.txt`、`gate-final-sh.txt`（第十节） |
@@ -401,7 +486,7 @@ JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」�
 |---|---|---|
 | 正式审计目录里找不到测试模式的记录 | **记录确实存在，此前「没存下来」的说法与实物不符，撤回**：`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw2.json`（7 条）与 `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw3.json`（8 条）里各有一条 `HearthChatTest`：`at=2026-10-18T08:05:55.032494Z`、`host=127.0.0.1`、`sentCharacters=206`、`sentBody=""`（正文长度 **0**）、`status=200`、`succeeded=true`、`promptTokens=12`、`completionTokens=8`；同两文件里另有沉浸 `HearthChat`（07:25:15，377 字；`raw3` 还有 08:07:09，470 字）。`09-audit-hearth-entries.txt` 只是当时摘录的 1 条，不是唯一凭据 | **已归档为仓库内可定位附件**：`docs/reviews/2026-10-18-P2-2/evidence/audit-raw.json`、`audit-raw2.json`、`audit-raw3.json`（复制前逐份查过：字段只有 `at/host/purpose/sentCharacters/sentBody/status/succeeded/promptTokens/completionTokens` 九个，`host` 全是 `127.0.0.1`，无本机用户名、设备序列号、密钥或真实地址；详见 `evidence/README.md`） |
 | 仅凭 `speed-run3.txt` 的 `OK (1 test)` 复核不了三次测速 | `p2-2-work` 里与测速有关的只有 `speed-run1.txt`（类名写错、`ClassNotFoundException`、末尾 `Tests run: 1, Failures: 1`）、`speed-run2.txt`（空文件）、`speed-run3.txt`（102 字节，只有 `Time: 373.865` 与 `OK (1 test)`）；**token 数与读提示/生成耗时明细在任何归档文件里都没有** | 已撤回「1500 token 测速通过」的写法，**继续标「无法验证」**（4.5、本节、9.1 第 6 项） |
-| 找不到两个 Compose 设备测试的原始成功输出 | 运行输出只留在会话里，没有归档成文件；仓库、`p2-2-work` 与正式证据目录里都搜不到 `OK (n tests)` 的原始输出 | 标**原始输出未归档**；给出复跑命令（4.3、4.4），复核者可自行复现 |
+| 找不到两个 Compose 设备测试的原始成功输出 | 运行输出只留在会话里，没有归档成文件；仓库、`p2-2-work` 与正式证据目录里都搜不到 `OK (n tests)` 的原始输出 | 标**原始输出未归档**；给出复跑命令（4.3、4.4），复核者可自行复现。**2026-10-19 补**：这两个类此后有界化复跑的原始输出已归档（`evidence/device-tests/`，39 个文件），见 4.6；2026-10-18 那一轮本身的输出仍未归档 |
 | 正式版前后包信息缺本包原文 | P2-2 两次走查只读了值，`dumpsys package` 原文始终没有落盘：仓库、`p2-2-work`、正式证据目录三处都搜不到 P2-2 时点的原文，**未归档，无法复核**；最近的同组原始记录是 P2-1b 的 `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\device-log.txt`（13:38，含 `dumpsys` 原文片段） | **撤回**此前「本轮补上了装前/装后原文」的说法（3.4 已改写）：P2-2 这两次读数只能算当时转述，标注**未归档、无法复核** |
 | `20`–`22` 保留状态栏、`20` 含系统通知，「状态栏已裁」不实 | **复审 `REVIEW-r2.md` 第 44–46 行目视确认：`20-testmode-turn.png` 仍保留大块「旁路充电」系统通知，裁掉顶部 160 像素并没有清除它。**本次无法目视（本会话模型不接受图像输入，`read_image` 直接报错），改用逐行像素统计复算，结论一致：图 1216×2528；y=0–266 是一整块浅色卡片（众数色 `(208,208,209)`，x=62–1153 共 1092 px 宽，左右各留 62 px 深色边），而同图应用本体是深色（y=600–700 众数色 `(20,18,24)`，占 93%）；卡片内 y=0–37、64–106、171–212、254–266 有内容行，其中 y=171–212 含强调色 `(121,118,252)` 3625 px，而该色在整图稀疏采样里只有 163 px。**裁掉 y=0–159 后仍留下 y=160–266 共 107 行**（含整个强调色块与卡片下边缘），故「裁掉 160 像素＝界面干净」不成立 | 改写为：`20-testmode-turn.png` **仍含系统「旁路充电」通知**，该图**只作「进入测试模式」的辅助证据，不作「界面干净」的证据**；且本会话无图像输入，卡片上的文字**未 OCR、未逐字确认**，上述结论只依据几何与色彩统计 |
 | 「12 条 + 7 条全部整改」「成功/失败/超时/取消另有测例」过头 | 12 条与 7 条是**逐条状态**（3.1/3.2 有表），不是笼统「全部通过」；超时/取消矩阵确实没有单独成例 | 已按事实改写（3.1 第 8 条、本节、3.3） |
@@ -428,11 +513,15 @@ JVM 侧无对应测例可跑；不是「改坏却不红」，是「没跑成」�
 4. **正式版包信息原文**：**未归档，无法复核**。仓库、`p2-2-work` 与正式证据目录都搜不到 P2-2 时点的
    `dumpsys package` 原文；最近一份同组读数在 P2-1b 的
    `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\device-log.txt`（13:38）。
-5. **设备输出原文**：四类九例的 instrumented 输出同样**未归档**，只有会话转述；复跑命令见 4.3/4.4。
-   （2026-10-19 补：这批真机输出**仍未归档**；但第 3、4、7 条的**判别力实证原文**已在一次性工作树里「改坏 → 变红 →
-   还原」重跑并归档，第 2 条由临时 JVM 复刻件补上其两条断言的失败原文（该复刻件未入库，不等于真机用例跑红过），
-   归档在 `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`（原始日志 `evidence/r3-logs/`）；
-   第 5、6 条无额外实证；第 8 条没有取得判别力证据，见该文件第 6 条。）
+5. **设备输出原文**：四类九例的 instrumented 输出最初**未归档**，只有会话转述；复跑命令见 4.3/4.4。
+   （2026-10-19 补两处纠正：(a) 第 3、4、7 条的**判别力实证原文**已在一次性工作树里「改坏 → 变红 → 还原」重跑并
+   归档，第 2 条由临时 JVM 复刻件补上其两条断言的失败原文（该复刻件未入库，不等于真机用例跑红过），归档在
+   `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`（原始日志 `evidence/r3-logs/`）；
+   第 5、6 条无额外实证；第 8 条当时没有取得判别力证据（该文件 6.1 节其后补上「首次保存 vs 导航」那一半的真机
+   实证，另一半仍标未验证），见该文件第 6 条。(b) **真机 androidTest 运行输出已归档**：
+   2026-10-19 的有界化复跑原始输出在 `docs/reviews/2026-10-18-P2-2/evidence/device-tests/`（39 个文件），
+   逐例结果与残余限制见 4.6，此前「这批真机输出仍未归档」的说法作废；不过 2026-10-18 22:35 那一轮四类九例
+   本身的输出仍未归档，4.4 的耗时只能算当时转述。）
 6. **测速**：1500 token 测速的 token 数与耗时明细**没有归档文件**，**继续标「无法验证」**（4.5 已写明）。
 
 方法与局限（如实记）：本次只在 Windows 上读文件、跑 `git` / `Select-String` 与一段只读的 Python/Pillow 像素统计，
