@@ -1,0 +1,17 @@
+{
+  "name": "04-freeze-recovered",
+  "why": "The freeze is detected and unfrozen, the log starts growing again and the invocation then finishes normally: FREEZER once, then DONE/exit 0, no watchdog.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 0,
+  "expectReport": [
+    "^FREEZER .*all 5 threads in do_freezer_trap",
+    "^DONE .*run finished normally \\(INSTRUMENTATION_CODE: -1\\); guards stop"
+  ],
+  "expectNoReport": ["^WATCHDOG ", "^CRASH ", "^UNKNOWN "],
+  "expectCommands": ["unfreeze --sticky com.xavierxia.mycelium.debug"],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-frozen-5-threads.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running-longer.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-done.txt" }
+  ]
+}

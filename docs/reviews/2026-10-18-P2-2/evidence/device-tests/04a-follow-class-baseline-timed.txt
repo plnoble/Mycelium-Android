@@ -1,0 +1,169 @@
+12:13:36.916 == start class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest ==
+12:13:37.575 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:37.575 INSTRUMENTATION_STATUS: current=1
+12:13:37.575 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:37.575 INSTRUMENTATION_STATUS: numtests=10
+12:13:37.575 INSTRUMENTATION_STATUS: stream=
+12:13:37.575 com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest:
+12:13:37.575 INSTRUMENTATION_STATUS: test=openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail
+12:13:37.576 INSTRUMENTATION_STATUS_CODE: 1
+12:13:38.733 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:38.733 INSTRUMENTATION_STATUS: current=1
+12:13:38.734 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:38.734 INSTRUMENTATION_STATUS: numtests=10
+12:13:38.734 INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+12:13:38.734 	at org.junit.Assert.fail(Assert.java:89)
+12:13:38.734 	at org.junit.Assert.assertTrue(Assert.java:42)
+12:13:38.734 	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+12:13:38.734 
+12:13:38.734 INSTRUMENTATION_STATUS: stream=
+12:13:38.734 Error in openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest):
+12:13:38.734 java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+12:13:38.734 	at org.junit.Assert.fail(Assert.java:89)
+12:13:38.734 	at org.junit.Assert.assertTrue(Assert.java:42)
+12:13:38.734 	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+12:13:38.734 
+12:13:38.734 INSTRUMENTATION_STATUS: test=openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail
+12:13:38.734 INSTRUMENTATION_STATUS_CODE: -2
+12:13:38.734 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:38.734 INSTRUMENTATION_STATUS: current=2
+12:13:38.734 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:38.734 INSTRUMENTATION_STATUS: numtests=10
+12:13:38.734 INSTRUMENTATION_STATUS: stream=
+12:13:38.735 INSTRUMENTATION_STATUS: test=switchingConversationIdsWithinTheSameSegmentStillResets
+12:13:38.735 INSTRUMENTATION_STATUS_CODE: 1
+12:13:40.133 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:40.133 INSTRUMENTATION_STATUS: current=2
+12:13:40.133 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:40.133 INSTRUMENTATION_STATUS: numtests=10
+12:13:40.133 INSTRUMENTATION_STATUS: stream=.
+12:13:40.133 INSTRUMENTATION_STATUS: test=switchingConversationIdsWithinTheSameSegmentStillResets
+12:13:40.133 INSTRUMENTATION_STATUS_CODE: 0
+12:13:40.133 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:40.133 INSTRUMENTATION_STATUS: current=3
+12:13:40.133 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:40.133 INSTRUMENTATION_STATUS: numtests=10
+12:13:40.133 INSTRUMENTATION_STATUS: stream=
+12:13:40.133 INSTRUMENTATION_STATUS: test=openingAnotherConversationFollowsItsNewestMessageAgain
+12:13:40.133 INSTRUMENTATION_STATUS_CODE: 1
+12:13:41.303 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:41.303 INSTRUMENTATION_STATUS: current=3
+12:13:41.303 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:41.303 INSTRUMENTATION_STATUS: numtests=10
+12:13:41.303 INSTRUMENTATION_STATUS: stream=.
+12:13:41.303 INSTRUMENTATION_STATUS: test=openingAnotherConversationFollowsItsNewestMessageAgain
+12:13:41.303 INSTRUMENTATION_STATUS_CODE: 0
+12:13:41.303 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:41.303 INSTRUMENTATION_STATUS: current=4
+12:13:41.303 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:41.303 INSTRUMENTATION_STATUS: numtests=10
+12:13:41.303 INSTRUMENTATION_STATUS: stream=
+12:13:41.303 INSTRUMENTATION_STATUS: test=theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport
+12:13:41.303 INSTRUMENTATION_STATUS_CODE: 1
+12:13:42.078 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:42.078 INSTRUMENTATION_STATUS: current=4
+12:13:42.078 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:42.078 INSTRUMENTATION_STATUS: numtests=10
+12:13:42.078 INSTRUMENTATION_STATUS: stream=.
+12:13:42.078 INSTRUMENTATION_STATUS: test=theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport
+12:13:42.078 INSTRUMENTATION_STATUS_CODE: 0
+12:13:42.078 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:42.078 INSTRUMENTATION_STATUS: current=5
+12:13:42.078 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:42.079 INSTRUMENTATION_STATUS: numtests=10
+12:13:42.079 INSTRUMENTATION_STATUS: stream=
+12:13:42.079 INSTRUMENTATION_STATUS: test=scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive
+12:13:42.079 INSTRUMENTATION_STATUS_CODE: 1
+12:13:43.173 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:43.173 INSTRUMENTATION_STATUS: current=5
+12:13:43.173 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:43.173 INSTRUMENTATION_STATUS: numtests=10
+12:13:43.173 INSTRUMENTATION_STATUS: stream=.
+12:13:43.173 INSTRUMENTATION_STATUS: test=scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive
+12:13:43.173 INSTRUMENTATION_STATUS_CODE: 0
+12:13:43.173 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:43.173 INSTRUMENTATION_STATUS: current=6
+12:13:43.173 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:43.173 INSTRUMENTATION_STATUS: numtests=10
+12:13:43.173 INSTRUMENTATION_STATUS: stream=
+12:13:43.173 INSTRUMENTATION_STATUS: test=longAnswerScrolledBackInsideKeepsTheViewportStillWhileTokensArrive
+12:13:43.173 INSTRUMENTATION_STATUS_CODE: 1
+12:13:44.025 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:44.025 INSTRUMENTATION_STATUS: current=6
+12:13:44.025 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:44.025 INSTRUMENTATION_STATUS: numtests=10
+12:13:44.025 INSTRUMENTATION_STATUS: stream=.
+12:13:44.025 INSTRUMENTATION_STATUS: test=longAnswerScrolledBackInsideKeepsTheViewportStillWhileTokensArrive
+12:13:44.025 INSTRUMENTATION_STATUS_CODE: 0
+12:13:44.026 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:44.026 INSTRUMENTATION_STATUS: current=7
+12:13:44.026 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:44.026 INSTRUMENTATION_STATUS: numtests=10
+12:13:44.026 INSTRUMENTATION_STATUS: stream=
+12:13:44.026 INSTRUMENTATION_STATUS: test=returningToTheBottomByHandResumesFollowing
+12:13:44.026 INSTRUMENTATION_STATUS_CODE: 1
+12:13:45.687 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:45.687 INSTRUMENTATION_STATUS: current=7
+12:13:45.688 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:45.688 INSTRUMENTATION_STATUS: numtests=10
+12:13:45.688 INSTRUMENTATION_STATUS: stream=.
+12:13:45.688 INSTRUMENTATION_STATUS: test=returningToTheBottomByHandResumesFollowing
+12:13:45.688 INSTRUMENTATION_STATUS_CODE: 0
+12:13:45.688 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:45.688 INSTRUMENTATION_STATUS: current=8
+12:13:45.688 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:45.688 INSTRUMENTATION_STATUS: numtests=10
+12:13:45.688 INSTRUMENTATION_STATUS: stream=
+12:13:45.688 INSTRUMENTATION_STATUS: test=scrollingBackInsideTheSecondConversationKeepsTheViewportStill
+12:13:45.688 INSTRUMENTATION_STATUS_CODE: 1
+12:13:47.020 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:47.021 INSTRUMENTATION_STATUS: current=8
+12:13:47.021 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:47.021 INSTRUMENTATION_STATUS: numtests=10
+12:13:47.021 INSTRUMENTATION_STATUS: stream=.
+12:13:47.021 INSTRUMENTATION_STATUS: test=scrollingBackInsideTheSecondConversationKeepsTheViewportStill
+12:13:47.021 INSTRUMENTATION_STATUS_CODE: 0
+12:13:47.021 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:47.021 INSTRUMENTATION_STATUS: current=9
+12:13:47.021 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:47.021 INSTRUMENTATION_STATUS: numtests=10
+12:13:47.021 INSTRUMENTATION_STATUS: stream=
+12:13:47.021 INSTRUMENTATION_STATUS: test=switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail
+12:13:47.021 INSTRUMENTATION_STATUS_CODE: 1
+12:13:47.932 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:47.932 INSTRUMENTATION_STATUS: current=9
+12:13:47.932 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:47.932 INSTRUMENTATION_STATUS: numtests=10
+12:13:47.932 INSTRUMENTATION_STATUS: stream=.
+12:13:47.932 INSTRUMENTATION_STATUS: test=switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail
+12:13:47.933 INSTRUMENTATION_STATUS_CODE: 0
+12:13:47.933 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:47.933 INSTRUMENTATION_STATUS: current=10
+12:13:47.933 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:47.933 INSTRUMENTATION_STATUS: numtests=10
+12:13:47.933 INSTRUMENTATION_STATUS: stream=
+12:13:47.933 INSTRUMENTATION_STATUS: test=newTokensAreFollowedWhileTheViewportIsAtTheBottom
+12:13:47.933 INSTRUMENTATION_STATUS_CODE: 1
+12:13:48.750 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+12:13:48.751 INSTRUMENTATION_STATUS: current=10
+12:13:48.751 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:13:48.751 INSTRUMENTATION_STATUS: numtests=10
+12:13:48.751 INSTRUMENTATION_STATUS: stream=.
+12:13:48.751 INSTRUMENTATION_STATUS: test=newTokensAreFollowedWhileTheViewportIsAtTheBottom
+12:13:48.751 INSTRUMENTATION_STATUS_CODE: 0
+12:13:48.754 INSTRUMENTATION_RESULT: stream=
+12:13:48.754 
+12:13:48.754 Time: 11.181
+12:13:48.754 There was 1 failure:
+12:13:48.754 1) openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest)
+12:13:48.754 java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+12:13:48.754 	at org.junit.Assert.fail(Assert.java:89)
+12:13:48.754 	at org.junit.Assert.assertTrue(Assert.java:42)
+12:13:48.754 	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+12:13:48.754 
+12:13:48.754 FAILURES!!!
+12:13:48.754 Tests run: 10,  Failures: 1
+12:13:48.754 
+12:13:48.754 
+12:13:48.754 INSTRUMENTATION_CODE: -1
+12:13:48.777 == adb exit 0 ==

@@ -6,6 +6,13 @@ import java.util.UUID
 
 data class CloudService(val id: String, val name: String, val baseUrl: String, val hasKey: Boolean)
 
+/**
+ * One service and its key, read in a single pass. Sending must never combine the address from one
+ * version of the settings with the key from another, so the caller keeps this snapshot for both
+ * the agreement check and the request it builds.
+ */
+data class CloudEndpoint(val id: String, val name: String, val baseUrl: String, val apiKey: String?)
+
 data class SavedModel(val serviceId: String, val model: String)
 
 data class CloudSelection(val serviceId: String, val model: String)
@@ -64,6 +71,26 @@ class CloudStore(
             ),
         )
     }
+
+    /** One read of the settings blob: the service as it stands right now, without unwrapping the key. */
+    fun service(serviceId: String): CloudService? = read().services
+        .firstOrNull { it.id == serviceId }
+        ?.let { CloudService(it.id, it.name, it.baseUrl, it.storedKey != null) }
+
+    /**
+     * One read that also opens the key, so address, name and key all belong to the same saved
+     * version. Reading them with separate calls lets a background save slip in between.
+     */
+    fun endpoint(serviceId: String): CloudEndpoint? = read().services
+        .firstOrNull { it.id == serviceId }
+        ?.let { stored ->
+            CloudEndpoint(
+                stored.id,
+                stored.name,
+                stored.baseUrl,
+                stored.storedKey?.let { key -> runCatching { String(secrets.unwrap(key), Charsets.UTF_8) }.getOrNull() },
+            )
+        }
 
     fun apiKey(serviceId: String): String? = read().services
         .firstOrNull { it.id == serviceId }

@@ -1,0 +1,21 @@
+{
+  "name": "14-ps-wchan-dash",
+  "why": "toybox prints `-` in WCHAN when /proc/<pid>/wchan cannot be read (the same shape toybox uses on the real device). That is 'cannot tell', not 'not frozen': the guard must report PROBE-UNKNOWN and end as UNKNOWN / exit 5. Fixture: ps-wchan-dash-constructed.txt (shape copied from the real 4-column excerpt, see guards-samples/README.md).",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 5,
+  "expectReport": [
+    "^PROBE-UNKNOWN .*reason=ps row 2 WCHAN unavailable",
+    "^WATCHDOG .*probe=UNKNOWN",
+    "^VERDICT UNKNOWN exit=5 probe=UNKNOWN"
+  ],
+  "expectNoReport": ["run finished normally", "^DONE ", "^FREEZER ", "probe=NOT_FROZEN"],
+  "expectCommands": ["force-stop com.xavierxia.mycelium.debug.test"],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-wchan-dash-constructed.txt", "log": "log-running.txt" }
+  ]
+}

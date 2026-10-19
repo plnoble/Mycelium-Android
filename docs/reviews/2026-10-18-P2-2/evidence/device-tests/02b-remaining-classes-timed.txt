@@ -1,0 +1,388 @@
+12:00:44.362 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest
+12:00:44.366 INSTRUMENTATION_STATUS: current=1
+12:00:44.367 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:44.367 INSTRUMENTATION_STATUS: numtests=15
+12:00:44.367 INSTRUMENTATION_STATUS: stream=
+12:00:44.368 com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest:
+12:00:44.368 INSTRUMENTATION_STATUS: test=threeRunsWithAnAbout1500TokenPrompt
+12:00:44.368 INSTRUMENTATION_STATUS_CODE: 1
+12:00:44.368 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest
+12:00:44.369 INSTRUMENTATION_STATUS: current=1
+12:00:44.369 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:44.369 INSTRUMENTATION_STATUS: numtests=15
+12:00:44.370 INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+12:00:44.370 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+12:00:44.370 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:00:44.371 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:00:44.371 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:00:44.371 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:00:44.371 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:00:44.372 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:00:44.372 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:00:44.372 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:00:44.372 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+12:00:44.373 
+12:00:44.373 INSTRUMENTATION_STATUS: stream=
+12:00:44.373 Error in threeRunsWithAnAbout1500TokenPrompt(com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest):
+12:00:44.373 java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+12:00:44.374 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+12:00:44.374 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:00:44.374 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:00:44.375 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:00:44.375 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:00:44.375 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:00:44.376 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:00:44.376 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:00:44.376 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:00:44.377 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+12:00:44.377 
+12:00:44.378 INSTRUMENTATION_STATUS: test=threeRunsWithAnAbout1500TokenPrompt
+12:00:44.378 INSTRUMENTATION_STATUS_CODE: -2
+12:00:44.378 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+12:00:44.379 INSTRUMENTATION_STATUS: current=2
+12:00:44.379 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:44.379 INSTRUMENTATION_STATUS: numtests=15
+12:00:44.380 INSTRUMENTATION_STATUS: stream=
+12:00:44.380 com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest:
+12:00:44.380 INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+12:00:44.380 INSTRUMENTATION_STATUS_CODE: 1
+12:00:48.751 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+12:00:48.751 INSTRUMENTATION_STATUS: current=2
+12:00:48.753 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:48.753 INSTRUMENTATION_STATUS: numtests=15
+12:00:48.754 INSTRUMENTATION_STATUS: stream=.
+12:00:48.754 INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+12:00:48.755 INSTRUMENTATION_STATUS_CODE: 0
+12:00:48.755 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:00:48.756 INSTRUMENTATION_STATUS: current=3
+12:00:48.756 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:48.756 INSTRUMENTATION_STATUS: numtests=15
+12:00:48.757 INSTRUMENTATION_STATUS: stream=
+12:00:48.757 com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest:
+12:00:48.758 INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+12:00:48.759 INSTRUMENTATION_STATUS_CODE: 1
+12:00:56.367 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:00:56.368 INSTRUMENTATION_STATUS: current=3
+12:00:56.369 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:56.370 INSTRUMENTATION_STATUS: numtests=15
+12:00:56.370 INSTRUMENTATION_STATUS: stream=.
+12:00:56.371 INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+12:00:56.371 INSTRUMENTATION_STATUS_CODE: 0
+12:00:56.372 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:00:56.372 INSTRUMENTATION_STATUS: current=4
+12:00:56.373 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:56.373 INSTRUMENTATION_STATUS: numtests=15
+12:00:56.373 INSTRUMENTATION_STATUS: stream=
+12:00:56.374 INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+12:00:56.375 INSTRUMENTATION_STATUS_CODE: 1
+12:00:59.952 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:00:59.953 INSTRUMENTATION_STATUS: current=4
+12:00:59.953 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:59.954 INSTRUMENTATION_STATUS: numtests=15
+12:00:59.955 INSTRUMENTATION_STATUS: stream=.
+12:00:59.955 INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+12:00:59.956 INSTRUMENTATION_STATUS_CODE: 0
+12:00:59.956 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:00:59.957 INSTRUMENTATION_STATUS: current=5
+12:00:59.957 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:00:59.958 INSTRUMENTATION_STATUS: numtests=15
+12:00:59.959 INSTRUMENTATION_STATUS: stream=
+12:00:59.959 INSTRUMENTATION_STATUS: test=comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+12:00:59.960 INSTRUMENTATION_STATUS_CODE: 1
+12:01:03.550 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:01:03.551 INSTRUMENTATION_STATUS: current=5
+12:01:03.552 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:03.552 INSTRUMENTATION_STATUS: numtests=15
+12:01:03.553 INSTRUMENTATION_STATUS: stream=.
+12:01:03.554 INSTRUMENTATION_STATUS: test=comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+12:01:03.554 INSTRUMENTATION_STATUS_CODE: 0
+12:01:03.555 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:01:03.555 INSTRUMENTATION_STATUS: current=6
+12:01:03.556 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:03.556 INSTRUMENTATION_STATUS: numtests=15
+12:01:03.557 INSTRUMENTATION_STATUS: stream=
+12:01:03.557 INSTRUMENTATION_STATUS: test=aConfirmationTheUserLeftBehindCannotSendOrWriteAnything
+12:01:03.558 INSTRUMENTATION_STATUS_CODE: 1
+12:01:09.672 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:01:09.674 INSTRUMENTATION_STATUS: current=6
+12:01:09.675 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:09.675 INSTRUMENTATION_STATUS: numtests=15
+12:01:09.676 INSTRUMENTATION_STATUS: stream=.
+12:01:09.676 INSTRUMENTATION_STATUS: test=aConfirmationTheUserLeftBehindCannotSendOrWriteAnything
+12:01:09.677 INSTRUMENTATION_STATUS_CODE: 0
+12:01:09.677 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:01:09.678 INSTRUMENTATION_STATUS: current=7
+12:01:09.678 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:09.679 INSTRUMENTATION_STATUS: numtests=15
+12:01:09.679 INSTRUMENTATION_STATUS: stream=
+12:01:09.679 INSTRUMENTATION_STATUS: test=switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage
+12:01:09.680 INSTRUMENTATION_STATUS_CODE: 1
+12:01:10.809 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+12:01:10.810 INSTRUMENTATION_STATUS: current=7
+12:01:10.811 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:10.811 INSTRUMENTATION_STATUS: numtests=15
+12:01:10.812 INSTRUMENTATION_STATUS: stream=.
+12:01:10.812 INSTRUMENTATION_STATUS: test=switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage
+12:01:10.813 INSTRUMENTATION_STATUS_CODE: 0
+12:01:10.813 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+12:01:10.813 INSTRUMENTATION_STATUS: current=8
+12:01:10.814 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:10.814 INSTRUMENTATION_STATUS: numtests=15
+12:01:10.815 INSTRUMENTATION_STATUS: stream=
+12:01:10.815 com.xavierxia.mycelium.hearth.DeviceHearthTest:
+12:01:10.816 INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+12:01:10.816 INSTRUMENTATION_STATUS_CODE: 1
+12:01:11.022 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+12:01:11.024 INSTRUMENTATION_STATUS: current=8
+12:01:11.024 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:11.025 INSTRUMENTATION_STATUS: numtests=15
+12:01:11.025 INSTRUMENTATION_STATUS: stream=.
+12:01:11.026 INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+12:01:11.027 INSTRUMENTATION_STATUS_CODE: 0
+12:01:11.027 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+12:01:11.028 INSTRUMENTATION_STATUS: current=9
+12:01:11.028 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:11.029 INSTRUMENTATION_STATUS: numtests=15
+12:01:11.029 INSTRUMENTATION_STATUS: stream=
+12:01:11.030 com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest:
+12:01:11.030 INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+12:01:11.030 INSTRUMENTATION_STATUS_CODE: 1
+12:01:19.131 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+12:01:19.132 INSTRUMENTATION_STATUS: current=9
+12:01:19.132 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.133 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.134 INSTRUMENTATION_STATUS: stream=.
+12:01:19.134 INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+12:01:19.135 INSTRUMENTATION_STATUS_CODE: 0
+12:01:19.135 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceConversationTest
+12:01:19.136 INSTRUMENTATION_STATUS: current=10
+12:01:19.136 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.136 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.137 INSTRUMENTATION_STATUS: stream=
+12:01:19.137 com.xavierxia.mycelium.roundtable.DeviceConversationTest:
+12:01:19.137 INSTRUMENTATION_STATUS: test=plaintextDialogueIsAbsentFromTheDatabaseFile
+12:01:19.138 INSTRUMENTATION_STATUS_CODE: 1
+12:01:19.237 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceConversationTest
+12:01:19.238 INSTRUMENTATION_STATUS: current=10
+12:01:19.239 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.239 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.240 INSTRUMENTATION_STATUS: stream=.
+12:01:19.241 INSTRUMENTATION_STATUS: test=plaintextDialogueIsAbsentFromTheDatabaseFile
+12:01:19.241 INSTRUMENTATION_STATUS_CODE: 0
+12:01:19.242 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest
+12:01:19.243 INSTRUMENTATION_STATUS: current=11
+12:01:19.244 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.244 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.244 INSTRUMENTATION_STATUS: stream=
+12:01:19.245 com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest:
+12:01:19.245 INSTRUMENTATION_STATUS: test=generate256Tokens
+12:01:19.246 INSTRUMENTATION_STATUS_CODE: 1
+12:01:19.246 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest
+12:01:19.247 INSTRUMENTATION_STATUS: current=11
+12:01:19.247 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.248 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.248 INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: model is not registered
+12:01:19.248 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+12:01:19.249 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:19.249 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:19.250 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:19.250 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:19.251 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:19.251 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:19.252 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:19.252 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:19.253 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+12:01:19.253 
+12:01:19.253 INSTRUMENTATION_STATUS: stream=
+12:01:19.254 Error in generate256Tokens(com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest):
+12:01:19.254 java.lang.IllegalStateException: model is not registered
+12:01:19.255 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+12:01:19.255 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:19.256 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:19.256 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:19.256 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:19.257 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:19.257 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:19.258 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:19.259 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:19.259 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+12:01:19.260 
+12:01:19.260 INSTRUMENTATION_STATUS: test=generate256Tokens
+12:01:19.261 INSTRUMENTATION_STATUS_CODE: -2
+12:01:19.261 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+12:01:19.262 INSTRUMENTATION_STATUS: current=12
+12:01:19.262 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.263 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.263 INSTRUMENTATION_STATUS: stream=
+12:01:19.264 com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest:
+12:01:19.264 INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+12:01:19.265 INSTRUMENTATION_STATUS_CODE: 1
+12:01:19.265 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+12:01:19.266 INSTRUMENTATION_STATUS: current=12
+12:01:19.266 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.266 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.267 INSTRUMENTATION_STATUS: stack=org.junit.AssumptionViolatedException: 真机上还没有登记过本地模型，先导入一个再跑这一例
+12:01:19.267 	at org.junit.Assume.assumeTrue(Assume.java:68)
+12:01:19.267 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:37)
+12:01:19.268 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:19.269 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:19.269 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:19.270 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:19.270 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:19.271 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:19.271 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:19.271 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:19.272 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+12:01:19.272 	at java.lang.reflect.Method.invoke(Native Method)
+12:01:19.273 	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+12:01:19.273 	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+12:01:19.274 	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+12:01:19.274 	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+12:01:19.275 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+12:01:19.276 	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+12:01:19.276 	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+12:01:19.277 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+12:01:19.278 	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+12:01:19.278 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+12:01:19.279 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+12:01:19.279 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+12:01:19.280 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+12:01:19.280 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+12:01:19.280 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+12:01:19.281 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+12:01:19.281 	at androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)
+12:01:19.282 	at org.junit.runners.Suite.runChild(Suite.java:128)
+12:01:19.284 	at org.junit.runners.Suite.runChild(Suite.java:27)
+12:01:19.284 	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+12:01:19.285 	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+12:01:19.285 	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+12:01:19.286 	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+12:01:19.286 	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+12:01:19.286 	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+12:01:19.287 	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+12:01:19.287 	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+12:01:19.288 	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+12:01:19.288 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:67)
+12:01:19.289 	at androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:58)
+12:01:19.289 	at androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:446)
+12:01:19.289 	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2802)
+12:01:19.290 
+12:01:19.291 INSTRUMENTATION_STATUS: stream=
+12:01:19.291 com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest:
+12:01:19.292 INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+12:01:19.293 INSTRUMENTATION_STATUS_CODE: -4
+12:01:19.294 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LocalModelDeviceTest
+12:01:19.294 INSTRUMENTATION_STATUS: current=13
+12:01:19.294 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.296 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.296 INSTRUMENTATION_STATUS: stream=
+12:01:19.296 com.xavierxia.mycelium.localmodels.LocalModelDeviceTest:
+12:01:19.297 INSTRUMENTATION_STATUS: test=loadStreamStopUnloadWithUserSelectedModel
+12:01:19.297 INSTRUMENTATION_STATUS_CODE: 1
+12:01:19.866 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LocalModelDeviceTest
+12:01:19.867 INSTRUMENTATION_STATUS: current=13
+12:01:19.868 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:19.869 INSTRUMENTATION_STATUS: numtests=15
+12:01:19.869 INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+12:01:19.870 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+12:01:19.870 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:19.871 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:19.871 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:19.872 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:19.872 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:19.873 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:19.873 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:19.874 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:19.874 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+12:01:19.874 
+12:01:19.874 INSTRUMENTATION_STATUS: stream=
+12:01:19.875 Error in loadStreamStopUnloadWithUserSelectedModel(com.xavierxia.mycelium.localmodels.LocalModelDeviceTest):
+12:01:19.876 java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+12:01:19.877 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+12:01:19.877 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:19.878 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:19.879 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:19.879 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:19.880 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:19.880 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:19.880 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:19.881 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:19.881 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+12:01:19.882 
+12:01:19.882 INSTRUMENTATION_STATUS: test=loadStreamStopUnloadWithUserSelectedModel
+12:01:19.883 INSTRUMENTATION_STATUS_CODE: -2
+12:01:20.776 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+12:01:20.778 INSTRUMENTATION_STATUS: current=14
+12:01:20.778 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:20.779 INSTRUMENTATION_STATUS: numtests=15
+12:01:20.779 INSTRUMENTATION_STATUS: stream=
+12:01:20.780 com.xavierxia.mycelium.roundtable.DeviceRetrievalTest:
+12:01:20.780 INSTRUMENTATION_STATUS: test=samplePackMatchesEveryRetrievalVector
+12:01:20.781 INSTRUMENTATION_STATUS_CODE: 1
+12:01:20.797 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+12:01:20.798 INSTRUMENTATION_STATUS: current=14
+12:01:20.798 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:20.799 INSTRUMENTATION_STATUS: numtests=15
+12:01:20.800 INSTRUMENTATION_STATUS: stream=.
+12:01:20.800 INSTRUMENTATION_STATUS: test=samplePackMatchesEveryRetrievalVector
+12:01:20.800 INSTRUMENTATION_STATUS_CODE: 0
+12:01:20.801 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+12:01:20.801 INSTRUMENTATION_STATUS: current=15
+12:01:20.802 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:20.802 INSTRUMENTATION_STATUS: numtests=15
+12:01:20.802 INSTRUMENTATION_STATUS: stream=
+12:01:20.803 INSTRUMENTATION_STATUS: test=boundQueriesReachTheSamplePack
+12:01:20.803 INSTRUMENTATION_STATUS_CODE: 1
+12:01:20.804 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+12:01:20.804 INSTRUMENTATION_STATUS: current=15
+12:01:20.805 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+12:01:20.805 INSTRUMENTATION_STATUS: numtests=15
+12:01:20.806 INSTRUMENTATION_STATUS: stream=.
+12:01:20.806 INSTRUMENTATION_STATUS: test=boundQueriesReachTheSamplePack
+12:01:20.807 INSTRUMENTATION_STATUS_CODE: 0
+12:01:20.807 INSTRUMENTATION_RESULT: stream=
+12:01:20.808 
+12:01:20.808 Time: 36.493
+12:01:20.809 There were 3 failures:
+12:01:20.810 1) threeRunsWithAnAbout1500TokenPrompt(com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest)
+12:01:20.810 java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+12:01:20.811 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+12:01:20.812 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:20.812 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:20.812 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:20.813 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:20.813 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:20.813 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:20.814 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:20.814 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:20.815 	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+12:01:20.815 2) generate256Tokens(com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest)
+12:01:20.816 java.lang.IllegalStateException: model is not registered
+12:01:20.816 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+12:01:20.817 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:20.817 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:20.818 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:20.818 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:20.819 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:20.819 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:20.820 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:20.820 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:20.820 	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+12:01:20.821 3) loadStreamStopUnloadWithUserSelectedModel(com.xavierxia.mycelium.localmodels.LocalModelDeviceTest)
+12:01:20.822 java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+12:01:20.822 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+12:01:20.823 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+12:01:20.824 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+12:01:20.824 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+12:01:20.825 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+12:01:20.825 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+12:01:20.826 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+12:01:20.826 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+12:01:20.827 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+12:01:20.828 	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+12:01:20.828 
+12:01:20.828 FAILURES!!!
+12:01:20.829 Tests run: 15,  Failures: 3
+12:01:20.830 
+12:01:20.830 
+12:01:20.831 INSTRUMENTATION_CODE: -1

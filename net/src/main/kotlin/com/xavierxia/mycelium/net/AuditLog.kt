@@ -3,6 +3,7 @@ package com.xavierxia.mycelium.net
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 data class AuditEntry(
     val at: String,
@@ -17,10 +18,19 @@ data class AuditEntry(
     val completionTokens: Int?,
 )
 
-/** Append-only record of everything the gateway sent. Credentials are not part of an entry. */
+/**
+ * Append-only record of everything the gateway sent. Credentials are not part of an entry.
+ *
+ * Every instance that points at the same file shares one lock, so the hearth, the roundtable and a
+ * model-list pull can all finish at the same moment without one of them reading the old list,
+ * appending and overwriting the other's entry. Reading, appending and clearing are all serialized,
+ * and only one writer at a time can touch the `.partial` file.
+ */
 class AuditLog(private val file: File) {
-    fun record(entry: AuditEntry) {
-        val entries = read() + entry
+    private val lock = lockFor(file)
+
+    fun record(entry: AuditEntry): Unit = synchronized(lock) {
+        val entries = readLocked() + entry
         file.parentFile?.mkdirs()
         val array = JSONArray()
         entries.forEach { array.put(it.toJson()) }
@@ -32,14 +42,23 @@ class AuditLog(private val file: File) {
         }
     }
 
-    fun read(): List<AuditEntry> {
+    fun read(): List<AuditEntry> = synchronized(lock) { readLocked() }
+
+    fun clear(): Unit = synchronized(lock) {
+        file.delete()
+    }
+
+    private fun readLocked(): List<AuditEntry> {
         if (!file.isFile) return emptyList()
         val array = JSONObject(file.readText()).optJSONArray("entries") ?: return emptyList()
         return List(array.length()) { index -> array.getJSONObject(index).toEntry() }
     }
 
-    fun clear() {
-        file.delete()
+    private companion object {
+        /** One lock per file path, shared by every instance in this process. */
+        private val locks = ConcurrentHashMap<String, Any>()
+
+        fun lockFor(file: File): Any = locks.computeIfAbsent(file.absoluteFile.normalize().path) { Any() }
     }
 }
 

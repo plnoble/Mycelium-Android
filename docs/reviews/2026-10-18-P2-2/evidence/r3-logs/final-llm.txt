@@ -1,0 +1,31 @@
+> Task :model-api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :model-api:compileKotlin UP-TO-DATE
+> Task :model-api:compileJava NO-SOURCE
+> Task :model-api:processResources NO-SOURCE
+> Task :model-api:classes UP-TO-DATE
+> Task :model-api:jar UP-TO-DATE
+> Task :llm:preBuild UP-TO-DATE
+> Task :llm:preDebugBuild UP-TO-DATE
+> Task :llm:generateDebugResources UP-TO-DATE
+> Task :llm:packageDebugResources UP-TO-DATE
+> Task :llm:processDebugNavigationResources UP-TO-DATE
+> Task :llm:parseDebugLocalResources UP-TO-DATE
+> Task :llm:generateDebugRFile UP-TO-DATE
+> Task :llm:compileDebugKotlin UP-TO-DATE
+> Task :llm:javaPreCompileDebug UP-TO-DATE
+> Task :llm:compileDebugJavaWithJavac NO-SOURCE
+> Task :llm:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :llm:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :llm:preDebugUnitTestBuild UP-TO-DATE
+> Task :llm:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :llm:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :llm:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :llm:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :llm:processDebugJavaRes UP-TO-DATE
+> Task :llm:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :llm:verifyOfflineDependencies
+> Task :llm:testDebugUnitTest
+
+BUILD SUCCESSFUL in 4s
+18 actionable tasks: 2 executed, 16 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.5.0/userguide/configuration_cache_enabling.html

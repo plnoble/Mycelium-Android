@@ -1,0 +1,5 @@
+Instrumentation #0: ActiveInstrumentation{37705ec {com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner} 1 procs}
+mClass=ComponentInfo{com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner} mFinished=false
+mTargetProcesses=[com.xavierxia.mycelium.debug]
+Proc # 5: fg     F/ /FGS  -CMNFU-T  t: 0 21272:com.xavierxia.mycelium.debug/u0a575 (instrumentation)
+Proc # 5: fg     F/ /FGS  -CMNFU-T  t: 0 21272:com.xavierxia.mycelium.debug/u0a575 (instrumentation)

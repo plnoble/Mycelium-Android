@@ -147,6 +147,7 @@ dependencies {
     implementation(project(":net"))
     implementation(project(":roundtable"))
     implementation(project(":llm"))
+    implementation(project(":hearth"))
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material3:material3")
@@ -179,7 +180,12 @@ dependencies {
         exclude(group = "androidx.test", module = "monitor")
     }
     androidTestImplementation("androidx.test:monitor:1.8.0")
+    // P2-2 真机复验：instrumented 测试要驱动界面，和本地单测用同一个制品、同一份 BOM 版本。
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // ui-test-junit4 传递依赖 espresso-idling-resource，但本机只缓存了 3.7.0（3.5.0 没有），
+    // 离线构建必须在 androidTest 上显式用缓存里那个版本，否则解析不到。
+    androidTestImplementation("androidx.test.espresso:espresso-idling-resource:3.7.0")
     androidTestImplementation(project(":contract"))
+    androidTestImplementation(project(":hearth"))
 }
-
-

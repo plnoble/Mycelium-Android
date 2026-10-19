@@ -1,0 +1,133 @@
+11:47:31.710 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+11:47:31.714 INSTRUMENTATION_STATUS: current=1
+11:47:31.715 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:31.715 INSTRUMENTATION_STATUS: numtests=25
+11:47:31.716 INSTRUMENTATION_STATUS: stream=
+11:47:31.716 com.xavierxia.mycelium.hearth.DeviceHearthTest:
+11:47:31.716 INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+11:47:31.717 INSTRUMENTATION_STATUS_CODE: 1
+11:47:31.881 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+11:47:31.882 INSTRUMENTATION_STATUS: current=1
+11:47:31.882 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:31.883 INSTRUMENTATION_STATUS: numtests=25
+11:47:31.883 INSTRUMENTATION_STATUS: stream=.
+11:47:31.883 INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+11:47:31.884 INSTRUMENTATION_STATUS_CODE: 0
+11:47:31.884 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+11:47:31.884 INSTRUMENTATION_STATUS: current=2
+11:47:31.884 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:31.884 INSTRUMENTATION_STATUS: numtests=25
+11:47:31.885 INSTRUMENTATION_STATUS: stream=
+11:47:31.885 com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest:
+11:47:31.886 INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+11:47:31.886 INSTRUMENTATION_STATUS_CODE: 1
+11:47:36.873 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+11:47:36.874 INSTRUMENTATION_STATUS: current=2
+11:47:36.875 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:36.876 INSTRUMENTATION_STATUS: numtests=25
+11:47:36.877 INSTRUMENTATION_STATUS: stream=.
+11:47:36.877 INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+11:47:36.878 INSTRUMENTATION_STATUS_CODE: 0
+11:47:36.879 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+11:47:36.879 INSTRUMENTATION_STATUS: current=3
+11:47:36.880 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:36.880 INSTRUMENTATION_STATUS: numtests=25
+11:47:36.881 INSTRUMENTATION_STATUS: stream=
+11:47:36.882 com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest:
+11:47:36.882 INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+11:47:36.883 INSTRUMENTATION_STATUS_CODE: 1
+11:47:45.363 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+11:47:45.364 INSTRUMENTATION_STATUS: current=3
+11:47:45.365 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:45.365 INSTRUMENTATION_STATUS: numtests=25
+11:47:45.366 INSTRUMENTATION_STATUS: stream=.
+11:47:45.366 INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+11:47:45.367 INSTRUMENTATION_STATUS_CODE: 0
+11:47:45.368 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+11:47:45.368 INSTRUMENTATION_STATUS: current=4
+11:47:45.369 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:47:45.370 INSTRUMENTATION_STATUS: numtests=25
+11:47:45.370 INSTRUMENTATION_STATUS: stream=
+11:47:45.370 com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest:
+11:47:45.370 INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+11:47:45.372 INSTRUMENTATION_STATUS_CODE: 1
+11:48:05.725 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+11:48:05.727 INSTRUMENTATION_STATUS: current=4
+11:48:05.728 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:05.729 INSTRUMENTATION_STATUS: numtests=25
+11:48:05.730 INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+11:48:05.730 	at org.junit.Assert.fail(Assert.java:89)
+11:48:05.731 	at org.junit.Assert.assertTrue(Assert.java:42)
+11:48:05.732 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:111)
+11:48:05.732 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.access$hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:1)
+11:48:05.733 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:70)
+11:48:05.733 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+11:48:05.733 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+11:48:05.734 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+11:48:05.735 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+11:48:05.735 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+11:48:05.736 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+11:48:05.737 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+11:48:05.737 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+11:48:05.738 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+11:48:05.738 
+11:48:05.739 INSTRUMENTATION_STATUS: stream=
+11:48:05.740 Error in stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest):
+11:48:05.741 java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+11:48:05.741 	at org.junit.Assert.fail(Assert.java:89)
+11:48:05.741 	at org.junit.Assert.assertTrue(Assert.java:42)
+11:48:05.742 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:111)
+11:48:05.742 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.access$hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:1)
+11:48:05.743 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:70)
+11:48:05.743 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+11:48:05.744 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+11:48:05.744 	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+11:48:05.745 	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+11:48:05.745 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+11:48:05.746 	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+11:48:05.746 	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+11:48:05.747 	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+11:48:05.747 	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+11:48:05.747 
+11:48:05.748 INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+11:48:05.748 INSTRUMENTATION_STATUS_CODE: -2
+11:48:05.749 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+11:48:05.749 INSTRUMENTATION_STATUS: current=5
+11:48:05.750 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:05.750 INSTRUMENTATION_STATUS: numtests=25
+11:48:05.751 INSTRUMENTATION_STATUS: stream=
+11:48:05.751 com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest:
+11:48:05.753 INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+11:48:05.753 INSTRUMENTATION_STATUS_CODE: 1
+11:48:13.586 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+11:48:13.588 INSTRUMENTATION_STATUS: current=5
+11:48:13.589 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:13.589 INSTRUMENTATION_STATUS: numtests=25
+11:48:13.590 INSTRUMENTATION_STATUS: stream=.
+11:48:13.591 INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+11:48:13.591 INSTRUMENTATION_STATUS_CODE: 0
+11:48:13.592 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+11:48:13.593 INSTRUMENTATION_STATUS: current=6
+11:48:13.593 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:13.594 INSTRUMENTATION_STATUS: numtests=25
+11:48:13.594 INSTRUMENTATION_STATUS: stream=
+11:48:13.595 INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+11:48:13.595 INSTRUMENTATION_STATUS_CODE: 1
+11:48:17.169 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+11:48:17.170 INSTRUMENTATION_STATUS: current=6
+11:48:17.171 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:17.172 INSTRUMENTATION_STATUS: numtests=25
+11:48:17.172 INSTRUMENTATION_STATUS: stream=.
+11:48:17.173 INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+11:48:17.174 INSTRUMENTATION_STATUS_CODE: 0
+11:48:17.174 INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+11:48:17.175 INSTRUMENTATION_STATUS: current=7
+11:48:17.176 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+11:48:17.176 INSTRUMENTATION_STATUS: numtests=25
+11:48:17.177 INSTRUMENTATION_STATUS: stream=
+11:48:17.177 INSTRUMENTATION_STATUS: test=comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+11:48:17.178 INSTRUMENTATION_STATUS_CODE: 1
+
+== WATCHDOG: no log growth for 3 min; stuck case: comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere; force-stopped ==
+11:51:28.036 INSTRUMENTATION_RESULT: shortMsg=Process crashed.
+11:51:28.037 INSTRUMENTATION_CODE: 0

@@ -1,0 +1,27 @@
+guards-selftest output (TEXT LEVEL ONLY: no real adb, no device, no Gradle)
+host  : Windows PowerShell 5.1.26100.9711
+cmd   : powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\guards-selftest.ps1
+date  : 2026-10-19 15:16:07 (Asia/Shanghai)
+fixtures: ../guards-samples/ (provenance in guards-samples/README.md)
+exit  : 0
+
+guards-selftest: text-level replay only (no adb, no device); samples: D:\Agent\Worktrees\Mycelium-Android\p2-2-r6-guards\docs\reviews\2026-10-18-P2-2\evidence\device-tests\guards-samples
+PASS 01-done (01-done)
+PASS 02-crash (02-crash)
+PASS 03-freeze-timeout (03-freeze-timeout)
+PASS 04-freeze-recovered (04-freeze-recovered)
+PASS 05-stall-not-frozen (05-stall-not-frozen)
+PASS 06-probe-unknown-old-shape (06-probe-unknown-old-shape)
+PASS 07-no-pid-stall (07-no-pid-stall)
+PASS 08-time-cap (08-time-cap)
+PASS 09-code0-no-marker (09-code0-no-marker)
+PASS 10-ps-error (10-ps-error)
+PASS 11-pidof-error (11-pidof-error)
+PASS 12-done-timestamped (12-done-timestamped)
+PASS 13-ps-extra-column (13-ps-extra-column)
+PASS 14-ps-wchan-dash (14-ps-wchan-dash)
+PASS 15-ps-wchan-blank (15-ps-wchan-blank)
+PASS live-adb-error (phase 2: real live loop, fixture adb, no device)
+
+guards-selftest: 16 passed, 0 failed (scenarios in D:\Agent\Worktrees\Mycelium-Android\p2-2-r6-guards\docs\reviews\2026-10-18-P2-2\evidence\device-tests\guards-samples\scenarios)
+note: 15 replay scenarios + 1 live-loop smoke test, all text level; the real device paths still need a device run.

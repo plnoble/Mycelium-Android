@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import com.xavierxia.mycelium.hearth.HearthSpace
 import com.xavierxia.mycelium.localmodels.LocalModelsScreen
 import com.xavierxia.mycelium.BuildConfig
 import com.xavierxia.mycelium.R
@@ -108,7 +109,7 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
         ) { padding ->
             when (space) {
                 Space.Roundtable -> RoundtableScreen(roundtable, chat, revision, padding) { revision++ }
-                Space.Hearth -> HearthScreen(padding)
+                Space.Hearth -> HearthSpace(padding)
                 Space.Mine -> MineScreen(roundtable, chat, updates, revision, padding) { revision++ }
             }
         }
@@ -354,15 +355,6 @@ private fun ClaimScreen(roundtable: Roundtable, version: InstalledVersion, claim
             Text("${relationLabel(relation.kind)} · ${relation.direction}「${relation.otherText}」")
             Text(relation.rationale)
         }
-    }
-}
-
-@Composable
-private fun HearthScreen(padding: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("炉边", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
-        Text("炉边在下一阶段开发：只用手机上的模型，不联网。")
     }
 }
 
@@ -848,7 +840,11 @@ private fun AuditCard(entry: AuditEntry) {
                 ""
             }
             Text("${entry.sentCharacters} 字$usage")
-            if (entry.sentBody.isNotEmpty()) Text(entry.sentBody)
+            if (entry.sentBody.isNotEmpty()) {
+                Text(entry.sentBody)
+            } else if (!entry.purpose.recordsBody) {
+                Text("（测试模式：不记正文）")
+            }
         }
     }
 }
@@ -857,6 +853,8 @@ private fun purposeLabel(purpose: GatewayPurpose): String = when (purpose) {
     GatewayPurpose.Update -> "更新"
     GatewayPurpose.FetchModels -> "拉取模型列表"
     GatewayPurpose.RoundtableChat -> "圆桌聊天"
+    GatewayPurpose.HearthChat -> "炉边聊天"
+    GatewayPurpose.HearthChatTest -> "炉边 · 测试模式"
 }
 
 /** FTS marks the matched span with brackets. The card shows the words, not the markers. */

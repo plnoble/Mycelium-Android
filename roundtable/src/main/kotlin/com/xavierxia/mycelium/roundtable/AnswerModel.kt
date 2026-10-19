@@ -11,12 +11,16 @@ import com.xavierxia.mycelium.model.ChatRole
 import com.xavierxia.mycelium.model.GenerationParameters
 import com.xavierxia.mycelium.model.ModelInfo
 import com.xavierxia.mycelium.model.ModelLocation
+import com.xavierxia.mycelium.net.GatewayCall
 import com.xavierxia.mycelium.net.GatewayPurpose
 import com.xavierxia.mycelium.net.GatewayRequest
+import com.xavierxia.mycelium.net.GatewayResponse
 import com.xavierxia.mycelium.net.OutboundGateway
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -46,6 +50,10 @@ sealed class ChatReply {
  * The cloud answer model, the same seam the on-device engine implements: :model-api's ChatModel.
  * Not streaming, so the whole body is emitted as one delta. Retrieval, prompting, validation and
  * storage stay outside this class.
+ *
+ * [purpose] is what the audit log records. The hearth space passes its own purpose (and the test
+ * mode's, which keeps the body out of the log) plus [omitAuditBody]; the defaults keep the
+ * roundtable behaviour.
  */
 class CloudChatModel(
     private val gateway: OutboundGateway,
@@ -53,18 +61,49 @@ class CloudChatModel(
     private val baseUrl: String,
     private val apiKey: String?,
     private val model: String,
+    private val purpose: GatewayPurpose = GatewayPurpose.RoundtableChat,
+    private val omitAuditBody: Boolean = false,
+    /**
+     * Hearth-style chat: plain conversation text with the caller's generation parameters. The
+     * roundtable protocol (JSON object answer, its own parameters) stays the default.
+     */
+    private val naturalChat: Boolean = false,
     private val readTimeoutMs: Int = 60_000,
 ) : ChatModel {
+    private val gate = Any()
+
+    @Volatile
+    private var aborted = false
+    private var handle: GatewayCall? = null
+
     override val info = ModelInfo(
         id = model,
         displayName = "$serviceName · $model",
         location = ModelLocation.CLOUD,
     )
 
-    /** One request, no stream: there is nothing in flight to abort between deltas. */
-    override fun stop() = Unit
+    /**
+     * The answer arrives in one piece, but the request itself can be stopped: the caller gets the
+     * request's cancel switch and cancelling it makes the blocking read return immediately. A stopped
+     * request produces no answer and no error, so nothing late can reach the screen or the database.
+     *
+     * Stop and registration share one lock, so a stop that lands *before* the connection exists is
+     * not lost: the handle arrives already cancelled, and the switch holds that state for good, so
+     * the gateway neither opens a socket nor writes a body for a request that was stopped.
+     */
+    override fun stop() = synchronized(gate) {
+        aborted = true
+        handle?.cancel()
+        handle = null
+    }
+
+    private fun register(open: GatewayCall) = synchronized(gate) {
+        if (aborted) open.cancel() else handle = open
+    }
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> = flow {
+        // Stopped before the request even started: nothing goes out at all.
+        if (aborted) return@flow
         val key = apiKey ?: throw IllegalStateException("这个服务还没有填写 API key")
         val list = JSONArray()
         messages.forEach { message ->
@@ -77,30 +116,78 @@ class CloudChatModel(
         val payload = JSONObject()
             .put("model", model)
             .put("messages", list)
-            .put("response_format", JSONObject().put("type", "json_object"))
+        if (naturalChat) {
+            // A character talks, so it gets the parameters its owner set, not the compiler's ones.
+            payload
+                .put("temperature", parameters.temperature.toDouble())
+                .put("max_tokens", parameters.maxTokens)
+                .put("top_p", parameters.topP.toDouble())
+        } else {
+            payload.put("response_format", JSONObject().put("type", "json_object"))
+        }
+        payload
             // Official thinking-mode guide: thinking is on by default. extra_body carries this object.
             .put("thinking", JSONObject().put("type", "disabled"))
-        val response = gateway.send(
-            GatewayRequest(
-                url = baseUrl.trimEnd('/') + "/chat/completions",
-                purpose = GatewayPurpose.RoundtableChat,
-                method = "POST",
-                headers = mapOf(
-                    "Authorization" to "Bearer $key",
-                    "Content-Type" to "application/json",
-                    "Accept" to "application/json",
-                ),
-                body = payload.toString(),
-                readTimeoutMs = readTimeoutMs,
-            ),
-        )
-        if (response.status !in 200..299) {
-            throw IllegalStateException(failureMessage(response.status))
+        try {
+            val response = try {
+                sendCancellable(
+                    GatewayRequest(
+                        url = baseUrl.trimEnd('/') + "/chat/completions",
+                        purpose = purpose,
+                        method = "POST",
+                        headers = mapOf(
+                            "Authorization" to "Bearer $key",
+                            "Content-Type" to "application/json",
+                            "Accept" to "application/json",
+                        ),
+                        body = payload.toString(),
+                        readTimeoutMs = readTimeoutMs,
+                        omitAuditBody = omitAuditBody,
+                        onOpen = ::register,
+                    ),
+                )
+            } catch (cancelled: CancellationException) {
+                // Cancelling the collector is not an answer either, and it must keep travelling: the
+                // app reads this cancellation as "the turn was stopped", not as a failure.
+                throw cancelled
+            } catch (failure: Exception) {
+                // Stopping the turn is not a failure: it just has no answer.
+                if (aborted) return@flow
+                throw failure
+            }
+            if (aborted) return@flow
+            if (response.status !in 200..299) {
+                throw IllegalStateException(failureMessage(response.status))
+            }
+            val json = JSONObject(response.body)
+            val content = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+            emit(content)
+        } finally {
+            // The registration lives as long as the request can still send or read, and is dropped
+            // only here, once the answer is out or the turn has ended. What keeps a later stop from
+            // producing an answer is the permanent [aborted] flag, not this handle.
+            synchronized(gate) { handle = null }
         }
-        val json = JSONObject(response.body)
-        val content = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-        emit(content)
     }
+
+    /**
+     * Runs the blocking gateway call while staying tied to the collecting coroutine, so cancelling
+     * the job cancels the request at once. `invokeOnCancellation` runs as soon as the job starts
+     * cancelling, whereas `invokeOnCompletion` would run only after this coroutine finished — that
+     * is, after the blocked read it is supposed to interrupt. The call still blocks this thread, so
+     * nothing about where the request runs changes; only the stop path does.
+     */
+    private suspend fun sendCancellable(request: GatewayRequest): GatewayResponse =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { stop() }
+            try {
+                continuation.resumeWith(Result.success(gateway.send(request)))
+            } catch (failure: Throwable) {
+                // Already cancelled: this resume is a no-op. A stop() instead of a cancelled job is
+                // what ends the suspension here.
+                continuation.resumeWith(Result.failure(failure))
+            }
+        }
 
     private fun failureMessage(status: Int): String = when (status) {
         401 -> "云端拒绝了密钥（401）"

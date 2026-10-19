@@ -1,0 +1,816 @@
+# P2-2 交付报告：炉边（人物与对话，2026-10-18 修订）
+
+- 分支：`wp/P2-2-hearth-chat`（已并入 `main`，最新基线 `a54c604`）；第四次复审后本报告曾在 detached 工作树 `p2-2-r4-doc` 上按 r4 意见更正（**改写前的分支 tip 为 `5ba4376`**，那一轮的文档提交是 `7b87696`）；本次（2026-10-19 晚）又在 detached 工作树 `p2-2-r5-fix` 上按第五次复审意见更正，**改写前的 tip 为 `803abb6`**（第五次复审审的即这一提交）；第六次复审整改（r6 四条【P2】）分两个 detached 工作树完成——守卫脚本在 `p2-2-r6-guards`（原提交 `42ded05`），结案材料/注释/转述在 `p2-2-r6-doc`（原提交 `cc9b3ec`，**改写前的 tip 为 `b58d3a0`**，第六次复审审的即这一提交），两笔已拣入本分支；**本次（2026-10-19，审核收口轮）在分支工作树 `p2-2-hintfix` 上把审核状态更新到收口终态、补记最终门禁，改写前的 tip 为 `1ac3ac6`**
+- 本报告对应的提交：见第八节「提交与证据对应表」
+- 本报告已于 2026-10-19 更新到**第二轮整改、真机复跑、最终门禁、第三至第六次复审结论与审核收口**（见 3.5、3.6、3.7、3.8、3.9、4.6、第十节）；3.7 是按 `REVIEW-r4.md`、3.8 是按 `REVIEW-r5.md`、3.9 是按 `REVIEW-r6.md` 意见对表述的更正，3.6 末是本轮的收口说明
+- 任务书：`docs/work-packages/P2-2-hearth-characters-chat.md`（以文末「2026-10-18 修订」「附录：预设人物」「2026-10-18 统筹裁定」为准）
+- 审核报告：`PLAN-REVIEW.md`（方案审，结论需修改）、`SPECIAL-隐私出网.md`（专项审，结论需修改）、`REVIEW.md`（全量审，9 条）、`REVIEW-r2.md`（复审，本分支已入库 `e6c1d65`；判第 5、6 条通过、其余七条不通过）、`REVIEW-r3.md`（第三次复审，审 `758bbf2`、对照 r2 基线 `cb6c2db`；已入库 `b6dbc6c`，结论见 3.6）、`REVIEW-r4.md`（第四次复审，审 `5ba4376`；已入库 `7b87696`，结论见 3.7）、`REVIEW-r5.md`（第五次复审，审 `803abb6`；已入库 `b58d3a0`，结论见 3.8）、**`REVIEW-r6.md`（第六次复审，审 `b58d3a0`；已入库 `2f5e623`，结论见 3.6 末与 3.9）**
+- 本包当前状态：**待审，审核循环已收口（交统筹处理）**——六轮复审（`REVIEW.md`、`REVIEW-r2.md`…`REVIEW-r6.md`）**已全部跑完并入库**；第六次复审 `REVIEW-r6.md` 的结论原文仍判**需修改**，其中「①的 15s/30s 口径、②门禁来源、③进程号冲突」**通过**，历史就绪/草稿/重试/本地取消**维持通过**；r6 新列的**四条【P2】必改已在本轮全部修完**（守卫脚本、结案材料/注释/转述，见 3.9 与第八节），**审核循环就此收口，不再有下一轮「整改并再复审」**。**本包仍不得交付、不得推送**；**第 1 条残留（取消无法中断在途建连）为平台限制，是否接受为已知残留由统筹裁定**（三个选项见 `CANCEL-DURING-CONNECT.md` 第 8 节；第二轮整改见 3.5，最终门禁 **169/0 双绿**见第十节，审核链见 3.6、3.7、3.8、3.9）
+
+## 一、这一包做了什么
+
+1. **人物三选一模型**：`ModelKind` = `default` / `local` / `cloud`；选 `local` 必须带登记模型，选 `cloud`
+   必须带云端服务。老库用 `PRAGMA table_info` 查缺列 + `ALTER TABLE` 补列，**列检查、改表与完成标记
+   （`meta.schema-version`）在同一个事务里**，`BEGIN IMMEDIATE` + 进程内锁保证同时首次打开不重复改表；
+   老人物保留原来指定的本地模型（空 `model_id` 的留在 `default`）。
+2. **预设人物 5 个**：阿远、年糕、老K、外婆、老陈，第一次打开炉边时写入；**5 条预设与「已放过」标记
+   同一个事务提交**，失败则一行都不留、标记也不落，之后再放一次仍然补齐；删掉的不再自动加回来。
+   每个人物的设定里都带安全兜底句（提示里一定含有、编辑页可见可改），默认「默认本地模型」，搜索关闭。
+3. **测试模式 / 沉浸模式**：规则在模块里（`HearthChat`）；测试模式只在内存的临时会话里读写，
+   重新生成也在其中做；离开炉边（底栏、切人物、切模式、关闭对话页）统一停掉进行中的生成并清空临时会话，
+   晚到回调用「本轮令牌」丢弃。测试模式的输入草稿只放在 `remember`（不进 saved state），切模式即清。
+4. **云端走 P1-7 的网关**：`:net` 新增 `HearthChat` / `HearthChatTest` 两个用途与请求级 `omitAuditBody`
+   选项；**「不记正文 = 请求要求不记正文 或 purpose 为 HearthChatTest」**，成功与失败两条审计路径统一，
+   字数照记、真正发出的正文不变。`:roundtable` 的 `CloudChatModel` 把用途、审计策略、协议参数化
+   （默认值保持圆桌原样），改用 `GrantwayAbort` 句柄支持真正中止请求。
+5. **隐私可见**：云端人物在卡片与对话页标「云端」；确认绑定「人物 + 服务 ID + 规范化地址」
+   （`cloud_confirmed_target`），**发送前从设置里重新读取服务快照**做校验，换服务、改地址都要重新确认，
+   复制人物不继承确认；弹窗写明会发出人物设定、本轮问题、历史对话（P2-3 后还有记忆），并写明
+   「测试模式 · 不留记录」只管手机上的记录；测试模式 + 云端时对话页常驻同一提示。
+6. **本轮归属快照**：发送瞬间固定人物、模式、会话、问题与模型；一轮只写一次（`written` 一次性开关），
+   先校验令牌再写库；**云端整段结果被取消就丢弃**，本地已流式生成的部分保留。
+
+## 二、门禁结果
+
+在提交后的干净工作区跑 `scripts/check-all.ps1 --offline`（跳过 llama 准备）：
+
+| 项目 | 结果 |
+|---|---|
+| 结论 | **PASS**：0 failures, 0 warnings, exit code 0 |
+| 用例总数 | 133 |
+| lint | `:app` debug 0 错 0 警；release 0 错 0 警 |
+| 产物 | debug APK / androidTest APK 已签名；release 未签名 |
+| 证据 | `build/check-all/summary.md`、`gradle.log`（gitignore，只在本机） |
+
+**全新 worktree 的从零验证**（交付要求的那一条）：在 `D:\Agent\Worktrees\Mycelium-Android\p2-2-delivery`
+干净检出提交 `f614d36`，跑 `scripts/check-all.ps1 -LlamaSourceRepository <本地 llama.cpp 克隆>`：
+
+- `worktree: clean`、`commit: f614d36…`、**253 个任务实际执行**（20 个无需执行）、llama.cpp 校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`；
+- 七个模块 **133 用例 0 失败 0 错误**（`:app` 27、`:contract` 22、`:hearth` 34、`:llm` 11、`:model-api` 3、`:net` 12、`:roundtable` 24）；
+- lint `:app` debug/release 均 **0 错 0 警**；`app-debug.apk` / `app-debug-androidTest.apk` 已签名、`app-release-unsigned.apk` 未签名；
+- 结论 **PASS：0 failures, 0 warnings, exit code 0**（原始输出在 `p2-2-work/checkall-freshwt2.txt`）。
+
+同一条腿再用 **CI 用的脚本**验一遍（`android-ci.yml` 跑的就是它）：在同一个全新 worktree 里用 Git Bash 跑
+`bash scripts/check-all.sh --skip-llama-prepare` → **通过：0 失败、0 警告、退出码 0**（`p2-2-work/checkall-sh4.txt`）。
+两条门禁脚本在 P2-2 **这一节所记的改动上**验过了（后来两轮改动另行跑过门禁，见下方引用框与第十节）；
+GitHub 上的远端 CI 仍需推送后才能看到（推送由用户决定）。
+
+> **本节的记录早于第二轮整改**（133 用例、提交 `f614d36` / `5005bc4` 等）。第二轮整改后的从零门禁结论见
+> **第十节「最终门禁」**：提交 `c91eaaa`、**154 用例 0 失败**、lint 0 error / 0 warning，`check-all.ps1` 与
+> `check-all.sh` 都给出通过结论；此后本机又在 `b6dbc6c` 与 `204c7c1` 上从零跑过两条门禁脚本（都是 **163 用例
+> 0 失败**、lint 0/0），第五次复审另外读了 `803abb6` 上那一轮的摘要并复算同一工作树的 JUnit XML（**169 用例
+> 0 失败**、lint 0/0）——**这些结论只对应各自跑门禁时的提交，不能外推到当前 tip**，也不该归到任何一次复审的
+> 「转述」名下（见第十节的更正）。
+
+## 三、三轮审核与逐条落实
+
+### 3.1 开工前方案审（`PLAN-REVIEW.md`，Codex，审基线 `e94599b`）：需修改，12 条
+
+| 条 | 内容 | 结果 |
+|---|---|---|
+| 1 | 云端适配（协议、参数、线程、可取消） | **已做**：自然语言协议 + 传 temperature/max_tokens/top_p + IO 上收集 + `GatewayAbort` 真中止 + 取消绑定网络取消 + 登记前停止整条不发 |
+| 2 | 测试模式覆盖所有收尾路径、固定本轮归属 | **已做**：`Turn` 快照 + 令牌 + 一轮只写一次；云端取消丢弃、本地保留部分 |
+| 3 | 测试模式独立临时会话与离页处理 | **已做**：临时会话只在内存；离页停生成、清会话、丢弃晚到回调；续读历史也受令牌约束 |
+| 4 | 云端确认绑定接收目标 | **已做**：人物 + 服务 ID + 规范化地址，发送前用权威快照校验，复制不继承 |
+| 5 | 迁移保留旧语义 + 事务与并发 | **已做**：版本标记与改表同事务、口令串行、进程内锁；老人物保留本地模型 |
+| 6 | 预设播种与标记原子 | **已做**：同事务 + 稳定 id + `INSERT OR IGNORE`；失败回滚有测例 |
+| 7 | 模型解析、引擎生命周期与标签一致 | **部分**（按裁定挪到 P2-5）：本包做到「所选模型/服务失效时明确提示、不崩溃、不静默换模型」 |
+| 8 | 请求级「不记正文」 | **已做**：成功/失败同一规则，`purpose` 与请求级选项双保险，测例覆盖正常返回与失败两种；**超时与取消的矩阵没有单独成例**（见第九节） |
+| 9 | 审计文件跨实例串行 | **已做**：按文件路径进程内共享锁，读/追加/清空串行；并发测例（8 线程 × 25 条） |
+| 10 | 架构测试覆盖真实模块集合与传递依赖 | **已做**：支持一个 `include(...)` 写多个模块，检查生产依赖传递闭包；直接依赖 `:net`、间接依赖、直接引入 HTTP 库、经别的模块继承 HTTP 库四种失败情形都有测例 |
+| 11 | 上下文预算与超长当前问题 | **已做**：装不下人物设定 + 当前问题时明确拒绝，不截设定或安全句 |
+| 12 | 无痕验收不能只比行数 | **已做**：比较完整快照（消息正文/来源/会话/人物），并断言 `redo` 改不掉已存回答 |
+
+### 3.2 隐私与出网专项审（`SPECIAL-隐私出网.md`，Codex）：需修改，7 条
+
+| 条 | 内容 | 结果 |
+|---|---|---|
+| 1（P1） | 连接登记前停止、单独取消协程仍可能出网 | **已做**：停止与登记共用一把锁（登记前停止→句柄一到就中止）；协程取消绑定中止；生成入口先看停止状态；`onCleared` 也停云端 |
+| 2（P1） | 云端回答进 buffer 后取消仍显示/保存/重复提交 | **已做**：令牌先行 + 一轮只写一次；云端取消丢弃整段结果；不再在取消分支无条件保存 |
+| 3（P1） | 未受令牌约束的历史读取把持久历史带回测试模式 | **已做**：历史读取、切人物/模式/会话、生成收尾共用令牌；晚结束任务不再清新任务的生成状态 |
+| 4（P1） | 测试文本进可恢复状态、切模式不清输入框 | **已做**：测试草稿只 `remember`（不进 saved state），切模式/切人物/关闭/离页一起清 |
+| 5（P1） | 发送前校验用缓存服务，可能「旧地址 + 新密钥」 | **已做**：发送时从设置重新取服务快照，地址、密钥、确认校验来自同一次读取 |
+| 6（P2） | 手工规范化错误合并 query 大小写 | **已做**：只折叠允许忽略大小写的部分，query/fragment 原样保留 |
+| 7（P2） | 补齐当前提交的验证证据 | **已做**：见第二、四、八节（在修复后的提交上重跑门禁、补跑受影响真机走查、修正审计附件错配、补 naturalChat 与取消时序测例） |
+
+建议修改 1（测试模式 + 云端常驻告知）已做；建议修改 2、3（审计清空语义、更多失败矩阵）留待下一轮。
+
+### 3.3 全量审（`REVIEW.md`）与 9 条整改
+
+2026-10-18 **21:05–21:19** 在只读 worktree 上跑完（Codex），产出 `REVIEW.md`：**结论「需修改」，9 条**
+（**5 条【P1】+ 4 条【P2】**，即 `REVIEW.md` 第 107、120、134、148、162、176、190、202、216 行的九个标题）。
+该轮结束时的额度读数：**5 小时窗口 59%、每周 41%**。第一轮（17:23–17:27）曾撞上
+用量上限（139,068 token、报告 0 字节，空文件已删），本轮是重置后的重跑。
+
+**逐条整改状态表**（被验证提交 `313e745`；第 5 条的补验测例在 `a196aed`）
+
+| # | 问题（审稿原话要点） | 改在哪里 | 证据 |
+|---|---|---|---|
+| 1 | P1 停止与网络取消协议不完整：`disconnect()` 在连接建立前空转，登记前停止仍会写正文；`invokeOnCompletion` 要等协程结束才触发 | `:net` 新增请求级**永久**取消标记 `GatewayCall`（`cancel` 置标记 + 断开已登记连接，`attach` 登记时若已取消则立刻断开），`exchange()` 在 open 前 / 登记后 / 取输出流前 / 写完正文后四个检查点 `check()`；`:roundtable` 改为 `suspendCancellableCoroutine { invokeOnCancellation { stop() } }`，删掉 `invokeOnCompletion` 与「send 返回即撤注册」 | `net/GatewayTest` 新增 2 例（`aCancelledRequestNeverOpensAConnection`、`aStopInTheRegistrationWindowNeverWritesTheBody`，含正向对照）；`roundtable/HearthCloudModelTest` 新增 2 例（登记窗口前停止不发正文、只 `job.cancel()` 也须 2 秒内断开 5 秒慢服务）。判别力实证：把新守卫改坏后窗口用例报 `expected: <0> but was: <1>`（假服务真收到正文） |
+| 2 | P1 生成中导航留下永久 busy：`abandonTurn()` 不清 `busy`，换会话只换令牌 | `HearthViewModel.abandonTurn()` 收口：bump token、停云端/引擎、取消 operation，并清 `busy/streaming/streamLabel/sendConfirm`；`newConversation()`/`openConversation()` 先调它 | 设备测例 `HearthNavigationDuringTurnDeviceTest`（生成中换会话 / 切测试模式：`busy` 清掉、页面还能继续发、晚到回答不上屏不入库） |
+| 3 | P1 令牌检查在 IO 写库之外：检查完到写库之间还能被作废 | `:hearth` `ConversationLog.append/replaceLastAnswer` 把 `valid()` 放进写事务首行，失败抛 `AbandonedTurn`，`HearthChat.finish/redo` 收敛成 null/false；`HearthViewModel.stillCommittable` 传令牌 + 「云端且用户已停」判定 | `hearth/AbandonedWriteTest` 2 例（写锁被占住期间作废的一轮不落库；仍有效则同一事务里一起提交） |
+| 4 | P1 确认发送任务可越过取消/离页：`confirmSend()` 没绑操作 | `PendingSend(character, question, mode, conversationId, target, token)`；`confirmSend` 每步异步后用 `stillWanted()`（令牌 + `sendConfirm` 实例身份）复检，人物没了就拒发，地址变了重新弹确认 | 设备测例 `HearthNavigationDuringTurnDeviceTest` 第 2 例（先弹确认、期间 0 请求；离页后再跑确认任务不得发请求、不得改写确认状态、不得留测试模式文字） |
+| 5 | P1 地址与密钥来自两次读取 | `CloudStore.endpoint()` 一次读取返回地址+名称+密钥，`:app` 侧 `CloudSettingsStore.service/endpoint` 委托；`stream()` 用它同时做校验与建请求 | `roundtable/CloudEndpointSnapshotTest` 2 例（快照一致；分开读确实会拼出「旧地址 + 新密钥」） |
+| 6 | P2 半升级库把指定本地模型静默改成 default | `:hearth` `Schema.kt` 拆开「加列」与「回填」，新增 `MODEL_KIND_SINCE = 3` 与 `legacyModelKindNeedsRepair`，回填只认 `default` 且 `model_id` 非空 | `:hearth:test` 39 例全绿，含 3 条新例（真实半升级夹具、已打标记库不被覆盖、阈值边界） |
+| 7 | P2 本地加载期间停止，问题仍消失 | `Turn.userStopped` + `stop()` 先置 `activeTurn?.userStopped`；加载期的普通异常按停止收尾（问题回输入框、不入库） | **代码修复，无新增测例**（审稿未要求补验，如实标注） |
+| 8 | P2 最后一条长消息可见 ≠ 用户在底部，流式更新把用户上翻重置 | `HearthSpace.kt` 抽出 `ChatTimeline`；`isAtContentBottom()` 按真实视口（`viewportEndOffset`/`afterContentPadding` + 容差 `min(末项高, 视口/16)`）判定，`DragInteraction` 区分「谁在滚」，`followTail` 只在松手后确实落到底部才恢复 | 设备测例 `HearthTimelineFollowDeviceTest` 5 例；对照实验：换回旧逻辑后「长回答内上翻」必失败（用户停在 691 被拽到 1433） |
+| 9 | P2 证据不足与过头表述 | 见本报告**第九节**（逐条列了缺失的原始附件、撤回的表述与更正后的说法）与 **9.1**（复审第 7 条要求的二次更正） | 第九节各行的「现在的事实」列、9.1 的更正清单、`docs/reviews/2026-10-18-P2-2/evidence/` 下的审计原文附件 |
+
+**复审状态**：另起的 Codex 复审第一次在 **22:11** 起跑，5.5 分钟 / 131 万 token 后撞上限（**5h=99%、每周=47%**，
+重置 **2026-10-19 02:06**，credits 0），**那一次报告未生成**。挂的**无人值守任务已按点执行并产出报告**：
+`p2-2-work/review-r2-wait.log` 记到 02:07:36 开始、审核目标 `cb6c2db746d4aad7d902de0191db7938596c360f`、
+02:15:26 结束、报告 13087 字节；结论为**需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**。
+报告 `REVIEW-r2.md` 现已在本分支**入库**（提交 `e6c1d65`，当时本分支 tip 即 `e6c1d65`；此前「未入库文件、
+位置在 `D:\Agent\Project\Nivra\…`」的说法作废）。它的审核目标是 `cb6c2db`，其后另有七笔提交
+（`6fd00c8` 复审第 3、4 条的 hearth 半边；`3bfbdc3` 第 8 条；`42fee21` 第 1 条；`bfa9217` 第 2 条；
+`e152472` 第 4 条；`c91eaaa` 令牌原子化＋第 7 条；`b9efc1d` 只更正证据表述），**复审结论未覆盖这些
+提交**——所以本报告既不把复审的「不通过」当成对第二轮整改的评语，也不把第二轮整改写成「已通过」。
+逐条整改见 **3.5**。
+
+**因此本包现在的状态是：方案审 12 条与隐私与出网专项审 7 条已按裁定整改（逐条状态见 3.1/3.2）；
+9 条整改已提交**（`313e745`、`a196aed`），**复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条仍不通过，
+第二轮已按复审意见整改**（逐条见 3.5，提交 `42fee21`、`bfa9217`、`6fd00c8`、`e152472`、`c91eaaa`、
+`3bfbdc3`、`b9efc1d`），**第三次复审 `REVIEW-r3.md` 已产出并随本次提交入库**（审 `758bbf2`，见 3.6）：
+判**第 3、4 条核心缺陷已修复、第 5、6 条维持通过**，**第 1、2、7、8 条仍有遗漏**，**第 9 条表述需改**——
+即**仍需修改，本包仍属「待审」**。**「9 条已全部整改并通过整树与
+真机复验」的表述在此撤回**：3.4 的整树与真机复验只说明那批改动构建、单测、lint 与设备测例通过，
+不构成「复审通过」，也不等于这 9 条的问题已消失。
+
+### 3.4 整改后的整树与真机复验
+
+- **JVM 单测 128/128 —— 此口径作废**：这一行取自**过期的结果产物**（`:net` 14、`:roundtable` 26、
+  `:contract-lib` 22、`:hearth` 39、`:app` 27；结果 XML 时间 2026-10-18 22:14），既没有覆盖第二轮整改后的
+  用例，模块名与数字也和现在的门禁表对不上。**不能把它当作第二轮整改后的单测结论**；二轮整改后的真实
+  数字见 3.5 与第十节（**合计 154**：`:app` 27、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、
+  `:net` 15、`:roundtable` 28）。
+- **lint（debug）0 error / 0 warning，「1 hint」的说法作废**：`HearthSpace.kt` 的 `AutoboxingStateCreation`
+  提示早在提交 `5314e34` 就已消掉；此后（含最终门禁）debug/release lint 都是 **0 error / 0 warning**。
+  此前「纯性能提示、本包未整改、如实写出」的写法与实物不符，撤回。
+- **真机四类九例全过**（runner `com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`）：
+  `HearthCloudStopDeviceTest` `OK (1 test)` 8.316 s、`HearthCloudReconfirmDeviceTest` `OK (1 test)` 3.537 s、
+  `HearthNavigationDuringTurnDeviceTest` `OK (2 tests)` 3.339 s、`HearthTimelineFollowDeviceTest` `OK (5 tests)` 5.804 s。
+  **这四段输出（2026-10-18 22:35 那一轮）本身仍未落盘成文件**（复审 `REVIEW-r2.md` 第 7 条已指出），本报告
+  这一行仍属**当时会话转述、无法独立复核**。**2026-10-19 补**：这四个类此后又做过一次「有界化」复跑，原始
+  输出已按类归档（`docs/reviews/2026-10-18-P2-2/evidence/device-tests/`，39 个文件），覆盖 4.4 列出的四个类，
+  逐例结果与限制见 **4.6**；那是另一次运行，不是 22:35 那一轮。
+- **正式版对照**：装调试包前后 `dumpsys package com.xavierxia.mycelium` 的读数一致——`versionName=0.1.1`、
+  `versionCode=2`、`lastUpdateTime=2026-10-10 05:23:04`、`firstInstallTime=2026-10-10 05:14:52`。但这次
+  **同样没有把 `dumpsys` 原文落盘归档**：仓库、`p2-2-work` 与正式证据目录里都搜不到任何 P2-2 时点的
+  `dumpsys package` 原文，只有 P2-1b 那次走查的 `device-log.txt` 留了同组读数。故本条**只能算当时读数转述，
+  不能独立复核**——此前「这次是真的把原文读出来了（第九节里那条据此更新）」的说法撤回，详见 9.1 第 4 项。
+- **提交对应关系**：`313e745`（9 条整改）、`a196aed`（第 5 条补验测例）；第二轮整改的提交见 3.5。
+
+### 3.5 第二轮整改（复审第 1、2、3、4、7、8、9 条，2026-10-19）
+
+复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条不通过（该报告审的是 `cb6c2db`；第三次复审 `REVIEW-r3.md` 改判第 3、4 条基本通过、第 5、6 条维持通过，第 1、2、7、8 条仍有遗漏，见 3.6）。第二轮逐条整改如下——**判别力实证按条分级，此前「每条都
+验过判别力」的说法与现有证据不符，撤回**：**第 1、3、4、7 条有归档的实证**（第 1 条的失败原文按提交 `42fee21`
+的提交信息与笔记抄录、未另存独立证据文件；第 3、4、7 条为 2026-10-19 在一次性（detached）工作树里
+「改坏 → 只跑相关用例 → 抓失败原文 → 还原 → 复绿」重跑并归档的原文，用的都是**已入库的 JVM 用例**）；
+**第 2 条只有临时 JVM 复刻件**（Robolectric + JDBC 的最小复刻件，本轮临时新写、**未入库到源码树**，源码归档在
+`evidence/r3-logs/item2-probe-source.kt`；它证明那两条断言对这段守卫有判别力，**不等于已入库的真机用例在本机
+跑红过**）；**第 5、6 条为原则通过、无额外实证**（r3 维持通过，本轮没有另做变异实验）；**第 8 条「首次保存 vs
+导航」那一半 2026-10-19 已在真机上取得实证，「手势协程与状态同键」那一半仍无变异实验**（`TimelineFollowState`
+是 `HearthSpace.kt` 的文件私有类、判别点是 Compose 协程的 key，JVM 侧无对应测例可跑；不是「改坏却不红」，
+是「没跑成」，故那一半标**未验证**）；**真机 androidTest 的运行输出此后已归档**（2026-10-19
+的有界化复跑，`evidence/device-tests/`，39 个文件；见 4.6。归档的是 2026-10-19 那一轮，不是 2026-10-18 22:35 那一轮）。
+上述归档文件为 **`docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`**（原始控制台输出与失败
+摘要在同目录 `evidence/r3-logs/`），逐条边界与原因如实记在该文件。本节各行已改为指向归档；表内标注的
+「设备输出」原文见 4.6 的归档目录（该文件第 1 节末与第 10 节仍写着「设备输出仍未归档」，那是它 2026-10-19
+05:30 归档时的状态，已被 4.6 的归档取代）。
+
+| 复审条 | 问题要点（复审原话要点） | 改在哪里 | 提交 | 判别力实证 / 证据 |
+|---|---|---|---|---|
+| 1（P1） | `call.check()` 返回后、`connection.outputStream` 真正建连之前仍可被取消；`disconnect()` 对还没建连的连接是空操作，恢复后照样建连并写完正文 | `:net` `GatewayCall.bodyStream` **把取流本身变成检查点**：取流前读一次开关（已取消就根本不建连），取到流后再读一次；返回的流包成**每次 `write`/`flush` 都复验开关**的写入流，取消后 **`close` 不 flush**，交给 `finally` 的 `disconnect()` 收尾。开关只从 false 变 true，所以任何后续动作都必须重新验证，被挂起期间到达的取消不会被落掉 | `42fee21` | 新增受控用例 `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`（`FrozenPeer` 把 `getOutputStream()` 卡在「已进入取流、尚未建连」处），断言原文 `assertEquals(0, service.bytes, "取消之后假服务收到了正文：${service.body}")`，并断言网关以 `GatewayCancelled` 在 2 秒内返回、连接被断开；同一接线另有放行正向对照（`正常正文` 确实送达）。**判别力实证原文（提交 `42fee21`）**：临时去掉 `bodyStream` 的后置检查与写入流守卫 → 该用例失败：`取消之后假服务收到了正文：{messages:[...]} ==> expected: <0> but was: <64>`，随后还原。`:net:test` 15、`:roundtable:test` 28、`:contract:test` 22，合计 65，**0 失败 0 错误 0 跳过** |
+| 2（P1） | `openConversation(B)` 等 `log.messages(B)` 期间目标仍是旧会话 A，此时发送会把新问题发给并保存到 A；`finishTurn` 第 757–759 行、`replaceTurn` 第 805–808 行在最后一次读取后没有复检令牌 | `openConversation` 在切换开始时**同步把目标定到新会话**并标记 `historyLoading`；历史读取期间 `send`/`regenerate` 一律拒绝；`loadConversation`/`setMode` 复用 `loadHistory`（读取失败也会解除等待，不会把发送键永久禁用）；`finishTurn`/`replaceTurn` 在最后两次读取之后**各复检一次令牌**（`NonCancellable` 收尾不能靠普通协程取消兜底）；`HearthViewModel` 增加可注入的会话开关（生产行为不变），供真机测试把某一次读停住 | `bfa9217` | 新增真机三例：`HearthNavigationDuringTurnDeviceTest.aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected`、`comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere`、`aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened`；`HearthSpace` 的发送键/重新生成在读取期间禁用。**设备原始输出已归档**：单类复跑 `HearthNavigationDuringTurnDeviceTest` **OK (5 tests)** `Time: 22.187`（`device-tests/01-*`），这三例在分批跑 B 里也都通过（`device-tests/02b-*`，逐例见 `03-timings-single-class.md`/`03e`）。**判别力实证已补**（`evidence/discriminating-experiments.md` 第 2 条）：一次性工作树里用 Robolectric + JDBC 停读夹具复刻该设备用例的那两条断言，改回旧写法后两条都红——`切换开始时就该把目标定到新的一段 expected:<[older]> but was:<[newest]>`、`历史还没就绪时不该开始任何一轮（notice） expected null, but was:<先在「我的 → 本地模型」导入一个模型，再和人物聊天>`；只去掉「历史就绪前拒发」时，目标断言仍绿、拒发断言单独红。**注意**：该复刻件是本轮临时新写的 JVM 件、没有入库到源码树（源码归档在 `evidence/r3-logs/item2-probe-source.kt`），所以它证明的是「这两条断言对这段守卫有判别力」，不等于「已入库的那条真机用例在本机跑红过」 |
+| 3（P1） | 事务内校验读的 `generationToken` 是未同步的普通字段；且 `AbandonedWriteTest` 的 latch 第一次放行的是 schema 检查事务，**把 `valid()` 移出写入事务该测试仍可能通过** | `:hearth` `ConversationLog` 抽出 `HearthSession.writeTurn(valid, block)`：**`valid()` 固定在写入事务打开之后、写第一行之前**；`append`/`replaceLastAnswer`（**`redo` 走同一条路**）统一走它；KDoc 写明边界规则（事务一旦提交就以提交为准，返回值不再撤回）。`HearthViewModel` 的 `generationToken` 改 **`AtomicInteger`**（`generation.get()` / `incrementAndGet()`），并把「开始先发布新令牌、取消/离页先递增再取消、最后一个递增者赢、已提交的写不回滚」写进注释 | `6fd00c8`（hearth 半边，含 `redo` 路径）+ `c91eaaa`（令牌改原子变量） | 夹具 `GatedWriteSession` **只拦真正的写入事务、放过每次开会话先跑的 schema 检查事务**（正是复审第 3 条要求的阻塞位置），断言原文：`assertNull(writing.get(20, TimeUnit.SECONDS), "作废的一轮不该被存下来")`、`assertTrue(gate.validSawWriteTransaction, "valid() 必须在写入事务内被问到")`、`assertEquals(0, gate.writes, "作废的一轮一行都不该写")`；另补 `redo` 作废/成功、完整内容与时间戳比较、写入次数、提交完成后才取消四类用例。判别力：把 `valid()` 挪到写入事务之前 → 该用例失败。**判别力实证原文已补**（`evidence/discriminating-experiments.md` 第 3 条，2026-10-19 复跑）：`:hearth:test --tests "*AbandonedWriteTest"` 5 例中 4 例红——`作废的一轮不该被存下来 ==> expected: <null> but was: <5409d3ce-9a12-4757-a9b7-af33362d2870>`（`AbandonedWriteTest.kt:52`）、`valid() 必须在写入事务内被问到`（`:98`/`:198`）、`作废的重做不该算成功`（`:145`）；还原后 5 例全绿。`:hearth:test` **46 用例，0 失败 0 错误 0 跳过** |
+| 4（P1） | 确认状态的数据库更新仍可在取消后完成，甚至用旧人物快照覆盖后来编辑的字段 | 新增 `CharacterStore.confirmCloudTarget(id, target, now, valid)`：在**该方法自己的事务边界内**判定 `valid()`，为 false 就**一列不改**并返回 false；只写 `cloud_confirmed_target` 与 `updated_at`，不再整条人物快照 `update`（`update` 语义不变）。`HearthViewModel.confirmSend` 改走它：`characters.confirmCloudTarget(pending.character.id, pending.target, now(), ::stillWanted)` | `6fd00c8`（store 半边）+ `e152472`（接线与设备用例重写） | `hearth/CloudConfirmTargetTest` 四类：取消、窄更新（含 SQL 列断言）、null 目标、人物不存在；真机用例重写为 `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything`（进测试模式 → 用 `GatedHearthSessions` 把确认写事务停住 → 取消弹窗/离页并在停住期间改名字 → 放行 → 断言没有请求、确认字段未被改写、改过的名字仍在、没有建出对话）。**设备原始输出已归档**：`aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 在单类复跑与分批跑 B 里都通过（6106ms / 6119ms；`device-tests/01-*`、`02b-*`），它也是最初那次 16 分钟挂死的那一例；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 4 条）：去掉事务内的 `valid()` 判定后 `aConfirmationCancelledWhileTheWriteWaitsChangesNothing` 变红，失败原文 `org.opentest4j.AssertionFailedError: 取消之后的确认不该算数`（`CloudConfirmTargetTest.kt:51`），同轮 `AbandonedWriteTest` 5 例 0 失败；还原后 4 例全绿 |
+| 7（P2） | JNI 加载已经成功、主线程尚未恢复时点停止：`userStopped=true` 但 `engine.load()` 不一定抛异常，随后仍会 `generate()`，`runNative()` 清掉停止标记后继续生成并入库 | `LocalModelEngine.load`：native 加载「照常成功」返回后**复检停止标记**，命中就抛 `Loading stopped` 并卸掉模型/关掉描述符（别让下一次 `generate` 的 `runNative` 把标记清掉后照常生成）；`HearthViewModel.stream` 本地分支在**加载返回、开始生成之前再问一次本轮停止意图**（`turn.userStopped`），命中即中止这一轮；`startTurn` 同步登记 `activeTurn`，使「发出后、任务第一行之前」按下的停止也落在本轮；`Turn.produced` 记录是否产出过 token，`stillCommittable` 明确「`userStopped` 且没有产出过的本地回答不入库」，已流式产出的部分仍然保留 | `c91eaaa` | 新增 JVM 用例（`:llm`）：`LocalModelEngineTest.aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded`（加载期间停止但加载仍成功 → 加载失败 + 不留已加载模型 + 描述符关闭 + 生成到不了 native）、`aNativeLoadingStoppedFailureReleasesTheModelAndTheFile`（native 抛 `Loading stopped` → 同样清干净并原样上抛）。新增真机用例 `HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（需要已登记模型，否则 `assume` 跳过）→ **设备原始输出已归档**：该例在真机上走 JUnit assumption **跳过**（`code=-4`，28ms；`device-tests/02b-*`、`03e`），原因是真机只登记了 `copied:false` 的外置 SAF 模型、私有目录无模型文件；**JVM 用例的判别力实证已补**（`evidence/discriminating-experiments.md` 第 5 条）：去掉 `load` 返回后的停止复检，`aStopThatLandsDuringASuccessfulLoadLeavesNothingLoaded` 变红，失败原文 `java.lang.AssertionError: 停止之后这次加载必须以失败收场，实际 null`（`LocalModelEngineTest.kt:98`），同轮其余 5 例通过；还原后 6 例全绿。`:llm:testDebugUnitTest` **13 用例** |
+| 8（P2） | 记忆键与手势监听协程的键不一致，换会话后仍操作旧状态；首次保存（会话 ID 从 null 变成真实 ID）被当成切换会话而重置上翻 | `HearthSpace.kt` 新增 **`TimelineFollowState`**：跟随状态由一份跟着「人 + 这一段对话」走的对象持有，手势协程引用的是**对象本身**（状态与键同源），不再抓住上一次组合的局部状态；会话身份用 `claim` 判定——真人 ID → 另一段真人 ID、或真人 ID → null（新对话/清空/切测试模式）才重置，`null -> 真实 ID`（这一段对话第一次落库）**保留上翻位置**；跟滚动的协程按 segment 重跑，条数一样的两段对话之间切换也会跟到新的一段 | `3bfbdc3` | `HearthTimelineFollowDeviceTest` 补三例：`scrollingBackInsideTheSecondConversationKeepsTheViewportStill`、`theFirstSavedAnswerKeepsAnUpScrolledViewport`、`switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail`。**设备原始输出已归档**：单类复跑 `HearthTimelineFollowDeviceTest` **OK (10 tests)**，连跑两次 `Time: 11.234` / `11.278`（`device-tests/04c`/`04d`），全量里第 11 例也通过（`04g`）。**判别力实证按两半分**：**「首次保存 vs 导航」那一半已有真机实证**——把 `TimelineFollowState.claim()` 改回旧判据（`if (previousId == null && conversationId != null) return`）后 `openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail` 立刻真红，现场是导航**之后**的布局（`total=41`、`lastIndex=22`、`atBottom=false`；`device-tests/04b`，详见 `evidence/discriminating-experiments.md` 第 6.1 节）；**「手势协程与状态同键」那一半仍无变异实验**（未恢复 `remember(…, conversationId)` + `LaunchedEffect(listState)` 的旧写法），如实标**未验证** |
+| 9（P2） | 仍声称「9 条全部整改」；审计原文被错误描述为缺失；`20-testmode-turn.png` 仍含系统通知 | 撤回「9 条已全部整改并通过整树与真机复验」；审计原文按实物更正并归档到 `docs/reviews/2026-10-18-P2-2/evidence/`；`20-testmode-turn.png` 改标「仍含系统『旁路充电』通知，只作进入测试模式的辅助证据」；正式版包信息与设备输出原文改标「未归档，无法复核」；1500 token 测速继续标「无法验证」 | `b9efc1d` | 本报告 3.3、3.4、4.5、第九节与 9.1 的对应改写；`evidence/` 下 `audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md`（2026-10-19 补：设备测例输出此后已归档，见 4.6；`dumpsys package` 原文仍未归档，见 9.1 第 4 项） |
+
+**第二轮整改后的测试真实数字**（最终门禁，见第十节）：`:hearth` **46**（此前 39）、`:net` **15**、
+`:roundtable` **28**、`:app` **27**、`:contract` **22**、`:llm` **13**、`:model-api` **3**，**合计 154 用例 0 失败**。
+
+**判别力实证的边界（2026-10-19 更新，如实记，按条分级）**：**第 1 条（取消后假服务仍收到正文）的失败原文可抄录**
+（见上表，提交 `42fee21`），但**没有另存独立证据文件**。**第 3、4、7 条已于 2026-10-19 在一次性（detached）工作树
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-evidence`（起点 `d5070e1`，即真分支当时的 HEAD）里逐条「改坏 → 只跑相关
+用例 → 抓失败原文 → `git checkout --` 还原 → 复绿」重跑并抓到失败原文**，用的是**已入库的 JVM 用例**
+（`AbandonedWriteTest`、`CloudConfirmTargetTest`、`LocalModelEngineTest`）。**第 2 条不是重跑入库用例**：它只有真机
+用例，本轮另写了一个**临时 JVM（Robolectric + JDBC）复刻件**来验那两条断言，该复刻件**没有入库到源码树**（源码归档在
+`evidence/r3-logs/item2-probe-source.kt`），所以它证明的是「这两条断言对这段守卫有判别力」，**不等于「已入库的真机
+用例在本机跑红过」**。**第 5、6 条为原则通过、无额外实证**：r3 维持通过，本轮没有另做变异实验。**第 8 条的判别力实证
+按两半分**：「首次保存 vs 导航」那一半 2026-10-19 已在真机上取得实证（改回旧判据 → `#11` 真红，`device-tests/04b`）；
+「手势协程与状态同键」那一半仍**未验证**——对 JVM 侧不可达（`TimelineFollowState` 是 `HearthSpace.kt` 的私有类、判别点是
+Compose 的 key），本轮也没有做恢复旧写法的变异实验，不是「改坏却不红」，是「没跑成」。上述原文见
+**`docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`**（原始控制台输出与失败摘要同目录 `evidence/r3-logs/`）。
+**本轮新增/改写的真机用例（androidTest）运行输出已归档**（2026-10-19 的有界化复跑：`evidence/device-tests/`，
+39 个文件，见 4.6；含第 2、4、7、8 条对应的那些用例。`discriminating-experiments.md` 第 1 节末与第 10 节里
+「设备输出仍未归档」是该文件 2026-10-19 05:30 归档时的状态，已被 4.6 的归档取代）。本节此前「每条都验过判别力」
+以及「第 2、4、7、8 条都找不到、标未归档无法复核」的说法均作废。
+本轮**没有出现「改坏却不红」的情形**：实际跑到的第 2（临时复刻件）、3、4、7 条改坏后都变红；第 8 条「首次保存
+vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协程与状态同键」那一半是没跑成，不是不红，标**未验证**。
+
+### 3.6 审核状态（截至本报告更新时）
+
+审核链：全量审 `REVIEW.md`（审 `11e92b3`，结论需修改，**9 条＝5 条【P1】+4 条【P2】**）
+→ 第一轮整改（`313e745` 九条整改 + `a196aed` 第 5 条补验测例；其间 `5314e34` 消掉 lint hint）
+→ 复审 `REVIEW-r2.md`（审 `cb6c2db`）：**第 5、6 条通过，第 1、2、3、4、7、8、9 条不通过**
+→ 第二轮整改（3.5 的七条：`42fee21`、`bfa9217`、`6fd00c8`、`e152472`、`c91eaaa`、`3bfbdc3`、`b9efc1d`）
+→ 第三次复审 `REVIEW-r3.md`（审 `758bbf2`）：任务挂在 2026-10-19 07:06:40（额度重置）后自动执行（等待任务见
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\review-r3-wait.log`），对照 r2 基线 `cb6c2db`，全程只读；
+**该报告已随 `b6dbc6c` 入库**（路径 `docs/reviews/2026-10-18-P2-2/REVIEW-r3.md`）
+→ 第四次复审 `REVIEW-r4.md`（审 `5ba4376`；**已入库 `7b87696`**，结论见 3.7）
+→ 第五次复审 `REVIEW-r5.md`（审 `803abb6`；**已入库 `b58d3a0`**，结论见 3.8）
+→ 第六次复审 `REVIEW-r6.md`（审 `b58d3a0`；**本轮入库**，结论见 3.6 末与 3.9）。
+
+**r3 的结论（`REVIEW-r3.md` 第 1 行）**：**结论：需修改**——**第 3、4 条核心缺陷已修复**（第 3 条「通过，有测试
+表述限制」：夹具已能抓「校验移到写事务外」的变异，但闩锁实际停在底层 `BEGIN` 之前；第 4 条「通过，按事务入口
+裁决」，JVM 变异实证有效），**第 5、6 条维持通过**；**第 1、2、7、8 条仍有遗漏**（第 1 条：取流后的检查能挡住写
+正文，但取消状态仍未进入底层建连过程，取消后仍可能启动连接并等到建连超时；第 2 条：历史读取失败后可能用新人物
+向旧人物会话发送、重做写库被拒后仍缺令牌复检；第 7 条：检查后到 IO 真正开始生成之间仍会丢停止信号；第 8 条：
+未保存的新对话切到历史被误认为首次保存，形成新回归），**第 9 条仍有超出证据的表述、需改**——即 r3 所指
+`DELIVERY.md:157`（本次改写前的位置）的「每条都……验过判别力」，本次已按 3.5 的按条分级说法改写。r3 同时指出：
+新增/改写设备测例的执行结果、第 8 条动态判别力、真实 Android 建连取消时序仍未验证。
+
+**r5 的结论（`REVIEW-r5.md` 第 1 行原文要点）**：**需修改**——②（历史失败、重试、草稿与模式切换）与③（本地
+轮次取消）**通过**（③的真实时延未验证）；①（建连闸门与超时归一化）判**部分通过、残留未封闭**，但明确「把无法
+保证立即取消的建连窗口记录为已知残留并提交统筹裁定，是可接受的处置方式」，前提是结案文档把取消保证与超时口径
+收窄；④（第 9 条的证据与引用）**部分修复**，本报告的门禁来源、r4 条目转述与部分附件说明仍不准确；r4 另列的
+**冻结守卫脚本**缺陷仍未修。④ 的本报告部分与守卫脚本已在本轮修正，详见 3.8。
+
+**r6 的结论（`REVIEW-r6.md` 第 1 行原文要点）**：**需修改**——①的 **15s/30s 口径（仅作禁止措辞）、②的门禁来源、
+③的进程号冲突**判**通过**；**历史就绪、草稿、重试与本地取消维持通过**（r6 复核时 `app`、`llm` 无改动，
+`Gateway.kt` 去掉注释与空白后与 r5 相同）；新增四条**【P2】必须修改**：① 守卫终止解析对配套跑测器带时间戳日志的**回归**、
+② WCHAN 解析未做行列数校验且自检覆盖声明夸大、③ **结案材料仍有第 6、58 行的过宽表述**（`Gateway.kt:290` 的
+保证 B 也需写成「获取正文输出流期间」）、④ 设备测例第 559 行注释与 `DELIVERY.md:282` 的 r4 转述仍未统一。
+r6 同时重申：把该取消限制记为**已知残留并提交统筹裁定**是可接受的处置，但材料须先完成一致性修正，**不能称
+窗口已修复或保证取消时限**。详见 3.9。
+
+**结论：本包仍属「待审」——不得交付、不得推送。** 本报告以及第十节的最终门禁只说明「第二轮整改后的提交能构建、
+JVM 用例与 lint 通过」，**不构成复审通过**；r3 判第 1、2、7、8 条仍有遗漏、第 9 条表述需改；r4 维持「需修改」
+并指出页面接线新回归等项（见 3.7）；r5 维持「需修改」——②③通过、①的残留处置待统筹裁定、④与守卫脚本本轮修正
+（见 3.8）；**r6 维持「需修改」**——②③与①的超时口径通过、历史就绪/草稿/重试/本地取消维持通过，但另列四条
+【P2】必改（见 3.9）。**第 1 条残留（建连取消窗口）是否接受，最终裁定权在统筹，本报告不作结论。**
+
+**收口说明（2026-10-19 收口轮）——审核循环到此结束**：六轮复审 `REVIEW.md`、`REVIEW-r2.md`、`REVIEW-r3.md`、
+`REVIEW-r4.md`、`REVIEW-r5.md`、`REVIEW-r6.md`（均已入库）**已经全部跑完**，本轮不再开新的「按意见整改 → 再复审」
+循环：
+
+- **r6 判通过 / 维持通过**：①的 **15s/30s 与整体截止时间口径**、②的**门禁来源及用例增量**、③的**进程号冲突**
+  判**通过**；r5 已通过的**历史就绪、草稿、重试与本地取消**在 r6 复核中**维持通过**（r6 复核时 `app`、`llm`
+  无改动，`Gateway.kt` 去注释与空白后与 r5 相同）。
+- **r6 新列的四条【P2】已在本轮全部修完**：①守卫终止解析兼容配套跑测器的**带时间戳日志**（新回归）；
+  ②**WCHAN 行/列数校验**与自检覆盖声明（改为 15 replay 场景 + 1 live 冒烟、场景数按实际文件数统计）；
+  ③结案材料第 6、58 行的**过宽表述**与 `Gateway.kt:290` 的保证 B 范围（收窄为「**获取正文输出流期间**」）；
+  ④设备测例 `:559` 的**注释**与 `DELIVERY.md` 的 **r4 转述**。逐条处置见 3.9，提交与拣入号见第八节。
+- **交统筹处理（唯一未决项）**：**第 1 条**（取消**无法中断在途建连**）是**平台限制**，本包按 r5、r6 都认可的
+  方式记为**已知残留**；**是否接受、以及走哪条路，由统筹裁定**——三个选项（①接受为已知残留〔当前状态〕、
+  ②批准引入 OkHttp 之类可取消的客户端、③其它缩小窗口的折中）的代价见 `CANCEL-DURING-CONNECT.md` 第 8 节。
+- **收口不等于「复审判通过」**：`REVIEW-r6.md` 的结论原文仍是**需修改**，本报告只记录「四条必改已修完、
+  审核循环结束」这一事实。**本包仍属待审——不得交付、不得推送**；最终门禁（全新 worktree detached `1ac3ac6`，
+  169 用例 0 失败、lint 0/0）见第十节，它只证明该提交能构建、JVM 用例与 lint 通过，**不是复审通过**。
+- **正式版包基线未受影响**：`com.xavierxia.mycelium` 仍是 `versionName=0.1.1` / `versionCode=2` /
+  `lastUpdateTime=2026-10-10 05:23:04`；本轮只改文档，**未装包、未覆盖、未卸载**（见 4.6、10.1）。
+
+另外两点如实记：
+
+- **「并发与升级专项审」因额度限制没有执行。** 它的审核要求早已写好
+  （`docs/reviews/2026-10-18-P2-2/codex-prompt-special-concurrency.md`），`docs/tracks/开发线.md` 第 76 行
+  记的做法是「额度够就补一轮，不够就并进全量审的要求里」；实际是本包**没有跑这一轮专项审**，其要点
+  并进了全量审（`REVIEW.md` 第 5、6、9 条）一起审。
+- 复审第一次尝试（22:11 起跑）撞额度上限、未产出报告；第二次由无人值守任务在 02:07:36–02:15:26
+  产出 `REVIEW-r2.md`（13087 字节，结论需修改），现已随 `e6c1d65` 入库。
+
+### 3.7 第四次复审（`REVIEW-r4.md`，审 `5ba4376`）的结论与上一轮表述更正
+
+**结论（`REVIEW-r4.md` 第 1 行原文要点）**：**需修改**——r3 必修第 3、5 项**已修复**（第 3 项标「通过，测试覆盖
+有限」；第 5 项标「通过，限所述回归」），第 2 项**核心防护已补但页面接线有新回归**（`HearthSpace.kt:457` 只按
+`historyLoading` 禁用发送，失败态下先 `setText("")` 再调用的 `send()` 直接返回 → 静默丢输入、生产页面没有
+`retryHistory()` 调用点；`historyReady():229` 对 TEST 无条件返回 true，模式切换期间可绕过发送守卫），第 1 项
+**仍未封闭**（`Gateway.kt:145` 锁内检查、锁外 `connect()`，r4 判定新增测例的停点设在 `setDoOutput()`、即新检查
+**之前**，夹具还替真实底层提供了它没有的取消行为），第 4 项（本地停止延续到生成启动边界）**部分修复、不通过**
+（`HearthViewModel` 已加 IO 内检查并丢弃迟到 token，但 `LocalModelEngine` 的启动路径随后仍会清除停止标记，页面可能
+一直忙到推理结束；r4 在「建议」里另提的 `confirmSend()` 查询返回后复检 `stillWanted()` 是**另一条**，不属于第 4 项
+——此前把这两件事混写在这一行，**本轮按 r4 原文更正**），原第 9 条（表述与证据一致）**部分修复、仍需改**。r4 另指出：归档的冻结检测脚本
+（`evidence/device-tests/scripts/guards.ps1`）赋值 `$pid`（PowerShell 里 `$PID` 是只读自动变量）、`WCHAN` 解析要求
+数字开头、只看到任意 `INSTRUMENTATION_CODE` 就记 `run finished normally`，故 `04f` 不能作为「正常跑完」的证据；
+`04e:46`「前 14 例通过」的写法也不成立（**本轮已按实际结果更正为 12 通过 / `#4` 跳过 / `#10` 失败 / `#15` 崩溃，
+其后 10 例未运行**）。
+
+**真机归档的裁定**：r4 认为归档足以支持**特定测例运行结果**（独立解析原文确认导航类 **5/5 通过**、时间线类
+**10/10 通过两轮**，三组带时间戳与去时间戳日志逐行一致；`04b` 的 `total=41`、`lastIndex=22`、`atBottom=false`
+支持第 8 条「首次保存 vs 导航」那一半的判别力；冻结现场与 `Broken pipe` 两种现象应分开），但**不足以支持本轮
+全部整改通过**。r4 同时指出：若合并 **02b 与最终 04c/04d**，可得到跨次运行的 **21 通过／3 失败／1 跳过**，
+仍不是一次完整的全量通过——本报告的 **19／5／1** 应标明是**改稳之前的历史并集**（本版 4.6 已按此更正，
+并把「一次 invocation 跑不完」写成事实）。
+
+**结论：本包仍属「待审」——不得交付、不得推送。** `REVIEW-r4.md` 已随 `7b87696` 入库
+（`docs/reviews/2026-10-18-P2-2/REVIEW-r4.md`）。
+
+**上一轮（按 r4 意见只改文档）的处置与仍未验证的项**：那次**只改文档**——未跑 Gradle、未联网、未连设备、未 push、
+未改源码，因此 r4 点到的**代码侧**事项（必修 1 的剩余竞态窗口、必修 2 的页面接线回归与 `retryHistory()` 接线、
+r4 在必修 4 之外**另列为建议**的 `confirmSend()` 查询返回后复检 `stillWanted()`、必修 3 的引擎启动边界停止标记）
+**均未在那一轮处理**，仍待整改（其中 `stillWanted()` 那一项不属于 r4 必修 4——必修 4 是冻结守卫脚本，见 3.8；
+此处此前写成「必修 4 的 `stillWanted()` 复检」，本轮按 r4 原文统一）。表述层面已按 r4
+更正：全量结果的来源（多次 invocation 的并集、有一次全量被脚手架崩溃中断）、模型失败的归因（**原始异常是
+「指定的 Qwen3.5-4B 未登记」**；真机只登记了 `copied:false` 的外置 SAF 模型、私有目录里没有测例要的模型文件，
+`#21` 还停在导入这一步）、当前提交门禁的适用性（见第十节，结论对应跑门禁时的提交）、以及全篇的「都/全部」类总括词。
+
+仍未验证 / 未归档的项（如实保留）：第 8 条「手势协程与状态同键」那一半的变异实验；1500 token 测速的 token 数
+与耗时明细（**无法验证**）；正式版装前装后 `dumpsys package` 原文（**未归档，无法复核**）；2026-10-18 22:35
+四类九例输出（**未归档**）；真实 Android 建连取消延迟、真实本地引擎剩余停止窗口；以及 4.6 里那 5 例失败中
+`#10`/`#21`/`#22` 三例（模型未登记）在该设备上**按现状不可能变绿**——它们不构成本次改动的证据，也不构成本次改动的回归。
+
+### 3.8 第五次复审（`REVIEW-r5.md`，审 `803abb6`）的结论与本次处置
+
+**结论（`REVIEW-r5.md` 第 1 行原文要点）**：**需修改**——②（历史失败、重试、草稿与模式切换）与③（本地轮次取消）
+**通过**（③的真实时延未验证）；①（建连闸门与超时归一化）**部分通过、残留未封闭**——锁内检查、锁外 `connect()`
+的窗口仍在，超时归一化本身正确，但「非正连接超时回退 15 秒、正值截到 30 秒」只是**连接超时参数**，不等于整个
+调用的截止时间；r5 明确「把无法保证立即取消的建连窗口记录为已知残留并提交统筹裁定，**是可接受的处置方式**」，
+最终是否接受由统筹决定。④（第 9 条的证据与引用）**部分修复**：本报告的门禁来源、r4 条目转述与部分附件说明仍
+不准确；r4 另列的**冻结守卫脚本**缺陷仍未修。
+
+**本次（按 r5 意见）做了什么**（本轮只改 `docs/reviews/2026-10-18-P2-2/` 下的文件：未跑 Gradle、未联网、未连设备、
+未 push、未改源码；`evidence/device-tests/` 下只动第 1 条列出的脚本、自检、新增样例目录与 `README.md`、`04e` 一处）：
+
+1. **冻结守卫脚本已修**（`evidence/device-tests/scripts/guards.ps1`）：原来赋值 `$pid`（`$PID` 是只读自动
+   变量，取到的是宿主 PID），改成从 `Select-TargetPid` 的返回值取 `$sel.Pid`（脚本里**没有** `$testPid` 这个
+   变量，r6 指出的旧写法已随 `1ac3ac6` 更正）；WCHAN 改为按真机 `ps -T -p <pid> -o PID,TID,STAT,WCHAN` 的**表头列位**解析，
+   缺列/空/`-`/列数不匹配/ps 或 adb 报错一律 `PROBE-UNKNOWN` 并判未知，绝不静默当「没冻结」；退出分类分成
+   跑完（0）/ 崩溃（2）/ 冻结超时（3）/ 停涨但探针明确未冻结（4）/ 未知（5），不再把任意 `INSTRUMENTATION_CODE`
+   记成 `run finished normally`。验证方式、覆盖到哪一步（**哪些是文本级、哪些需真机**）写在
+   `evidence/device-tests/README.md` 第 4.1 节；样例夹具与 11 个场景在 `evidence/device-tests/guards-samples/`，
+   自检 `scripts/guards-selftest.ps1` 实跑 **12/12 通过**（Windows PowerShell 5.1，原始输出
+   `guards-samples/selftest-output.txt`），全部**不连真机**。
+2. **本报告的门禁来源、r4 条目转述与附件说明已按 r5 更正**：门禁逐轮对应到提交并列明原始日志位置（第十节）、
+   3.7 第 4 项按 r4 原文重写、截图与门禁日志的归档位置改成「在另一个仓库/仓库外，本仓库无法独立复核」（第四节）。
+3. **`REVIEW-r5.md` 本轮入库**（`docs/reviews/2026-10-18-P2-2/REVIEW-r5.md`）。
+4. `evidence/device-tests/04e-follow-class-rerun.md` 里「`#1`–`#14` 通过」改为实际结果：`04g` 是 **12 通过、
+   `#4` 跳过、`#10` 失败、`#15` 进程崩溃，其后 10 例未运行**。
+
+**仍未做 / 超出本轮范围**（其中结案文档与超时口径一条已随本分支 `0ed29b8` 完成、源代码注释一条已在第六次复审整改补做，见 3.9 与第八节）：
+
+- r5 必修 1、2 要求收窄结案文档 `CANCEL-DURING-CONNECT.md` 的保证范围（保证 A 限定为“取消先于闸门检查”、
+  保证 B 限定时点）与超时口径，并同步 `Gateway.kt` 的对应注释。该笔在**另一个工作树**
+  （`D:\Agent\Worktrees\Mycelium-Android\p2-2-r5-doc`）处理，在 r5 那一轮**不在本报告范围内**；**本轮（收口轮）
+  已确认它以 `0ed29b8` 落在本分支**（原始 `2d52726`，patch 相同）。本报告仍按 r5 的口径记录：当前实现
+  **不能保证**覆盖所有启动窗口或立即结束在途建连，也没有「停止到任务结束」的总体时限。
+- `app/src/androidTest/.../HearthNavigationDuringTurnDeviceTest.kt:558` 那句「只能走 `NonCancellable`、只有令牌
+  能拦住」的源码注释更正需要改源码，在 r5 那一轮**超出范围、未做**；**该笔已在第六次复审整改中完成**（见 3.9）
+  ——只改注释：说明该用例验证「晚到的刷新不改动页面」，**不**验证「只有令牌能拦住」（导航取消本身也可能让
+  `withContext` 返回），断言与测试逻辑未动（原始日志按 r5 要求保留）。
+- r5 的两条建议（补真实 `LocalModelEngine` 配合受控 `EngineBridge` 的启动边界测试；把「页面立刻退出忙碌」
+  改成「随引擎安全退出完成收尾」）是后续整改项，本轮未做。
+
+**r5 的「未能验证」如实保留**：r5 本轮**没有**跑构建、测试或变异实验，也**没有**连设备；真实 Android 建连取消
+延迟、真实 native 启动边界与停止耗时、当前提交的整套设备测试都未动态验证，旧设备归档不能替代本轮实测。
+本报告同样没有新增任何真机实测。
+
+### 3.9 第六次复审（`REVIEW-r6.md`，审 `b58d3a0`）的结论与本次处置
+
+**结论（`REVIEW-r6.md` 第 1 行原文要点）**：**需修改**——主要保证与超时口径已收窄，但仍有证据表述遗漏，
+冻结守卫新增了无法识别配套带时间戳日志正常结束的回归。逐项：①15s/30s 与整体截止时间**通过**（「最多再等15s／
+总体上限30s」只作为禁止措辞出现）；②门禁来源及用例增量**通过**；③进程号冲突**通过**；r5 已通过的**历史就绪、
+草稿、重试及本地取消维持通过**（r6 复核时 `app`、`llm` 无改动，`Gateway.kt` 去注释与空白后与 r5 相同）；①保证 A/B
+**正文已修、注释仍需统一**；①平台结论**部分修复**（第 30 行已补非空引擎取消路径，第 6、58 行仍过宽）；
+②r4 转述与附件说明**部分通过**；③WCHAN 解析**部分通过**；③退出分类**旧缺陷已修、新增回归**；③README
+验证边界**部分通过**。
+
+**r6 的四条【P2】必须修改与处置**（第 1、2 条在 detached 工作树 `p2-2-r6-guards` 完成、第 3、4 条在
+`p2-2-r6-doc` 完成，两笔均已拣入本分支：`1ac3ac6`、`2f5e623`；改的是 `evidence/device-tests/` 下的守卫脚本与自检、
+`docs/reviews/2026-10-18-P2-2/` 下的文件、`Gateway.kt` 的 KDoc、以及 `HearthNavigationDuringTurnDeviceTest.kt`
+的一处注释；未联网、未连设备、未 push）：
+
+| r6 必改 | 本次处置 |
+| --- | --- |
+| 1. 守卫终止解析要兼容配套跑测器带时间戳的日志（新回归） | **已完成**：守卫在解析前统一剥离每行行首的主机时间戳（正则 `^\d{1,2}(:\d{2}){1,3}(\.\d{1,3})?\s+`，只吃行首这一段），并接入回归场景 `12-done-timestamped`（`04c` 归档末尾 9 行的逐字节副本）。这一笔在**另一个工作树**（`p2-2-r6-guards`）完成：原始提交 `42ded05`，**已拣入本分支为 `1ac3ac6`** |
+| 2. 补齐 WCHAN 行列数校验、纠正自检覆盖声明 | **已完成**：`ps -T` 解析要求**每行列数与表头完全一致**（少列、多列、`WCHAN` 为空或为 `-`/`?`、`PID` 格非数字、无线程行、`ps`/`adb` 报错一律 `PROBE-UNKNOWN`，绝不折成「没冻结」）；自检改为**15 个 replay 场景 + 1 个 live 冒烟全过**（`16 passed, 0 failed`，`guards-samples/selftest-output.txt`），场景数按 `scenarios/*.json` 实际个数统计，未接场景的夹具不再算已验证。同一笔 `1ac3ac6`（原始 `42ded05`） |
+| 3. 清除结案材料剩余的过宽表述（`CANCEL-DURING-CONNECT.md:6`、`:58`）与 `Gateway.kt:290` 的保证 B 范围 | **本轮已完成**：第 6 行不再写「不是本实现的缺陷」；第 58 行不再把诉求归为「平台没有提供的可中断性」；两处统一为「当前实现不能保证覆盖所有启动窗口，也不能保证立即结束在途连接」，并写明这**不足以排除实现选择的影响，也不足以否定平台已有的取消能力**（同实现空引擎分支直接返回、非空引擎分支调 `httpEngine.cancel()`）。`Gateway.kt:290` 的保证 B 由 `during body streaming` 收窄为「**获取正文输出流期间**（期间发生的取消被后置检查拦住、正文不写出）」，不再覆盖「正文已经开始写出」的阶段 |
+| 4. r5 遗留：设备测例注释（`:559`）与 `DELIVERY.md:282` 的 r4 转述 | **本轮已完成**：测例注释改成说明该用例**验证什么／不验证什么**——只验证「晚到的刷新不改动页面」，**不**声称「收尾只能走 `NonCancellable`、只有令牌能拦住」（导航取消本身也可能让 `withContext` 返回），断言与测试逻辑未动；`DELIVERY.md:282` 的 `stillWanted()` 复检改回「r4 在必修 4 之外**另列为建议**」，r4 必修 4 是**冻结守卫脚本** |
+
+**本次验证（只为确认注释改动没破坏构建；未联网、未连设备、未跑 lint/打包）**：`.\gradlew.bat --offline
+--console=plain :net:test :app:compileDebugAndroidTestKotlin`（`JAVA_HOME=D:\Development\Android-studio\jbr`、
+`ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`）→ **BUILD SUCCESSFUL in 20s**，56 个任务实际执行，退出码 **0**；
+`:net:test` **19 例（`GatewayTest` 18 + `AuditLogTest` 1）、0 失败 0 错误 0 跳过**（JUnit XML 现算）；`Gateway.kt`
+与设备测例的注释改动都不改变断言与测试逻辑，`app:compileDebugAndroidTestKotlin` 编译通过。这一轮**不是**门禁：
+没跑 lint、assemble 与任何设备测试，不能替代第十节按提交记录的门禁结果。
+
+**仍未做 / 未验证**：r6 的两条建议里，**「文档里的 `$testPid` 改成实际使用的 `$sel.Pid`」已随守卫脚本那一笔
+（`1ac3ac6`，原始 `42ded05`）在 `evidence/device-tests/README.md` 更正**（该脚本里本来就没有 `$testPid` 这个变量；
+本报告 3.8 与提交表里此前写的 `$testPid` 同轮一并更正为 `$sel.Pid`）；**补真实 `LocalModelEngine` 配合受控
+`EngineBridge` 的启动边界测试、停止耗时验证，照旧保留、仍未做**。
+r6 的「未能验证」同样如实保留：r6 **没有**重跑构建或连接设备，真实设备冻结恢复、Android 建连取消延迟、native
+启动与停止耗时、当前提交的整套设备测试都未由 r6 验证，旧归档不能替代本轮实测。**本包仍属待审、不得交付、
+不得推送；第 1 条残留（建连取消窗口）是否接受，最终裁定权在统筹。**
+
+**`REVIEW-r6.md` 本轮入库**（`docs/reviews/2026-10-18-P2-2/REVIEW-r6.md`）。
+
+## 四、真机走查
+
+设备：红魔 NX809J（Android 16，SDK 36，1216×2688）。只装 `com.xavierxia.mycelium.debug`。
+正式版 `com.xavierxia.mycelium` 在 P2-2 两次走查前后一致（0.1.1 / versionCode 2 / lastUpdateTime
+`2026-10-10 05:23:04` / firstInstallTime `2026-10-10 05:14:52`），但**本包没有归档这两次走查的
+`dumpsys package` 原文**，所以这一条只是「按当时读数转述」，不能独立复核；最近的原始凭据是 P2-1b 的
+`device-log.txt`（13:38，同一组读数，在**另一个仓库** `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\` 下，本包仓库里没有副本）。
+**截图与第一轮门禁日志的归档位置（本轮按 r5 更正）**：它们不在本包仓库里，而在**另一个仓库的工作树**
+`D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-2\`（此前写作「Windows 仓库
+`.omx/development/reviews/2026-10-18-android-P2-2/`」）。那里有第一轮 `01`–`14` 与第二轮 `20`–`22` 截图（都已按
+同一规则裁掉顶部 160 像素，尺寸 1216×2528，只在知衍（调试）前台截），以及第一轮的三份门禁日志
+`p2-2-gate-summary-freshworktree.md`、`p2-2-gate-checkall-ps1.txt`、`p2-2-gate-checkall-sh.txt`（时间戳 2026-10-18
+18:12–18:17）。**它们未纳入本包版本控制**：本包只能按路径引用，不能从仓库独立复核；第十节那四轮从零门禁
+（`c91eaaa`/`b6dbc6c`/`204c7c1`/`803abb6`）的原始摘要在仓库外的 `p2-2-work\`，本包仓库里同样没有副本。
+
+### 4.1 第一轮（改动前的提交，`01`–`14`）
+
+预设 5 个与安全兜底、老周本地多轮、重新生成、杀掉重开、云端确认弹窗与云端标记、云端回答、
+测试模式不留历史、飞行模式本地能聊、正式版不变 —— 这些都有截图或日志证据（细节见 `01`–`14` 号证据）。
+1500 token 测速只有测例返回 `OK (1 test)` 的转述，**没有留下 token 数/耗时明细文件**，按第九节标为无法复核。
+
+### 4.2 第二轮（本轮修复后的提交，`20`–`22`）
+
+| 项目 | 结果 | 证据 |
+|---|---|---|
+| 测试模式离开后清空 | 已通过：测试模式聊一轮 → 切「我的」→ 回炉边，测试那轮消失、模式回到沉浸；随后重进人物，沉浸历史完整 | `20-testmode-turn.png`、`21-after-leave.png` |
+| 停止后问题回到输入框 | 已通过：发送后 1.5 秒停止 → 提示「已停止，还没有回答」、问题回到输入框、这一轮没入库 | `22-stop-question-back.png` |
+| 自动滚动 | 已通过（截图可见最新一轮在最下方；代码里「用户上翻时不再强行拉回」的逻辑同批实现） | `22-stop-question-back.png` |
+
+### 4.3 两项缺口的自动化补测（手机上跑的 Compose instrumented 测试）
+
+手工点不进的两项，改成在真机上跑的 Compose 界面测试补上（进程内假服务，**不动手机输入法与系统设置**）：
+
+| 测试 | 证明了什么 | 断言到的具体值 |
+|---|---|---|
+| `HearthCloudStopDeviceTest` | 云端慢回答（进程内 `LocalHttp` 睡 5 秒）在途时点「停止」：晚到的回答**不上屏、不入库**，但这次请求在隐私记录里留痕 | 界面 `onAllNodesWithText("晚到的回答 …")` = **0 个节点**；`log.conversations(id)` = **0 段**、`log.messages()` = **0 条**；审计 = 跑之前 + **正好 1 条**，`purpose = HearthChat`、`succeeded = false`、`status = null`、`sentBody` 含本轮问句 |
+| `HearthCloudReconfirmDeviceTest` | 用界面（`performTextReplacement`）把已确认服务的接口地址换成另一个端口后，回炉边发送会**先弹确认框、且不发请求**；取消后仍不发、确认状态不被改写 | 存储里的 `baseUrl` = 新地址；弹窗「这个人物改用云端模型？」`assertIsDisplayed()` 通过且此时 `server.count == 0`、`calls()` 空；取消后提示「已取消，这一轮没有发出去」显示、弹窗节点 0、输入框仍有问句、`count == 0`；`cloudConfirmedTarget` 仍是**旧地址**的目标；0 段对话 |
+
+我的复核：在手机上重跑两条 → `OK (2 tests)`（11.797 s）。子代理侧另有三次重复（8.1–8.2 s / 3.5 s 各三次）与两条一次跑 `OK (2 tests)`。
+
+**这两条测试只在真机上跑，不在门禁里**：`check-all.ps1` / `check-all.sh` 按任务契约只编译 androidTest
+（`assembleDebugAndroidTest`）并跑 JVM 单测与 lint，不跑 instrumented 测试（CI runner 上没有设备/模拟器）。
+运行方式记在这里，方便以后复验：
+`adb install -r app/build/outputs/apk/debug/app-debug.apk` 与 `…/androidTest/debug/app-debug-androidTest.apk`，
+然后 `adb shell "am instrument -w -e class com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest,com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner"`。
+
+**构建改动（如实记）**：`app/build.gradle.kts` 的 `androidTestImplementation` 加了三行——`composeBom`、
+`androidx.compose.ui:ui-test-junit4`（这两行经用户同意）、`androidx.test.espresso:espresso-idling-resource:3.7.0`
+（`ui-test-junit4` 的传递依赖，本机离线缓存只有 3.7.0，不显式写会解析不到）。三行都是**已缓存制品**，
+没有引入新制品；`src/main` 与其他模块一行未改。
+
+**测试脚手架的取舍（如实记）**：`HearthCloudStopDeviceTest` 临时接管了未捕获异常处理器。原因是被停掉的连接上，
+进程内假服务写回答会抛 `SocketException: Broken pipe`，Android 上任意线程的未捕获异常会杀进程。
+现在只咽「来自 `com.xavierxia.mycelium.net.LocalHttp` 栈帧且非主线程的 `IOException`」，其余异常照旧交给系统处理器。
+另外该测试不断言「已停止，还没有回答」的文案（取消分支与干净返回分支是竞态、文案会不同），只断实质。
+
+### 4.4 整改后的设备测试（2026-10-18 22:35 复跑，逐类单跑）
+
+全量审 9 条整改之后，设备上共 4 个类 9 例。**必须逐类分开跑**：被中止的连接会让进程内假服务在
+`LocalHttp.serve` 抛 `SocketException: Broken pipe`，非主线程未捕获会杀掉进程——这是既有脚手架问题
+（一次跑多类时在第 3 例崩过），不是产品缺陷；分开跑等于每类一个全新进程。
+
+| 测试类 | 覆盖 | 结果 |
+|---|---|---|
+| `HearthCloudStopDeviceTest` | 云端停止后晚到的回答不上屏、不入库，审计仍留这次请求 | `OK (1 test)` 8.235 s |
+| `HearthCloudReconfirmDeviceTest` | 改地址后发送先弹确认框、期间 0 请求，取消后仍 0 请求且确认状态不被改写 | `OK (1 test)` 3.478 s |
+| `HearthNavigationDuringTurnDeviceTest`（本包新增） | 生成中换会话 / 切测试模式：旧任务停下、`busy` 清掉、页面还能继续发；晚到回答不上屏不入库 | `OK (2 tests)` 3.386 s |
+| `HearthTimelineFollowDeviceTest`（本包新增） | 长回答内部上翻、跨消息上翻、手动回到底部、换对话、底部时自动跟随 | `OK (5 tests)` 5.84 s |
+
+新加的两个类**直接驱动 `HearthViewModel` / `ChatTimeline`**，不点屏幕（不受输入法影响）；假服务是进程内的
+`LocalHttp`，只监听 `127.0.0.1`、密钥是假值。
+
+### 4.5 1500 token 测速（第一轮，设备测例）
+
+30 条消息、估算 1576 token；Qwen3.5-4B-Q4_K_M 只读打开；线程 6、上下文 8192：
+
+| 次数 | 读提示 token | 读提示耗时 | 生成 token | 生成耗时 | 生成速度 |
+|---|---|---|---|---|---|
+| 1 | 1284 | 93.8 s | 148 | 18.1 s | 8.16 token/s |
+| 2 | 1284 | 108.7 s | 148 | 21.1 s | 7.01 token/s |
+| 3 | 1284 | 109.8 s | 148 | 21.0 s | 7.06 token/s |
+
+模型加载 0.97 s。**读一条 1300 token 的提示要 1.6–1.8 分钟**，已按裁定排入 P2-1c（复用已读过的上下文）。
+
+**上表的可核验状态：无法验证。** `p2-2-work` 里与这次测速有关的原始文件只有三份：`speed-run1.txt`（当时类名
+写错，`ClassNotFoundException`，末尾 `Tests run: 1, Failures: 1`）、`speed-run2.txt`（空文件，5 字节 `\r\n`）、
+`speed-run3.txt`（102 字节，只有 `HearthPromptSpeedDeviceTest` + `Time: 373.865` + `OK (1 test)`）。
+**token 数、读提示耗时、生成耗时的明细在任何归档文件里都找不到**，上表只能算当时会话转述，
+**标为「无法验证」，不作为本包交付证据**（复审 `REVIEW-r2.md` 第 7 条要求继续这样标）。
+
+### 4.6 真机 androidTest 有界化复跑与归档（2026-10-19）
+
+**归档位置**：`docs/reviews/2026-10-18-P2-2/evidence/device-tests/`，**39 个文件**（统计口径
+`Get-ChildItem -Recurse -File`：`device-tests/` 根下 26 个、`hang-record/` 10 个、`scripts/` 3 个）。含单类/分批/全量
+原始输出（`adb shell am instrument -w -r` 原文，仅每行加主机侧毫秒时间戳）与去时间戳版本、逐例耗时表
+（`03*`、`04*`）、挂死现场记录（`hang-record/`）、主机侧守卫与跑测脚本（`scripts/guards.ps1`、
+`run-timestamped.ps1`、`extract-timings.ps1`）、判定文件（`04e-follow-class-rerun.md`）与目录说明（`README.md`）。
+设备 NX809J（Red Magic，Android 16，arm64），时间 2026-10-19 11:36–12:03（Asia/Shanghai）；只安装/运行
+`com.xavierxia.mycelium.debug` 与 `…debug.test`。
+
+**挂死根因：进程冻结器，不是用例死锁。** 用户那次「16 分钟没有任何输出、两个进程都活着」的现场，是 Android 的
+进程冻结器把 instrumentation 进程整个挂起：`dumpsys activity` 里 `isFrozen=true`，该进程**每个线程**的 `WCHAN`
+都是 `do_freezer_trap`；`am unfreeze` 之后同一轮在数秒内继续跑完（`Tests run: 25, Failures: 7`）。因此**所有等待
+必须有界**，且**硬上限只能在主机侧**——进程被冻住时进程内的看门狗线程也一起冻住，**进程内超时不会到点**
+（`hang-record/01`–`03`，`device-tests/README.md` 第 3 节）。
+
+**设备测例的有界化改动**（只动 `app/src/androidTest` 的 4 个测试文件，实现未改；提交 `bce89e8`、`204c7c1`）：
+闸门内部放行等待有界（`PARK_LIMIT_MS = 60_000L`，到点自己兜底放行并打日志）；所有等待带明确超时，失败信息里
+带页面状态与**全部线程栈**；删掉「用 `Thread.sleep` 当同步」的写法（第 5、6、7、8 例，改用
+`awaitCallFinished` + `expectNothingFor`，只保留 `waitUntil` 50ms / `expectNothingFor` 25ms 的轮询间隔）；
+闸门一律在 `finally` 里放行（`hold?.letGo()` + `gates?.releaseAll()`）；新增用例级 4 分钟上限
+（`BoundedDeviceTest(timeoutMs = 240_000)`，超时打印全部线程栈后判失败、后续用例照跑）；另修掉一个会让 `send`
+被静默丢掉的夹具竞态（ViewModel 刚建出来时 `!historyLoading` 即为 `false`，改用 `awaitOpenCharacter()` 等到
+「人物已打开 + 这一段历史读完」，并用 `sendOrFail()` 把静默失败变成带页面状态的断言）。
+
+**真机结果（原始输出已归档）**：25 例的逐例结论**不是一次 invocation 跑完的结果，而是多次 invocation 的并集**——三次全量都在 `#15` 那一格被 `LocalHttp` 的 `Broken pipe` 把进程带走，另有早期的全量停在第 9 例附近（`01`–`04g`、`hang-record/02`–`10`）。
+
+| 运行 | 结果 | 出处 |
+|---|---|---|
+| 单类复跑 `HearthNavigationDuringTurnDeviceTest` | **OK (5 tests)**，`Time: 22.187`，0 失败 | `01-single-class-…-timed.txt`、`03-timings-single-class.md` |
+| 单类复跑 `HearthTimelineFollowDeviceTest` | **OK (10 tests)**，连跑两次 `Time: 11.234` / `11.278` | `04c`/`04d` |
+| 全量（一次 invocation） | **跑不完**：`#1`–`#15` 里 `#4` 跳过、`#10` 失败、`#15` 因 `Broken pipe` 进程崩溃，其后用例未运行（`#11` 此时已通过） | `04g-full-suite-after-test-fix-timed.txt`、`04g-…-timings.md` |
+| 分批跑 B（除 `HearthTimelineFollowDeviceTest` 外的 10 个类，15 例） | `Tests run: 15, Failures: 3`（`#10`、`#21`、`#22`） | `02b-remaining-classes.txt`、`03b-timings-split-run-b.md` |
+| 分批跑 C（`HearthTimelineFollowDeviceTest` 剩下 5 例） | **OK (5 tests)** | `02c`、`03c-timings-split-run-c.md` |
+| 25 例并集（跨次汇总，**不是**一次全量） | **通过 19 / 失败 5 / 跳过 1（`#4`，assumption）/ 挂死 0**；另有 **1 次进程崩溃**（`#15`） | `03e-timings-all-25-cases.md` |
+
+并集里那 5 例失败的构成：`#10`、`#21`、`#22` 与真机本地模型有关；`#11` 是测例自身假红（04g 已通过）、`#15` 是进程被 `Broken pipe` 带走。**该并集是 4.6 那一轮（测例改稳之前）的快照**；此后改稳测例的复跑（`04c`/`04d`/`04g`）中 `#11` 已通过。
+
+原挂死用例 `HearthNavigationDuringTurnDeviceTest#aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 在单类
+复跑与分批跑 B 里都通过（6106/6119ms），断言未放宽。
+
+**两例误归因的更正**（原写作「缺本地模型」）：`HearthTimelineFollowDeviceTest#openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail`
+（全量第 11 例）是**测试脆弱**——`navigateTo` 只写状态不等重组，断言读到导航前那一帧（`total=1`、`lastSize=3952`）；
+`#15 scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive` 是**脚手架崩溃**——别的类泄漏的
+`LocalHttp` 后台线程抛 `SocketException: Broken pipe` 把进程带走，不是它的断言。**都不是回归，也与模型无关**；
+判别力实证见 3.5 表第 8 行与 `04e-follow-class-rerun.md`。
+
+**仍然存在的限制（如实记）**：
+
+1. **一次 invocation 跑完全部 25 例做不到**：全量跑到当时那一例时，`LocalHttp.serve` 在请求线程里往已关闭的
+   socket 写、非主线程未捕获 `SocketException: Broken pipe` 把进程带走（三次全量都停在第 15 例、另有一次停在第 9 例，
+   `04g` 又在第 15 例）；修它要动 `net` 的 **main** 源集（测试假服务器位于生产源码集，这本身也是 P2-2b
+   方案审已点出的问题），本轮未改。25 例结论由多次 invocation 的**并集**给出（分批跑 B + 分批跑 C + 若干次单类复跑 + 一次未跑完的全量），**不是**一次性全量（`hang-record/08`）。
+2. **4 例与真机本地模型有关**（3 例失败 + 1 例跳过；**原始异常都是「模型未登记」，不是「私有目录缺文件」**）：应用在真机上**只登记了一个 7.4GB 的
+   `copied:false` 外置 SAF 模型**（`content://…Qwen3.5-9B-…gguf`），私有目录里没有模型文件；测例要的是**指定的 Qwen3.5-4B-Q4_K_M**，而**登记列表里没有这个模型**。原始记录（`02b-remaining-classes.txt`、`04g-…-timed.txt`）：
+   - `#10 HearthPromptSpeedDeviceTest#threeRunsWithAnAbout1500TokenPrompt`（10ms）：`java.lang.IllegalStateException: Qwen3.5-4B 还没有登记`；
+   - `#22 com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest#generate256Tokens`（15ms）：`java.lang.IllegalStateException: model is not registered`；
+   - `#21 com.xavierxia.mycelium.localmodels.LocalModelDeviceTest#loadStreamStopUnloadWithUserSelectedModel`（586ms）：`java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first`——它在「导入」这一步就失败，**没走到**后续模型可用性检查；
+   - `#4 HearthLocalStopDuringLoadDeviceTest#stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`：JUnit assumption **跳过**（`code=-4`），原文 `org.junit.AssumptionViolatedException: 真机上还没有登记过本地模型，先导入一个再跑这一例`，即**登记列表为空**，连上面的模型名都取不到。
+
+   因此**不能**把这 3 例笼统归因成「真机只有外置 SAF 模型、所以加载不了」：**真机拿不出这几例指定的那个模型**——
+   `#10`/`#22` 是登记里找不到指定的 Qwen3.5-4B，`#21` 连导入这一步都没过；而外置 SAF（`copied:false`）本身是
+   实现支持的路径（见 `llm/AndroidModelStore` 的 SAF 打开逻辑）。「私有目录里没有模型文件」只是**登记列表里那条
+   外置 SAF 模型不在私有目录**的意思；**私有目录里到底有没有能用的模型文件，本轮没有独立核实**（未连设备）。
+   **顺带**：`04g` 里 `#1`–`#14` 中的失败只有 `#10`（`#4` 跳过、`#11` 已通过），第 10 例也就是 4.5 那张测速表对应的测例，
+   所以 4.5 **继续标「无法验证」**。这 4 例与本次改动无关。
+3. **复审第 8 条「手势协程与状态同键」那一半仍无变异实验**：2026-10-19 只证明了「首次保存 vs 导航」那一半
+   （`04b`），另一半如实标**未验证**。
+4. **2026-10-18 22:35 那一轮四类九例的输出（4.4 的表）仍未归档**，4.4 的耗时只算当时转述；本节归档的是
+   2026-10-19 的另一次复跑。
+
+**为规避冻结做过的、可回退的设备操作（如实记）**：
+
+- 每轮开跑后 `adb shell am unfreeze --sticky com.xavierxia.mycelium.debug`（`guards.txt` 记 5 次 `STICKY` 解冻；
+  **那几行是当时的主机包装命令追加的，不是仓库里任何脚本写的**——`scripts/run-timestamped.ps1` 每轮开跑前确实会调
+  一次 `am unfreeze --sticky`，但输出是 `Out-Null` 不落日志，见 `device-tests/README.md` 第 4 节）。该操作是
+  **进程/UID 级、内存态**，`am force-stop` 掉该调试包或重启设备即失效，不落盘。
+- 一次 `adb shell pm clear com.xavierxia.mycelium.debug`（清掉前几次崩溃留下的测试数据，让复跑从干净状态开始）。
+- `cached_apps_freezer` **未改**（仍是 `device_default`）；`svc power stayon` **未改**（值本来就是 `15`）；
+  输入法与其它系统设置**未动**。
+- 正式版 `com.xavierxia.mycelium`（`versionName=0.1.1` / `versionCode=2` / `lastUpdateTime=2026-10-10 05:23:04`）
+  在开工前与收工后**两次核对一致**，**未安装、未覆盖、未卸载**（`device-tests/README.md` 第 1、7 节、
+  `04e-follow-class-rerun.md` 第 1 节）。
+
+**本节更正的方法与局限**：本节（含 3.4、3.5、第八、九节与 9.1 的对应改写）是 2026-10-19 **只改文档**的一轮——
+未跑 Gradle、未联网、未连接设备、未 push、未改源码；正文里的结果、文件名、提交号均逐项对照
+`evidence/device-tests/` 的已归档文件与 `git log` 复核，evidence 目录内容一字未动。
+
+**2026-10-19 晚这一轮（按 r5）**：`evidence/device-tests/` 下动了四处——修 `scripts/guards.ps1`、新增
+`scripts/guards-selftest.ps1` 与 `guards-samples/`、更正 `README.md`（第 4.1、8、9 节）与
+`04e-follow-class-rerun.md` 的一处（「前 14 例通过」→ 12 通过 / `#4` 跳过 / `#10` 失败 / `#15` 崩溃），
+其余归档文件与截图未动；**没有**新增任何真机取样。清单与验证边界见 3.8。
+
+**按第四次复审（`REVIEW-r4.md`）的表述更正（2026-10-19 上一轮，只改文档）**：本节 4.6 此前把 25 例写成像是「一次全量跑完」
+的结果，实际是**多次 invocation 的并集**（三次全量都在 `#15` 被 `Broken pipe` 带走、另有一次全量停在第 9 例附近），
+本轮已如实改写并在结果表里补上「全量跑不完」那一行与分批跑 B/C；「4 例与真机本地模型有关」此前按真机只有外置 SAF
+模型归因，本轮改为以**原始异常**为准（**测例要的 Qwen3.5-4B 未登记**；真机上登记的那条是 `copied:false` 的外置
+SAF 模型，与测例指定的不是同一个），逐例引用了 `02b`/`04g` 的异常原文；第十节的门禁适用性、3.5 的一处结论来源也已
+改为与 `git log` 一致。本次**没有**改动 `evidence/` 下任何文件，也没有重跑任何构建或测试。
+
+## 五、隐私与出网
+
+- **默认本地**：不开云端不出网；飞行模式下本地模型照常对话（第一轮走查）。
+- **云端逐人物确认**：绑定「人物 + 服务 ID + 规范化地址」，发送前从设置重新读取并校验；
+  「取消」不生效（第一轮走查验证）；复制人物不继承确认。
+- **测试模式不记正文**：设备审计实测 `HearthChatTest` 记录字数、**正文长度 0**；沉浸 `HearthChat` 记正文
+  （这是设计：用户可在「我的 → 隐私记录」看到自己发出去的内容）。规则对成功与失败两条路径统一。
+- **只发炉边自己的内容**：审计看到的正文只有人物设定 + 该人物历史 + 当前问题，没有圆桌内容。
+- **只 :net 碰 HTTP**：架构测试按真实模块集合与生产依赖传递闭包检查，四种失败情形都有测例。
+- **缺口**（按裁定挪到 P2-5）：本地引擎的跨页面加载/卸载/生成协调与登记列表过期处理。
+
+## 六、已知问题
+
+1. 云端回答是**整段返回**（不是逐字流式）：界面显示「生成中」，结果一次性出现。这是本包的既定范围
+   （裁定允许），但不是流式体验。
+2. 「停止」在**第一个字还没出来**时不再丢问题（问题回到输入框），但这一轮不会入库 —— 与「已生成的部分
+   才留下」一致。
+3. 本地模型有时把整段预算花在隐藏的思考段上，界面长时间没有正文（第一轮走查观察过一次约 47 秒）；
+   与 P2-5 的上下文/长度策略一起复验。
+4. 走查输入受限：`adb` 不能注入中文（英文会被中文输入法当拼音吞掉）。
+5. **两项真机复验已用自动化测试补上**（见 4.3）：手工点不进去的两件事，现在由手机上跑的 Compose
+   instrumented 测试证明。仍未覆盖的：点「知道了，用云端」之后真的把这一轮发出去、以及「编辑页重选云端模型也弹窗」
+   这条旧入口；测试 2 也无法观测「有没有偷偷发到新地址」（新端口上没有服务），它证明的是「被确认过的那个服务 0 请求」
+   加「弹窗先出现」（源码里这条路径在发请求前就 return）。
+6. 云服务编辑页没有单独的「保存」按钮：点「拉取模型」会先落盘再拉取（读 `CloudSettingsScreen` 确认），
+   所以改地址在界面上要靠这个动作落盘；拉取本身对新地址会失败，但地址已经存进去了。
+
+## 七、额度读数
+
+**本轮新增两条**：2026-10-18 **21:19** 全量审结束 **5h=59% / 每周=41%**；**22:30** 复审撞上限
+**5h=99% / 每周=47%**（credits 0，Codex 明确答复「try again at Oct 19th, 2026 2:06 AM」）。
+
+| 时点 | 5 小时窗口 | 每周 |
+|---|---|---|
+| 方案审前（12:12 事件） | 93.0%（重置 15:54） | 14.0% |
+| 方案审后（16:09 事件） | 23.0% | 19.0% |
+| 专项审后（17:00 事件） | 65.0% | 26.0% |
+| 全量审尝试后（17:26 事件） | **99.0%（上限，重置 21:04）** | 31.0% |
+
+全量审那一轮消耗 139,068 token 后撞上限、未产出报告；重跑安排在 21:10。建议统筹提前知悉：
+如果希望更早拿到结论，可以在重置前代审（审稿要求已在仓库里：`codex-prompt-review.md`）。
+
+## 八、提交与证据对应表
+
+| 提交 | 内容 | 对应证据 |
+|---|---|---|
+| `e0d3f7f` | P2-2 实现（四批：hearth 模块、网关与审计、页面接线、审稿要求） | 第一轮门禁（111 用例）、第一轮真机走查 `01`–`14` |
+| `eecbf7a` | 方案审报告入库 + 第 8/11/12 条与第 2/3/7 条核心的落实 | 门禁 113 用例 |
+| `097862c` | 交付报告与开发线交接 | — |
+| `d390c24` | 并入 `main` `a54c604`（统筹裁定） | — |
+| `01a5ff0` | 裁定里的本包内必修项（第 1 剩余、3、4、5、6、9、10 与体验①②） | 门禁 133 用例、第二轮真机走查 `20`–`22` |
+| `d4fbea0` | 专项审 7 条整改 | 门禁（在修复后提交上重跑） |
+| `5005bc4` | 回到炉边时重新载入沉浸历史 | 最终门禁：PASS，133 用例（提交号已记入 `summary.md`，工作区干净） |
+| `5f64b99` | 改地址/换服务后的重新确认挪到发送时（对话页直接弹确认框） | 编译 + lint + 三模块测试 |
+| （真机补测提交） | 两个 Compose instrumented 测试 + androidTest 三行依赖 | 设备 `OK (2 tests)`（我自己重跑 11.797 s；子代理侧各三次重复） |
+| `ddafb69`、`24ff0cd`、`4756ebf` | 交付报告与开发线交接更新（docs only） | — |
+| — | **全量审尝试（17:23–17:27）撞用量上限，未产出** | 额度 99%，21:04 重置；重跑挂在 21:10 |
+| `11e92b3` | 交付报告：说明两条 instrumented 测试只在真机跑、不在门禁任务契约内，并记下复验命令 | — |
+| `be2e013`、`11e92b3` | 截图与门禁日志归档到正式证据目录 | `.omx/.../2026-10-18-android-P2-2/` |
+| `0f28bd0`、`11e92b3`、`be2e013` | `check-all.sh`（CI 那条）在全新 worktree 上同样通过 | `p2-2-gate-checkall-sh.txt` |
+| `11e92b3` | 全量审（21:05 发出，21:05–21:19 在只读 worktree 跑完） | `REVIEW.md`（需修改，9 条；结束时 5h=59%、每周=41%） |
+| `313e745` | 全量审 9 条整改：网关请求级取消协议、导航时清 busy、校验进事务、确认任务绑定操作、地址与密钥同一快照、升级判定不再静默改模型、加载期停止算停止、按真实视口判定跟随、证据更正 | 当时的整树复验（**「JVM 128/128」一行来自过期产物，已作废**，见 3.4/第十节）与真机 4 类 9 例转述 |
+| `a196aed` | 第 5 条要求的快照测例（两次读取之间配置被改，地址与密钥不得跨版本拼接） | `roundtable/CloudEndpointSnapshotTest` 2 例通过 |
+| （复审第一次） | 22:11 起跑，5.5 分钟 / 131 万 token 后撞上限（5h=99%、每周=47%，02:06 重置） | **未产出** |
+| （复审第二次·无人值守） | 02:07:36 开始（`p2-2-work/review-r2-wait.log`），审核目标 `cb6c2db`，02:15:26 结束、报告 13087 字节 | `REVIEW-r2.md`：**结论需修改**，第 5、6 条通过，**第 1、2、3、4、7、8、9 条不通过**（该报告已随 `e6c1d65` 入库） |
+| （本轮证据更正） | 归档审计原文附件、撤回「9 条全部整改」与「当时没存下来」、更正截图与包信息表述、测速继续标无法验证 | `docs/reviews/2026-10-18-P2-2/evidence/`（`audit-raw.json`/`audit-raw2.json`/`audit-raw3.json` + `README.md`）、本报告 3.3 / 3.4 / 4.5 / 第八、九节与 9.1 |
+| `6fd00c8` | 复审第 3、4 条的 hearth 半边：`writeTurn` 把 `valid()` 放进写入事务（含 `redo` 路径）、`confirmCloudTarget` 事务内判有效性且只写确认列 | `hearth/AbandonedWriteTest`、`hearth/CloudConfirmTargetTest`；`:hearth:test` 46 用例 0 失败 |
+| `3bfbdc3` | 复审第 8 条：跟随状态与手势协程同键（`TimelineFollowState.claim`），首次保存不再重置上翻 | `HearthTimelineFollowDeviceTest` 补 3 例；设备输出已归档（单类 **OK (10 tests)**，`Time: 11.234`/`11.278`，`evidence/device-tests/04c`/`04d`；判别力见 3.5 第 8 行） |
+| `42fee21` | 复审第 1 条：取消状态延续到建连之前（`GatewayCall.bodyStream` 取流检查点 + 写入流每次 write/flush 复验、取消后不 flush） | `net/GatewayTest.aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte`；判别力原文见 3.5 |
+| `bfa9217` | 复审第 2 条：切历史先固定目标、历史就绪前拒绝发送、收尾刷新复检令牌 | `HearthNavigationDuringTurnDeviceTest` 补 3 例（设备输出已归档：单类 **OK (5 tests)** `Time: 22.187`，`evidence/device-tests/01-*`、`02b-*`） |
+| `e152472` | 复审第 4 条：`confirmSend` 改走 `confirmCloudTarget(id, target, now, ::stillWanted)`，取消后一列不改 | `HearthNavigationDuringTurnDeviceTest.aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 重写（设备输出已归档：单类与分批跑 B 均通过，6106/6119ms，`evidence/device-tests/01-*`、`02b-*`） |
+| `c91eaaa` | 复审第 3、7 条：`generationToken` 改 `AtomicInteger`；加载返回后先问停止意图、本地回答没产出就不落库 | `llm/LocalModelEngineTest` 新增 2 例；`HearthLocalStopDuringLoadDeviceTest`（设备输出已归档：真机 assumption 跳过，`code=-4`，28ms，`evidence/device-tests/02b-*`） |
+| `b9efc1d` | 复审第 9 条：证据更正与撤回过头表述（docs only） | 本报告 3.3 / 3.4 / 4.5 / 第九节与 9.1、`evidence/` |
+| `e6c1d65` | 复审报告 `REVIEW-r2.md` 入库（docs only），当时本分支 tip | `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`（13087 字节） |
+| （第二轮整改后·最终门禁） | 全新 worktree detached `c91eaaa`，`check-all.ps1` 与 `check-all.sh` 均通过 | **154 用例 0 失败**、lint 0 error / 0 warning；`p2-2-work/gate-final-ps1.txt`、`gate-final-sh.txt`（第十节） |
+| （第三次复审·已产出） | 等待任务在 2026-10-19 07:06:40（额度重置）后自动执行，审 `758bbf2`、对照 r2 基线 `cb6c2db`，全程只读 | `REVIEW-r3.md`：**结论需修改**——第 3、4 条核心缺陷已修复、第 5、6 条维持通过，第 1、2、7、8 条仍有遗漏，第 9 条表述需改（**该报告已随 `b6dbc6c` 入库**，见 3.6） |
+| `b6dbc6c` | 第三次复审结论与判别力表述按证据分级（docs only），`REVIEW-r3.md` 入库 | `docs/reviews/2026-10-18-P2-2/REVIEW-r3.md`；本报告 3.5、3.6 |
+| （判别力证据归档提交） | 一次性（detached）工作树里复跑第 3、4、7 条的「改坏 → 变红 → 还原」，并为第 2 条另写临时 JVM 复刻件、补上此前缺的失败原文；第 8 条如实记为没有取得证据 | `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`、同目录 `evidence/r3-logs/`（15 个文件）；本报告 3.5 与 9.1 第 5 项 |
+| `bce89e8`、`204c7c1` | 设备测例有界化并在真机复跑、跟随类两例稳定化并更正归档归因；只改 `app/src/androidTest` 的 4 个测试文件，实现未改 | `docs/reviews/2026-10-18-P2-2/evidence/device-tests/`（**当时** 39 个文件，含 `01`–`04g`、`hang-record/`、`scripts/`；本轮又新增 `guards-samples/` 与 `scripts/guards-selftest.ps1`）；本报告 4.6 |
+| `5ba4376` | 交付报告补真机证据与限制（docs only），第四次复审审的就是这一提交 | 本报告 4.6；`REVIEW-r4.md`（审 `5ba4376`） |
+| （第四次复审·已产出并入库） | 审 `5ba4376`，全程只读、未重跑构建/测试 | `REVIEW-r4.md`：**结论需修改**——必修 3、5 通过；必修 2 核心防护已补但页面接线有新回归；必修 1 仍未封闭；必修 4 部分修复；原第 9 条仍需改表述（**已随 `7b87696` 入库**，见 3.7） |
+| （按 r4 更正·上一轮） | 按 r4 意见更正交付报告的表述（全量结果来源、模型失败归因、门禁适用性、总括词），并把 r4 结论写入 3.7。**那一轮只改文档：不跑 Gradle、不联网、不连设备、不 push、不改源码** | 本报告 3.6、3.7、4.6、第十节；`docs/reviews/2026-10-18-P2-2/REVIEW-r4.md`（随 `7b87696` 入库） |
+| （第五次复审·本轮入库） | 审 `803abb6`、对照 r4，全程只读、未重跑构建/测试；并直接读了 `803abb6` 的 `gate-final3-ps1/sh` 摘要、复算同工作树 JUnit XML（**169 例 0 失败**、lint 0/0） | `REVIEW-r5.md`：**结论需修改**——②③通过（③真实时延未验证）；①残留可作为已知残留**提交统筹裁定**、但结案文档措辞需收窄；④与本报告的门禁来源/转述/附件说明需改；冻结守卫脚本仍需修（见 3.8） |
+| `a9843a7`（本轮第一笔，工作树 `p2-2-r5-fix`；本分支落点为 `62ddf31`） | 修冻结守卫脚本：`$pid`→`$sel.Pid`（`Select-TargetPid` 的返回值；脚本里没有 `$testPid` 这个变量）、按 `ps -T` 表头列位解析 WCHAN、退出分类（跑完/崩溃/冻结超时/停涨/未知）；新增样例夹具与自检。**不跑 Gradle、不联网、不连设备、不 push、不改源码** | `evidence/device-tests/scripts/guards.ps1`、`scripts/guards-selftest.ps1`、`guards-samples/`（11 replay 场景 + 1 个 live 冒烟全过，`selftest-output.txt`）；`evidence/device-tests/README.md` 第 4.1 节；本报告 3.8 |
+| （本轮第二笔） | 按 r5 意见更正本报告的门禁来源、r4 条目转述与附件说明，写入 r5 结论，`REVIEW-r5.md` 入库；`04e` 的「前 14 例通过」改为实际结果。**只改 `docs/reviews/2026-10-18-P2-2/` 下的文件：不跑 Gradle、不联网、不连设备、不 push、不改源码** | 本报告 3.8、4.6、第十节；`docs/reviews/2026-10-18-P2-2/REVIEW-r5.md`；`evidence/device-tests/04e-follow-class-rerun.md` |
+| （第六次复审·本轮入库） | 审 `b58d3a0`、对照 r5，全程只读、未重跑构建/测试；并直接读了本轮 `gate-final4-ps1/sh` 两份摘要、复算对应工作树 JUnit XML（**169 例 0 失败/错误/跳过**、lint 0/0；SH 单测任务 `UP-TO-DATE`，不算第二次独立执行全部测试） | `REVIEW-r6.md`：**结论需修改**——①15s/30s 口径、②门禁来源、③进程号冲突**通过**；历史就绪/草稿/重试/本地取消**维持通过**；新增守卫解析回归与 WCHAN 校验、结案材料过宽表述、r5 遗留一致性共**四条【P2】必改**（见 3.9） |
+| `2f5e623`（**拣入本分支**，原始 `cc9b3ec`，工作树 `p2-2-r6-doc`；r6 必改 3、4） | 按 r6 意见收窄结案文档第 6、58 行的过宽表述，`Gateway.kt:290` 的保证 B 限定为「获取正文输出流期间」，设备测例 `:559` 注释改成实事求是的验证边界，`DELIVERY.md` 的 r4 转述与「已完成／未做」统一，写入 r6 结论并入库 `REVIEW-r6.md`。**未联网、未连设备、未 push、不改 main** | 本报告 3.6、3.8、3.9；`docs/reviews/2026-10-18-P2-2/REVIEW-r6.md`；`CANCEL-DURING-CONNECT.md`；`net/.../Gateway.kt`（注释）；`app/src/androidTest/.../HearthNavigationDuringTurnDeviceTest.kt`（注释） |
+| `1ac3ac6`（**拣入本分支**，原始 `42ded05`，工作树 `p2-2-r6-guards`；r6 必改 1、2，也是本轮最终门禁的提交） | r6 必改 1、2：守卫在解析前统一剥离每行行首主机时间戳（兼容 `run-timestamped.ps1` 的带时间戳日志，接入回归场景 `12-done-timestamped`）、`ps -T` 表头行/列数一致性校验、退出分类回归；自检改为 15 个 replay 场景 + 1 个 live 冒烟、场景数按实际文件数统计。**不跑 Gradle、不联网、不连设备、不 push、不改源码** | `evidence/device-tests/scripts/guards.ps1`、`scripts/guards-selftest.ps1`、`guards-samples/`（含 `log-done-timestamped.txt`、`ps-wchan-dash/blank/extra-column-constructed.txt`、`scenarios/12`–`15`）、`selftest-output.txt`（**16 passed, 0 failed**）；`evidence/device-tests/README.md`、`guards-samples/README.md`；本报告 3.9 |
+| （审核收口轮·最终门禁） | 全新 worktree detached **`1ac3ac6`**，`check-all.ps1` 与 `check-all.sh` 都给出通过结论（SH 与 PS1 同一 worktree 先后跑、SH 多数任务 `UP-TO-DATE`） | **169 用例 0 失败**、lint 0/0、llama.cpp `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`；`p2-2-work/gate-final5-ps1.txt`、`gate-final5-sh.txt`（**在仓库外，未入库，无法从仓库独立复核**；第十节 10.1） |
+| （本轮·收口文档） | 本报告补 3.6 收口说明与第十节 10.1 最终门禁、更新 3.9 四条状态与提交表；`docs/tracks/开发线.md` 的 P2-2 段最小更新。**只改这两个文档文件：不跑 Gradle、不联网、不连设备、不 push、不改源码** | 本报告 3.6、3.8、3.9、第八节、第十节；`docs/tracks/开发线.md` |
+
+## 九、全量审提出的证据缺口与更正（2026-10-18 21:10 审后）
+
+这一节只写「哪些原始证据不存在、哪些表述被撤回」，方便复核者按图索骥。
+
+| 审稿指出 | 现在的事实 | 处置 |
+|---|---|---|
+| 正式审计目录里找不到测试模式的记录 | **记录确实存在，此前「没存下来」的说法与实物不符，撤回**：`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw2.json`（7 条）与 `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw3.json`（8 条）里各有一条 `HearthChatTest`：`at=2026-10-18T08:05:55.032494Z`、`host=127.0.0.1`、`sentCharacters=206`、`sentBody=""`（正文长度 **0**）、`status=200`、`succeeded=true`、`promptTokens=12`、`completionTokens=8`；同两文件里另有沉浸 `HearthChat`（07:25:15，377 字；`raw3` 还有 08:07:09，470 字）。`09-audit-hearth-entries.txt` 只是当时摘录的 1 条，不是唯一凭据 | **已归档为仓库内可定位附件**：`docs/reviews/2026-10-18-P2-2/evidence/audit-raw.json`、`audit-raw2.json`、`audit-raw3.json`（复制前逐份查过：字段只有 `at/host/purpose/sentCharacters/sentBody/status/succeeded/promptTokens/completionTokens` 九个，`host` 全是 `127.0.0.1`，无本机用户名、设备序列号、密钥或真实地址；详见 `evidence/README.md`） |
+| 仅凭 `speed-run3.txt` 的 `OK (1 test)` 复核不了三次测速 | `p2-2-work` 里与测速有关的只有 `speed-run1.txt`（类名写错、`ClassNotFoundException`、末尾 `Tests run: 1, Failures: 1`）、`speed-run2.txt`（空文件）、`speed-run3.txt`（102 字节，只有 `Time: 373.865` 与 `OK (1 test)`）；**token 数与读提示/生成耗时明细在任何归档文件里都没有** | 已撤回「1500 token 测速通过」的写法，**继续标「无法验证」**（4.5、本节、9.1 第 6 项） |
+| 找不到两个 Compose 设备测试的原始成功输出 | 运行输出只留在会话里，没有归档成文件；仓库、`p2-2-work` 与正式证据目录里都搜不到 `OK (n tests)` 的原始输出 | 标**原始输出未归档**；给出复跑命令（4.3、4.4），复核者可自行复现。**2026-10-19 补**：这两个类此后有界化复跑的原始输出已归档（`evidence/device-tests/`，39 个文件），见 4.6；2026-10-18 那一轮本身的输出仍未归档 |
+| 正式版前后包信息缺本包原文 | P2-2 两次走查只读了值，`dumpsys package` 原文始终没有落盘：仓库、`p2-2-work`、正式证据目录三处都搜不到 P2-2 时点的原文，**未归档，无法复核**；最近的同组原始记录是 P2-1b 的 `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\device-log.txt`（13:38，含 `dumpsys` 原文片段） | **撤回**此前「本轮补上了装前/装后原文」的说法（3.4 已改写）：P2-2 这两次读数只能算当时转述，标注**未归档、无法复核** |
+| `20`–`22` 保留状态栏、`20` 含系统通知，「状态栏已裁」不实 | **复审 `REVIEW-r2.md` 第 44–46 行目视确认：`20-testmode-turn.png` 仍保留大块「旁路充电」系统通知，裁掉顶部 160 像素并没有清除它。**本次无法目视（本会话模型不接受图像输入，`read_image` 直接报错），改用逐行像素统计复算，结论一致：图 1216×2528；y=0–266 是一整块浅色卡片（众数色 `(208,208,209)`，x=62–1153 共 1092 px 宽，左右各留 62 px 深色边），而同图应用本体是深色（y=600–700 众数色 `(20,18,24)`，占 93%）；卡片内 y=0–37、64–106、171–212、254–266 有内容行，其中 y=171–212 含强调色 `(121,118,252)` 3625 px，而该色在整图稀疏采样里只有 163 px。**裁掉 y=0–159 后仍留下 y=160–266 共 107 行**（含整个强调色块与卡片下边缘），故「裁掉 160 像素＝界面干净」不成立 | 改写为：`20-testmode-turn.png` **仍含系统「旁路充电」通知**，该图**只作「进入测试模式」的辅助证据，不作「界面干净」的证据**；且本会话无图像输入，卡片上的文字**未 OCR、未逐字确认**，上述结论只依据几何与色彩统计 |
+| 「12 条 + 7 条全部整改」「成功/失败/超时/取消另有测例」过头 | 12 条与 7 条是**逐条状态**（3.1/3.2 有表），不是笼统「全部通过」；超时/取消矩阵确实没有单独成例 | 已按事实改写（3.1 第 8 条、本节、3.3） |
+
+### 9.1 复审《REVIEW-r2.md》第 7 条要求的二次更正（2026-10-19，只改文档与归档证据）
+
+复审审的是 `cb6c2db`（当时本报告所在工作树的基线是 `3bfbdc3`，它后面还有 `6fd00c8` 等整改；到 `c91eaaa`
+共七笔，逐条见 3.5）。逐项更正：
+
+1. **撤回「9 条全部整改」**。3.3 的结论已改写为：「9 条整改已提交（`313e745`、`a196aed`），复审
+   `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条仍不通过，正按复审意见二次整改」。3.4 的整树与真机复验
+   只证明那批改动构建、单测、lint 与设备测例通过，**不再当作复审通过的凭据**。
+2. **审计原文按实物更正并归档**。测试模式那条记录**确实存在**，「当时没存下来」的说法**与实物不符，撤回**：
+   - `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw2.json`（7 条）与
+     `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\audit-raw3.json`（8 条）各含一条 `HearthChatTest`：
+     `at=2026-10-18T08:05:55.032494Z`、`host=127.0.0.1`、`sentCharacters=206`、`sentBody=""`（正文长度 0）、
+     `status=200`、`succeeded=true`、`promptTokens=12`、`completionTokens=8`。
+   - 同目录的 `audit-raw.json`（6 条）是更早的一次快照。
+   - 三份都已复制进仓库：`docs/reviews/2026-10-18-P2-2/evidence/`（附 `README.md` 记来源、字段、编码与敏感字段排查结果；
+     三份都是 **UTF-16LE + BOM 的单行 JSON**，逐字节照抄，故 `git show` 会显示为 `Bin`，读法见该 README）。
+3. **截图**。`20-testmode-turn.png` **仍含系统「旁路充电」通知**（复审目视；本次用逐行像素统计复算，见上表），
+   裁掉顶部 160 像素没有清除它。该图**只作「进入测试模式」的辅助证据，不作「界面干净」的证据**。
+   正式证据目录：`D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-2\20-testmode-turn.png`。
+4. **正式版包信息原文**：**未归档，无法复核**。仓库、`p2-2-work` 与正式证据目录都搜不到 P2-2 时点的
+   `dumpsys package` 原文；最近一份同组读数在 P2-1b 的
+   `D:\Agent\Worktrees\OMNIX-Mycelium\main\.omx\development\reviews\2026-10-18-android-P2-1b\device-log.txt`（13:38）。
+5. **设备输出原文**：四类九例的 instrumented 输出最初**未归档**，只有会话转述；复跑命令见 4.3/4.4。
+   （2026-10-19 补两处纠正：(a) 第 3、4、7 条的**判别力实证原文**已在一次性工作树里「改坏 → 变红 → 还原」重跑并
+   归档，第 2 条由临时 JVM 复刻件补上其两条断言的失败原文（该复刻件未入库，不等于真机用例跑红过），归档在
+   `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`（原始日志 `evidence/r3-logs/`）；
+   第 5、6 条无额外实证；第 8 条当时没有取得判别力证据（该文件 6.1 节其后补上「首次保存 vs 导航」那一半的真机
+   实证，另一半仍标未验证），见该文件第 6 条。(b) **真机 androidTest 运行输出已归档**：
+   2026-10-19 的有界化复跑原始输出在 `docs/reviews/2026-10-18-P2-2/evidence/device-tests/`（39 个文件），
+   逐例结果与残余限制见 4.6，此前「这批真机输出仍未归档」的说法作废；不过 2026-10-18 22:35 那一轮四类九例
+   本身的输出仍未归档，4.4 的耗时只能算当时转述。）
+6. **测速**：1500 token 测速的 token 数与耗时明细**没有归档文件**，**继续标「无法验证」**（4.5 已写明）。
+
+方法与局限（如实记）：本次只在 Windows 上读文件、跑 `git` / `Select-String` 与一段只读的 Python/Pillow 像素统计，
+**没有连接设备、没有推送、没有跑 Gradle、没有联网、没有改源码**；当时复审报告 `REVIEW-r2.md` 还是
+**未入库文件**，本轮（2026-10-19）它已随 `e6c1d65` 入库为 `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`。
+
+另外记一笔：第一轮 `01`–`14` 里的 `09` 号审计附件是**当时**的读数；此后设备上的审计条数已变——本报告上一轮更新（见 9.1）复核停止测试时又留了 1 条 `HearthChat`（那是真实出网请求的审计记录，按规矩不去改用户的隐私记录）。
+
+## 十、最终门禁（第二轮整改后，2026-10-19）
+
+在**全新 worktree** 里对**已提交的提交**从零跑两条门禁脚本：工作树
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-final`，detached 在 **`c91eaaa`**，`worktree: clean`。
+
+**门禁结论的适用性（本节口径，本轮按 `REVIEW-r5.md` 必修 4 更正）**：门禁结果只对应**各自跑门禁时的那个提交**，
+一律不能外推到别的提交。下面是逐轮对应（`c91eaaa` 那一轮的模块明细留在本节末尾的表里）：
+
+| 门禁跑在 | 用例 | 结论 | 原始日志（全都在**仓库外**的本机目录） |
+| --- | --- | --- | --- |
+| `c91eaaa` | 154 | PASS，lint 0/0；PS1 与 SH 都实跑 | `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-final-ps1.txt`、`gate-final-sh.txt` |
+| `b6dbc6c` | 163 | PASS，lint 0/0；PS1 实跑，SH 那一轮 10 个任务全 `UP-TO-DATE`（复用结果） | 同目录 `gate-r3-ps1.txt`、`gate-r3-sh.txt` |
+| `204c7c1` | 163 | PASS，lint 0/0；PS1 实跑，SH 同样复用 `UP-TO-DATE` | 同目录 `gate-final2-ps1.txt`、`gate-final2-sh.txt` |
+| `803abb6`（第五次复审审的提交） | 169 | PASS，lint 0/0；PS1 实跑，SH 同样复用 `UP-TO-DATE` | 同目录 `gate-final3-ps1.txt`、`gate-final3-sh.txt`；**r5 直接读过这两份摘要并复算了同一工作树的 JUnit XML**（169 例、0 失败/错误/跳过、lint 0/0） |
+| **`1ac3ac6`（审核收口轮的最终门禁，本轮补记）** | **169** | **PASS**，lint 0/0；**PS1 先实跑，SH 与 PS1 同一 worktree 先后跑**（SH 的 JVM 单测任务多数 `UP-TO-DATE`，复用同一批结果） | 同目录 **`gate-final5-ps1.txt`**、**`gate-final5-sh.txt`**（**都在仓库外、未纳入版本控制**，从仓库出发**无法独立复核**；详情见 10.1） |
+
+### 10.1 收口轮最终门禁：全新 worktree detached `1ac3ac6`（本轮补记）
+
+- **worktree**：全新 `D:\Agent\Worktrees\Mycelium-Android\p2-2-final5`（detached），`commit: 1ac3ac650136ae059f39b91bc4e2409f0c949612`、`worktree: clean`；`--offline`、`tasks: 253 executed, 20 up-to-date`、Gradle 退出码 **0**。
+- **结论行原文**：`scripts/check-all.ps1` → `**PASS**: 0 failures, 0 warnings, exit code 0.`；`scripts/check-all.sh` → `**通过**：0 失败、0 警告，退出码 0`。
+- **169 用例 0 失败**：`:app` **38**、`:contract` **22**、`:hearth` **46**、`:llm` **13**、`:model-api` **3**、`:net` **19**、`:roundtable` **28**（合计 **169**，失败/错误/跳过都是 **0**）。
+- **lint**：`:app` debug 与 release 均 **0 error / 0 warning**；产物 `app-debug.apk`、`app-debug-androidTest.apk` 已签名，`app-release-unsigned.apk` 未签名。
+- **llama.cpp**：校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`。
+- **日志**：`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-final5-ps1.txt`、`gate-final5-sh.txt`——**在仓库外、未纳入版本控制**，所以**从本仓库出发无法独立复核**（本轮只按这两份原始摘要如实转录，未重跑门禁、未联网、未连设备）。**SH 与 PS1 跑在同一个 worktree 上、PS1 在前**，SH 的 JVM 单测任务多数显示 `UP-TO-DATE`（复用 PS1 那一批结果与产物），因此**不算第二次独立执行全部测试**。
+- **能证明什么**：它证明 `1ac3ac6` 这一提交**能构建、JVM 用例 169/0、lint 0/0 并通过打包**；它**不包含** device/instrumented 测试（两条脚本按任务契约只跑 `assembleDebugAndroidTest`），也**不是复审通过**——`REVIEW-r6.md` 的结论原文仍是「需修改」，只是它新列的四条【P2】必改已在本轮修完，**审核循环已收口、交统筹处理**（见 3.6）。
+- **正式版包基线未受影响**：`com.xavierxia.mycelium` 仍是 `versionName=0.1.1` / `versionCode=2` / `lastUpdateTime=2026-10-10 05:23:04`（本节与 4.6 两轮真机走查前后核对一致；本轮只改文档、未装包、未覆盖、未卸载）。
+
+**来源与转述的更正（r5 必修 4 第一类）**：本节此前写「第四次复审指出：最近的从零门禁是在 `204c7c1` 上跑的……
+其用例数与双绿结论按 **r4 的复核转述**记录」——**作废**：`REVIEW-r4.md` 通篇没有跑门禁、也没有给出这些数字
+（r4 明确写「本次遵守只读要求，没有重跑 Gradle、JUnit、lint、设备或变异实验……当前提交的完整门禁……均未动态
+验证」）。`204c7c1` 那一轮的 163 例是本机 `gate-final2-*` 原始摘要里的读数，不是 r4 的转述；`b6dbc6c` 那一轮同样
+是 `gate-r3-*`。**原始日志确实没有归档进本包仓库**：四轮摘要都在 `p2-2-work\`（仓库外、未纳入版本控制），
+仓库内只有 `c91eaaa` 那一轮的结果被抄进本文第十节的表里，所以从仓库出发**无法独立复核**；其中 `803abb6` 那一轮
+由 r5 复核过（见上表末行），其余按本机原始摘要记录。另按 r5 的口径：SH 那三条大多 `UP-TO-DATE`，
+「不能算第二次独立执行全部测试」。
+
+**用例数为什么从 154 涨到 163、再到 169（r5 必修 4 第二类）**：本节此前写「用例数由 154 增至 163 是两笔设备测例
+改动带来的」——**不成立，作废**：`app/src/androidTest` 的改动不进 JVM 单测计数。真实来源是各轮**修复提交自带的
+JVM 测例**：`c91eaaa..b6dbc6c` 之间 `cd2a0b6`（`:net` 15→17）、`798ea7d`/`1aaec9b`/`199e0fa`（`:app` 27→34）把它
+推到 163；`b6dbc6c..803abb6` 之间 `bf6ce47`（`:net` 17→19）、`2c6059a`（`:app` +2）、`803abb6`（`:app` +2）把它推到
+169（两轮模块表：154=27+22+46+13+3+15+28，163=34+22+46+13+3+17+28，169=38+22+46+13+3+19+28；本轮用
+`git log --name-only` 逐笔核过这些提交改的是哪个源集，所以不存在「设备测例改动让 JVM 用例变多」这回事）。
+
+| 项目 | 结果 |
+|---|---|
+| 提交 | `c91eaaafc7c1c72160b0de064e2e3dc56311e565`（本表的对数只到这一笔） |
+| llama.cpp | 校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f` |
+| Gradle | `--offline`；`test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest`，退出码 **0**，**253 个任务实际执行 / 20 个无需执行** |
+| `scripts/check-all.ps1` 结论行（原文） | `**PASS**: 0 failures, 0 warnings, exit code 0.` |
+| `scripts/check-all.sh` 结论行（原文） | `**通过**：0 失败、0 警告，退出码 0。` |
+| 用例 | **154 用例 0 失败**：`:app` 27、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、`:net` 15、`:roundtable` 28 |
+| lint | `:app` debug / release 均 **0 error / 0 warning**（无 hint） |
+| 产物 | `app-debug.apk`、`app-debug-androidTest.apk` 已签名；`app-release-unsigned.apk` 未签名 |
+| 日志 | `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-final-ps1.txt`、`gate-final-sh.txt`（`.sh` 那条跑在 `.ps1` 之后，多数任务显示 `UP-TO-DATE`，复用同一批结果与产物；**在仓库外，未入库**） |
+
+**口径更正（三条旧说法作废）**：
+
+1. 此前 3.4 写的 **「JVM 单测 128/128」来自过期产物，作废**。第二轮整改后的真实数字是上表的
+   **154 用例 0 失败**（`:hearth` 46、`:net` 15、`:roundtable` 28、`:app` 27、`:contract` 22、`:llm` 13、
+   `:model-api` 3）。
+2. 此前「lint 0 error / 0 warning / **1 hint**」的说法**作废**：`HearthSpace.kt` 的 `AutoboxingStateCreation`
+   hint 早在提交 **`5314e34`** 就已消掉，最终门禁是 **0 error / 0 warning**。
+3. 此前「`c91eaaa` 以后只有文档变化、故结论对当前 tip 适用」的说法**作废**：`c91eaaa` 之后还有测试改动
+   （`bce89e8`、`204c7c1`）、修复改动（`cd2a0b6`、`798ea7d`、`1aaec9b`、`199e0fa` 等）与文档改动。此前把
+   「门禁跑在 `204c7c1`、163 用例」挂在「第四次复审的转述」名下也不成立：那是本机 `gate-final2-*` 摘要的读数，
+   r4 本轮没有跑门禁；本轮已在上表按原始摘要逐轮列出（154/163/163/169）并标明日志位置。
+
+**这一节能证明什么、不能证明什么**：它证明上面那四个提交（`c91eaaa` 154 例、`b6dbc6c` 163 例、
+`204c7c1` 163 例、`803abb6` 169 例）**构建、JVM 用例、lint 与打包**通过；这四轮的原始摘要都在仓库外
+（`803abb6` 那一轮由 r5 复核过摘要与 JUnit XML，其余按本机原始摘要记录）。**本轮另补记了收口轮的最终门禁**
+（上表末行：全新 worktree detached `1ac3ac6`，**169 例**，PS1 先实跑、SH 同 worktree 后跑且多数 `UP-TO-DATE`，
+两份结论行原文与限制见 **10.1**）。以上都**不包含** device/instrumented 测试（两条脚本按任务契约只跑
+`assembleDebugAndroidTest`，CI runner 上没有设备/模拟器），也**不是复审通过**——r3、r4 判**仍需修改**，r5 维持
+「需修改」（②③通过、①的残留处置待统筹裁定、④与守卫脚本本轮修正），r6 维持「需修改」（②③与①的超时口径通过、
+历史就绪/草稿/重试/本地取消维持通过，另有四条【P2】必改，见 3.9）——**r6 那四条已在本轮全部修完，审核循环
+就此收口、交统筹处理**（见 3.6），本包仍是「待审」（见 3.6、3.7、3.8、3.9）。

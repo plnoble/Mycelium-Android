@@ -1,0 +1,17 @@
+RUN 01 single class (HearthNavigationDuringTurnDeviceTest) started 2026-10-19 11:46:45; hard cap = 3 min without log growth; freezer guard on
+RUN 02 full androidTest (25 tests) started 2026-10-19 11:47:53; hard cap = 3 min without log growth; freezer guard on
+WATCHDOG 2026-10-19 11:51:27 no log growth for 3 min (size 9568 bytes)
+started  : plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile | changingTheSavedAddressMakesTheNextSendAskAgain | aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer | stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer | aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened | aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected | comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+finished : plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile | changingTheSavedAddressMakesTheNextSendAskAgain | aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer | stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer | aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened | aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+stuck    : comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+action   : force-stop com.xavierxia.mycelium.debug and com.xavierxia.mycelium.debug.test
+STICKY 2026-10-19 11:52:53 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (9507) sticky=true
+RUN 03 full androidTest (25 tests) started 2026-10-19 11:52:53; in-process bound 4 min (prints all thread stacks), host cap 6 min without log growth; freezer guard on
+STICKY 2026-10-19 11:55:41 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (12149) sticky=true
+RUN 04 full androidTest (25 tests) retry started 2026-10-19 11:55:41; in-process bound 4 min (prints all thread stacks), host cap 6 min without log growth; freezer guard on
+STICKY 2026-10-19 11:58:13 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (15052) sticky=true
+RUN 05 full androidTest (25 tests) after 'pm clear com.xavierxia.mycelium.debug' started 2026-10-19 11:58:13; in-process bound 4 min, host cap 6 min; freezer guard on
+STICKY 2026-10-19 12:00:49 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (17725) sticky=true
+RUN 06 split run B (all classes except HearthTimelineFollowDeviceTest) started 2026-10-19 12:00:49
+STICKY 2026-10-19 12:02:55 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (19002) sticky=true
+RUN 07 split run C (remaining HearthTimelineFollowDeviceTest methods) started 2026-10-19 12:02:55

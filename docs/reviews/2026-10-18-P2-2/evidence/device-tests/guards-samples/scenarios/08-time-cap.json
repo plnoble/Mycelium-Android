@@ -1,0 +1,16 @@
+{
+  "name": "08-time-cap",
+  "why": "The log keeps growing, so the stall bound never fires; the total -Seconds cap is hit with no terminal marker. The guard must report UNKNOWN/exit 5 rather than pretend the run finished.",
+  "args": { "StaleMinutes": 5, "PollSeconds": 15, "Seconds": 60 },
+  "expectExit": 5,
+  "expectReport": ["^UNKNOWN .*total cap .*reached with no terminal marker"],
+  "expectNoReport": ["^WATCHDOG ", "^DONE ", "^CRASH ", "^FREEZER "],
+  "expectCommands": [],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running-longer.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running-longer.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-done.txt" }
+  ]
+}

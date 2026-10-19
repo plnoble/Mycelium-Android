@@ -1,0 +1,591 @@
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.DeviceHearthTest:
+INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.DeviceHearthTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest:
+INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudReconfirmDeviceTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=changingTheSavedAddressMakesTheNextSendAskAgain
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest:
+INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthCloudStopDeviceTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest:
+INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:111)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.access$hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:70)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+
+INSTRUMENTATION_STATUS: stream=
+Error in stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest):
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:111)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.access$hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:70)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+
+INSTRUMENTATION_STATUS: test=stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest:
+INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened(HearthNavigationDuringTurnDeviceTest.kt:520)
+
+INSTRUMENTATION_STATUS: stream=
+Error in aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened(com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest):
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened(HearthNavigationDuringTurnDeviceTest.kt:520)
+
+INSTRUMENTATION_STATUS: test=aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=aConfirmationTheUserLeftBehindCannotSendOrWriteAnything
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=aConfirmationTheUserLeftBehindCannotSendOrWriteAnything
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage(HearthNavigationDuringTurnDeviceTest.kt:89)
+
+INSTRUMENTATION_STATUS: stream=
+Error in switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage(com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest):
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage(HearthNavigationDuringTurnDeviceTest.kt:89)
+
+INSTRUMENTATION_STATUS: test=switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest:
+INSTRUMENTATION_STATUS: test=threeRunsWithAnAbout1500TokenPrompt
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+
+INSTRUMENTATION_STATUS: stream=
+Error in threeRunsWithAnAbout1500TokenPrompt(com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest):
+java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+
+INSTRUMENTATION_STATUS: test=threeRunsWithAnAbout1500TokenPrompt
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest:
+INSTRUMENTATION_STATUS: test=openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+
+INSTRUMENTATION_STATUS: stream=
+Error in openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest):
+java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+
+INSTRUMENTATION_STATUS: test=openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=switchingConversationIdsWithinTheSameSegmentStillResets
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=switchingConversationIdsWithinTheSameSegmentStillResets
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=openingAnotherConversationFollowsItsNewestMessageAgain
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=openingAnotherConversationFollowsItsNewestMessageAgain
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=theFirstSavedAnswerInTheSameSegmentKeepsAnUpScrolledViewport
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=longAnswerScrolledBackInsideKeepsTheViewportStillWhileTokensArrive
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=longAnswerScrolledBackInsideKeepsTheViewportStillWhileTokensArrive
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=returningToTheBottomByHandResumesFollowing
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=returningToTheBottomByHandResumesFollowing
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=scrollingBackInsideTheSecondConversationKeepsTheViewportStill
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=scrollingBackInsideTheSecondConversationKeepsTheViewportStill
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=switchingToAnotherConversationWithTheSameMessageCountFollowsTheNewTail
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=newTokensAreFollowedWhileTheViewportIsAtTheBottom
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=newTokensAreFollowedWhileTheViewportIsAtTheBottom
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LocalModelDeviceTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.localmodels.LocalModelDeviceTest:
+INSTRUMENTATION_STATUS: test=loadStreamStopUnloadWithUserSelectedModel
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LocalModelDeviceTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+
+INSTRUMENTATION_STATUS: stream=
+Error in loadStreamStopUnloadWithUserSelectedModel(com.xavierxia.mycelium.localmodels.LocalModelDeviceTest):
+java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+
+INSTRUMENTATION_STATUS: test=loadStreamStopUnloadWithUserSelectedModel
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest
+INSTRUMENTATION_STATUS: current=22
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest:
+INSTRUMENTATION_STATUS: test=generate256Tokens
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest
+INSTRUMENTATION_STATUS: current=22
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.IllegalStateException: model is not registered
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+
+INSTRUMENTATION_STATUS: stream=
+Error in generate256Tokens(com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest):
+java.lang.IllegalStateException: model is not registered
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+
+INSTRUMENTATION_STATUS: test=generate256Tokens
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceConversationTest
+INSTRUMENTATION_STATUS: current=23
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.roundtable.DeviceConversationTest:
+INSTRUMENTATION_STATUS: test=plaintextDialogueIsAbsentFromTheDatabaseFile
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceConversationTest
+INSTRUMENTATION_STATUS: current=23
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=plaintextDialogueIsAbsentFromTheDatabaseFile
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+INSTRUMENTATION_STATUS: current=24
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.xavierxia.mycelium.roundtable.DeviceRetrievalTest:
+INSTRUMENTATION_STATUS: test=samplePackMatchesEveryRetrievalVector
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+INSTRUMENTATION_STATUS: current=24
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=samplePackMatchesEveryRetrievalVector
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+INSTRUMENTATION_STATUS: current=25
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=boundQueriesReachTheSamplePack
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.xavierxia.mycelium.roundtable.DeviceRetrievalTest
+INSTRUMENTATION_STATUS: current=25
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=boundQueriesReachTheSamplePack
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 342.988
+There were 7 failures:
+1) stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest)
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:111)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTestKt.access$hearthWaitUntil(HearthLocalStopDuringLoadDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest$stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer$1.invokeSuspend(HearthLocalStopDuringLoadDeviceTest.kt:70)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthLocalStopDuringLoadDeviceTest.stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer(HearthLocalStopDuringLoadDeviceTest.kt:33)
+2) aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened(com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest)
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened(HearthNavigationDuringTurnDeviceTest.kt:520)
+3) switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage(com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest)
+java.lang.AssertionError: 等待超时（20000ms）：条件一直没成立
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.waitUntil(HearthNavigationDuringTurnDeviceTest.kt:589)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTestKt.access$waitUntil(HearthNavigationDuringTurnDeviceTest.kt:1)
+	at com.xavierxia.mycelium.hearth.HearthNavigationDuringTurnDeviceTest.switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage(HearthNavigationDuringTurnDeviceTest.kt:89)
+4) threeRunsWithAnAbout1500TokenPrompt(com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest)
+java.lang.IllegalStateException: Qwen3.5-4B 还没有登记
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest$threeRunsWithAnAbout1500TokenPrompt$1.invokeSuspend(HearthPromptSpeedDeviceTest.kt:33)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.hearth.HearthPromptSpeedDeviceTest.threeRunsWithAnAbout1500TokenPrompt(HearthPromptSpeedDeviceTest.kt:29)
+5) openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest)
+java.lang.AssertionError: 打开已有历史 B 以后必须跟到 B 的末尾：first=0/691 visibleCount=1 total=1 lastIndex=0 lastOffset=-691 lastSize=3952 viewportEnd=2636 afterPadding=52 canScrollForward=true atBottom=false tailVisible=false
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest.openingSavedHistoryFromAnUnsavedStreamingConversationFollowsTheNewTail(HearthTimelineFollowDeviceTest.kt:362)
+6) loadStreamStopUnloadWithUserSelectedModel(com.xavierxia.mycelium.localmodels.LocalModelDeviceTest)
+java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest$loadStreamStopUnloadWithUserSelectedModel$1.invokeSuspend(LocalModelDeviceTest.kt:31)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LocalModelDeviceTest.loadStreamStopUnloadWithUserSelectedModel(LocalModelDeviceTest.kt:22)
+7) generate256Tokens(com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest)
+java.lang.IllegalStateException: model is not registered
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest$generate256Tokens$1.invokeSuspend(LongGenerationDeviceTest.kt:34)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:101)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:47)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest.generate256Tokens(LongGenerationDeviceTest.kt:29)
+
+FAILURES!!!
+Tests run: 25,  Failures: 7
+
+
+INSTRUMENTATION_CODE: -1

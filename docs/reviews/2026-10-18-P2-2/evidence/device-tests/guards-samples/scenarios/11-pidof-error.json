@@ -1,0 +1,20 @@
+{
+  "name": "11-pidof-error",
+  "why": "`adb shell pidof` itself fails with an adb error line (device offline / no devices). That is not the same as `the process is not running`, so it must be a reported probe failure ending as UNKNOWN/exit 5.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 5,
+  "expectReport": [
+    "^PROBE-UNKNOWN .*reason=pidof output is not a pid: error: device offline",
+    "^VERDICT UNKNOWN exit=5 probe=UNKNOWN"
+  ],
+  "expectNoReport": ["run finished normally", "^DONE ", "^FREEZER ", "probe=NO_PID"],
+  "expectCommands": ["force-stop com.xavierxia.mycelium.debug"],
+  "steps": [
+    { "pidofError": "error: device offline", "log": "log-running.txt" },
+    { "pidofError": "error: device offline", "log": "log-running.txt" },
+    { "pidofError": "error: device offline", "log": "log-running.txt" },
+    { "pidofError": "error: device offline", "log": "log-running.txt" },
+    { "pidofError": "error: device offline", "log": "log-running.txt" },
+    { "pidofError": "error: device offline", "log": "log-running.txt" }
+  ]
+}
