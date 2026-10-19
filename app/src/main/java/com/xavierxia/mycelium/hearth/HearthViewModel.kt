@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xavierxia.mycelium.llm.AndroidModelStore
 import com.xavierxia.mycelium.llm.EngineOptions
+import com.xavierxia.mycelium.llm.LocalEngine
 import com.xavierxia.mycelium.llm.LocalModelEngine
 import com.xavierxia.mycelium.llm.LocalModelRecord
 import com.xavierxia.mycelium.model.ChatMessage
@@ -67,6 +68,13 @@ data class HearthState(
      * against the conversation the page is leaving, so it is refused until this is false.
      */
     val historyLoading: Boolean = false,
+    /**
+     * True when the read a move started came back as a failure. That is not "history is ready": the
+     * page has no target of its own, so a send is still refused (the question stays in the box, and
+     * [HearthViewModel.retryHistory] offers the read again) instead of being captured against the
+     * conversation the page was showing before — a conversation that belongs to somebody else.
+     */
+    val historyFailed: Boolean = false,
     val mode: HearthMode = HearthMode.IMMERSIVE,
     /** A question that produced nothing (stopped before the first word) and goes back to the box. */
     val pendingQuestion: String? = null,
@@ -145,6 +153,12 @@ class HearthViewModel @JvmOverloads constructor(
      * hand instead of racing it. It changes nothing else about the view model.
      */
     sessions: (() -> HearthSession)? = null,
+    /**
+     * The one local engine behind this page. The app leaves it out and gets the process-wide engine;
+     * a JVM test passes a fake so the stop and commit boundaries can be driven without native code,
+     * and a device test can keep using the real one.
+     */
+    private val engine: LocalEngine = LocalModelEngine.shared,
 ) : AndroidViewModel(application) {
     private val database = HearthDatabase(application)
     private val connect: () -> HearthSession = sessions ?: { database.session() }
@@ -153,7 +167,6 @@ class HearthViewModel @JvmOverloads constructor(
     private val seeder = PresetSeeder(characters, HearthMeta(connect))
     private val chat = HearthChat(log)
     private val store = AndroidModelStore(application)
-    private val engine = LocalModelEngine.shared
     private val cloudSettings = CloudSettingsStore(application, KeystoreSecretBox("mycelium-cloud"))
     private val prefs = application.getSharedPreferences("local-model-options", 0)
     private val options = EngineOptions(
@@ -201,8 +214,36 @@ class HearthViewModel @JvmOverloads constructor(
      */
     private fun beginGeneration(): Int {
         val token = generation.incrementAndGet()
-        if (mutable.value.historyLoading) mutable.update { it.copy(historyLoading = false) }
+        if (mutable.value.historyLoading || mutable.value.historyFailed) {
+            mutable.update { it.copy(historyLoading = false, historyFailed = false) }
+        }
         return token
+    }
+
+    /**
+     * Whether the page may accept a send or a redo. Its own history has to be the history on screen:
+     * while that read is still out, or after it came back as a failure, a send would be captured
+     * against the conversation the page was showing before — one that belongs to another character.
+     * Test mode reads no stored history, so there is nothing to wait for there.
+     */
+    private fun historyReady(): Boolean {
+        val current = mutable.value
+        if (current.mode == HearthMode.TEST) return true
+        return !current.historyLoading && !current.historyFailed
+    }
+
+    /**
+     * Reads the page's history again after a failed read, and is what the page offers instead of a
+     * send while [HearthState.historyFailed] is true. It takes the page over like any other move, so
+     * a turn that was still finishing is refused rather than shown over the history it belongs to.
+     */
+    fun retryHistory() {
+        val current = mutable.value
+        val character = current.openCharacter ?: return
+        if (current.mode != HearthMode.IMMERSIVE) return
+        beginGeneration()
+        mutable.update { it.copy(historyLoading = true, historyFailed = false) }
+        viewModelScope.launch { loadConversation(character) }
     }
 
     init {
@@ -260,12 +301,16 @@ class HearthViewModel @JvmOverloads constructor(
      * marked as still loading history: the target conversation is already fixed, but the page must
      * not accept a send until that conversation's own history is here. A newer generation (a send,
      * a switch, leaving the page) owns the state from its first line, so a read that comes back late
-     * changes nothing — its token no longer matches. A read that fails clears the wait instead of
-     * leaving the send button disabled for good.
+     * changes nothing — its token no longer matches.
+     *
+     * A read that fails is **not** a read that is ready. The failed target is dropped instead of
+     * being kept as if the page were showing it: keeping it is what let a send take the new character
+     * together with the old character's conversation. The page then stays in the failed state
+     * ([HearthState.historyFailed]), where sends are refused and [retryHistory] can read again.
      */
     private suspend fun loadHistory(character: HearthCharacter?, show: (HearthState, History) -> HearthState) {
         val token = generationToken
-        mutable.update { it.copy(historyLoading = true) }
+        mutable.update { it.copy(historyLoading = true, historyFailed = false) }
         try {
             val conversations = if (character == null) {
                 emptyList()
@@ -276,10 +321,18 @@ class HearthViewModel @JvmOverloads constructor(
             val first = conversations.firstOrNull()?.id
             val messages = withContext(Dispatchers.IO) { if (first == null) emptyList() else log.messages(first) }
             if (token != generationToken) return
-            mutable.update { show(it, History(conversations, first, messages)) }
+            mutable.update { show(it, History(conversations, first, messages)).copy(historyFailed = false) }
         } catch (failure: Exception) {
             if (token == generationToken) {
-                mutable.update { it.copy(historyLoading = false, notice = failure.message ?: "历史读不出来") }
+                mutable.update {
+                    it.copy(
+                        historyLoading = false,
+                        historyFailed = true,
+                        openConversation = null,
+                        messages = emptyList(),
+                        notice = failure.message ?: "历史读不出来",
+                    )
+                }
             }
         }
     }
@@ -391,6 +444,19 @@ class HearthViewModel @JvmOverloads constructor(
                 editing = null,
                 cloudConfirm = null,
                 mode = HearthMode.IMMERSIVE,
+                // The switch drops the old page before the read starts, not after it succeeds: the
+                // conversation that was open belongs to the character the user just left, and a send
+                // that slips in before (or after a failed) read must not be captured against it. The
+                // page is marked as waiting in the same update, so there is no moment where it looks
+                // ready with no target of its own either.
+                openConversation = null,
+                conversations = emptyList(),
+                messages = emptyList(),
+                streaming = null,
+                streamLabel = null,
+                droppedTurns = 0,
+                historyLoading = true,
+                historyFailed = false,
                 notice = null,
             )
         }
@@ -556,19 +622,32 @@ class HearthViewModel @JvmOverloads constructor(
      */
     fun openConversation(id: String) {
         abandonTurn()
-        mutable.update { it.copy(openConversation = id, messages = emptyList(), droppedTurns = 0, historyLoading = true) }
+        mutable.update {
+            it.copy(openConversation = id, messages = emptyList(), droppedTurns = 0, historyLoading = true, historyFailed = false)
+        }
         viewModelScope.launch {
             val token = generationToken
             val messages = try {
                 withContext(Dispatchers.IO) { log.messages(id) }
             } catch (failure: Exception) {
                 if (token == generationToken) {
-                    mutable.update { it.copy(historyLoading = false, notice = failure.message ?: "这段对话读不出来") }
+                    // Same rule as the character switch: a read that failed leaves no target behind.
+                    mutable.update {
+                        it.copy(
+                            historyLoading = false,
+                            historyFailed = true,
+                            openConversation = null,
+                            messages = emptyList(),
+                            notice = failure.message ?: "这段对话读不出来",
+                        )
+                    }
                 }
                 return@launch
             }
             if (token != generationToken) return@launch
-            mutable.update { it.copy(openConversation = id, messages = messages, droppedTurns = 0, historyLoading = false) }
+            mutable.update {
+                it.copy(openConversation = id, messages = messages, droppedTurns = 0, historyLoading = false, historyFailed = false)
+            }
         }
     }
 
@@ -589,9 +668,10 @@ class HearthViewModel @JvmOverloads constructor(
     /** Streams an answer for [text]. Stopping keeps whatever was written so far. */
     fun send(text: String) {
         // Until the conversation that is open now has its own history, a send would be captured
-        // against the one the page is leaving (and its read would be thrown away). Refused, not
-        // redirected: the question stays in the box for the user to send when the page is ready.
-        if (mutable.value.historyLoading) return
+        // against the one the page is leaving (and its read would be thrown away). A read that failed
+        // counts as not ready too: the page has no target, so there is nothing to send into. Refused,
+        // not redirected: the question stays in the box for the user to send when the page is ready.
+        if (!historyReady()) return
         startTurn(text, mutable.value.mode, mutable.value.openConversation)
     }
 
@@ -631,6 +711,15 @@ class HearthViewModel @JvmOverloads constructor(
         activeTurn = turn
         operation = viewModelScope.launch {
             try {
+                // The window boundary asks whether this turn may read that conversation at all. The
+                // page fixes its target itself, but the id can still be one that belongs to the
+                // character the user just left (whatever the earlier failure left behind); reading it
+                // would put somebody else's history in the prompt. Refused, and the page heals.
+                if (!belongsTo(turn.character, turn.conversationId)) {
+                    healForeignTarget(turn.character, turn.question, token)
+                    return@launch
+                }
+                if (token != generationToken) return@launch
                 val window = withContext(Dispatchers.IO) {
                     chat.window(turn.character, turn.conversationId, turn.question, budgetFor(turn.character), turn.mode, current.messages)
                 }
@@ -675,16 +764,24 @@ class HearthViewModel @JvmOverloads constructor(
         val character = current.openCharacter ?: return
         if (operation?.isActive == true) return
         // Same rule as send: redoing an answer needs the history the page is showing to be there.
-        if (current.historyLoading) return
+        if (!historyReady()) return
         val chosen = choose(character) ?: return
+        val conversationId = if (current.mode == HearthMode.TEST) null else current.openConversation
         val token = beginGeneration()
         val buffer = StringBuilder()
         operation = viewModelScope.launch {
             var turn: Turn? = null
             try {
-                val prepared = withContext(Dispatchers.IO) { regeneration(character) } ?: return@launch
+                // The window boundary, same as send: a redo inside a conversation that belongs to
+                // another character would rewrite an answer in that person's history.
+                if (!belongsTo(character, conversationId)) {
+                    healForeignTarget(character, null, token)
+                    return@launch
+                }
+                if (token != generationToken) return@launch
+                val prepared = withContext(Dispatchers.IO) { regeneration(character, current.mode, conversationId) } ?: return@launch
                 val (question, window) = prepared
-                turn = Turn(character, current.mode, current.openConversation, question, chosen)
+                turn = Turn(character, current.mode, conversationId, question, chosen)
                 activeTurn = turn
                 if (token == generationToken) {
                     mutable.update {
@@ -742,11 +839,11 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     /** The window for a redo: the last question stays, its old answer is left out. */
-    private fun regeneration(character: HearthCharacter): Pair<String, ContextWindow>? =
-        if (mutable.value.mode == HearthMode.TEST) {
+    private fun regeneration(character: HearthCharacter, mode: HearthMode, conversationId: String?): Pair<String, ContextWindow>? =
+        if (mode == HearthMode.TEST) {
             chat.regenerationWindow(character, mutable.value.messages, budgetFor(character))
         } else {
-            mutable.value.openConversation?.let { chat.regenerationWindow(character, it, budgetFor(character)) }
+            conversationId?.let { chat.regenerationWindow(character, it, budgetFor(character)) }
         }
 
     private fun budgetFor(character: HearthCharacter): Int = options.contextLength - character.maxTokens
@@ -858,6 +955,44 @@ class HearthViewModel @JvmOverloads constructor(
     private fun stillCommittable(turn: Turn, token: Int): Boolean = token == generationToken &&
         !(turn.userStopped && (turn.chosen.isCloud || !turn.produced))
 
+    /**
+     * Whether [conversationId] is one of [character]'s own conversations. A conversation is never
+     * moved to another character, so this question has the same answer wherever it is asked — but it
+     * has to be asked at both boundaries all the same: the page fixes its target itself, and the id
+     * it fixed can be one the character does not own (the page failed to read its own history and
+     * still held the conversation of the character the user just left). Reading that id would put
+     * somebody else's history in the prompt, writing it would append to that person's conversation.
+     * A null id starts a new conversation for this character, which is always their own.
+     */
+    private suspend fun belongsTo(character: HearthCharacter, conversationId: String?): Boolean =
+        conversationId == null ||
+            withContext(Dispatchers.IO) { log.conversations(character.id).any { it.id == conversationId } }
+
+    /**
+     * Drops a turn whose conversation does not belong to its character, and puts the page back on a
+     * target it can trust: the foreign id is cleared, the character's own history is read again, and
+     * a send stays refused until that read is there. [question] goes back to the box when the turn
+     * was a send, so refusing never loses what the user wrote.
+     */
+    private fun healForeignTarget(character: HearthCharacter, question: String?, token: Int) {
+        if (token != generationToken) return
+        beginGeneration()
+        mutable.update {
+            it.copy(
+                openConversation = null,
+                conversations = emptyList(),
+                messages = emptyList(),
+                streaming = null,
+                busy = false,
+                pendingQuestion = question ?: it.pendingQuestion,
+                historyLoading = true,
+                historyFailed = false,
+                notice = "会话和这个人物对不上，已重新读取历史",
+            )
+        }
+        viewModelScope.launch { loadConversation(character) }
+    }
+
     private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
         // A turn from a page the user has already left is dropped whole: nothing is shown and
         // nothing is stored, no matter where the cancellation happened to land.
@@ -876,9 +1011,15 @@ class HearthViewModel @JvmOverloads constructor(
         // local answer that was already streaming keeps what it had produced.
         if (cancelled && turn.chosen.isCloud) return
         if (!turn.written.compareAndSet(false, true)) return
+        // The write boundary asks the ownership question again, right where the rows would be added.
+        val owned = belongsTo(turn.character, turn.conversationId)
+        if (!owned) {
+            healForeignTarget(turn.character, turn.question, token)
+            return
+        }
         val conversationId = withContext(Dispatchers.IO) {
             chat.finish(turn.character, turn.conversationId, turn.question, answer, turn.chosen.label, now(), turn.mode) {
-                stillCommittable(turn, token)
+                stillCommittable(turn, token) && owned
             }
         }
         if (conversationId == null) {
@@ -926,10 +1067,17 @@ class HearthViewModel @JvmOverloads constructor(
         }
         if (cancelled && turn.chosen.isCloud) return
         if (!turn.written.compareAndSet(false, true)) return
+        // Same as finishTurn: the id about to be rewritten must belong to this character's history,
+        // or the write would replace an answer inside somebody else's conversation.
+        val owned = belongsTo(turn.character, turn.conversationId)
+        if (!owned) {
+            healForeignTarget(turn.character, null, token)
+            return
+        }
         val stored = turn.conversationId?.let { id ->
             if (
                 withContext(Dispatchers.IO) {
-                    chat.redo(id, answer, turn.chosen.label, now(), turn.mode) { stillCommittable(turn, token) }
+                    chat.redo(id, answer, turn.chosen.label, now(), turn.mode) { stillCommittable(turn, token) && owned }
                 }
             ) {
                 id

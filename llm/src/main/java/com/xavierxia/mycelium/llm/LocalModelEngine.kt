@@ -46,8 +46,20 @@ internal class NativeBridge : EngineBridge {
     external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, callback: TokenCallback): LongArray
 }
 
+/**
+ * What a page that generates on this phone needs from the one local engine: the model it holds, the
+ * statistics of the last generation, and the two operations that move it (load, generate). The hearth
+ * page takes it from its own constructor, so a JVM test can put a fake behind exactly the boundary the
+ * native engine sits behind instead of needing a phone and a model file.
+ */
+interface LocalEngine : ChatModel {
+    val loadedModel: StateFlow<ModelInfo?>
+    val lastStats: GenerationStats?
+    suspend fun load(model: ModelInfo, options: EngineOptions, open: () -> ModelFile)
+}
+
 /** One process-wide engine. The mutex covers cleanup after cancellation as well. */
-class LocalModelEngine internal constructor(private val bridgeFactory: () -> EngineBridge) : ChatModel {
+class LocalModelEngine internal constructor(private val bridgeFactory: () -> EngineBridge) : LocalEngine {
     companion object { val shared by lazy { LocalModelEngine { NativeBridge() } } }
     private val nativeDelegate = lazy(bridgeFactory)
     private val native by nativeDelegate
@@ -55,14 +67,14 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     private var descriptor: ModelFile? = null
     private val stopRequested = AtomicBoolean(false)
     private val loaded = MutableStateFlow<ModelInfo?>(null)
-    val loadedModel: StateFlow<ModelInfo?> = loaded.asStateFlow()
+    override val loadedModel: StateFlow<ModelInfo?> = loaded.asStateFlow()
     override val info: ModelInfo get() = checkNotNull(loaded.value) { "请先加载模型" }
-    @Volatile var lastStats: GenerationStats? = null
+    @Volatile override var lastStats: GenerationStats? = null
         private set
     override fun stop() { stopRequested.set(true); if (nativeDelegate.isInitialized()) native.stop() }
 
     /** Opening and loading happen off the UI thread. The descriptor stays open until unload. */
-    suspend fun load(model: ModelInfo, options: EngineOptions, open: () -> ModelFile) {
+    override suspend fun load(model: ModelInfo, options: EngineOptions, open: () -> ModelFile) {
         gate.withLock {
             try {
                 runNative {
