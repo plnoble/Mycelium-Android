@@ -72,23 +72,36 @@ class GatewayCancelled(message: String) : Exception(message)
  * One request's cancel switch, and the only thing here that remembers a stop.
  *
  * `HttpURLConnection.disconnect()` is not a cancellation marker: on a connection that has not been
- * established it can return immediately and the writing would go on. This object pairs that
- * disconnect with a flag that never goes back, so:
+ * established it can return immediately and the connection would still start afterwards. This object
+ * therefore pairs that disconnect with a flag that never goes back, and puts the two decisions that
+ * must not interleave — "this request is stopped" and "this request starts its connection" — under
+ * one lock:
  *
- *  * a stop that lands before the socket is opened means no connection is opened at all;
- *  * a stop that lands while the socket is being opened is seen by [attach], by the gateway's own
- *    checkpoints and by [bodyStream], which reads the switch again the moment the output stream
- *    exists — the point where a real connection has actually been started — so not one body byte
- *    goes out;
- *  * a stop that lands after that is seen before every write and every flush of the body;
- *  * a stop that lands while the blocking read is waiting closes the connection at once, which is
- *    the only thing that ends that read.
+ *  * a stop that wins the lock makes [startingConnection] refuse, so the platform call that starts
+ *    the connection is never made at all;
+ *  * a stop that loses it finds the connection registered and disconnects it at once — the stop is
+ *    not queued behind the blocking connect.
  *
- * [cancel] and [attach] each write their own field and then read the other's, and both fields are
- * volatile, so whichever of the two runs second observes the other one.
+ * From there the flag keeps applying: [attach] closes a connection that appeared after the stop, the
+ * gateway's own checkpoints throw instead of sending, [bodyStream] reads the switch again the moment
+ * the output stream exists, and `StoppedBodyStream` asks before every write and every flush. A stop
+ * that lands while the blocking read is waiting closes the connection, the only thing that ends it.
+ *
+ * The lock is deliberately never held across the blocking connect, so a stop never waits for the
+ * network: its only wait is the few instructions of the other side's critical section. Serialising
+ * the stop *behind* the connect — what holding the lock across it would do — would leave the socket
+ * alive after the stop for as long as that ROM's connect takes to time out, so the short wait is the
+ * right price: correctness first, cancel latency second.
  */
 class GatewayCall {
     private val cancelled = AtomicBoolean(false)
+
+    /**
+     * The lock that orders the stop against the connection start. Every critical section on it is a
+     * few instructions long on purpose; the class comment explains why the blocking connect stays
+     * outside it.
+     */
+    private val decision = Any()
 
     @Volatile
     private var connection: HttpURLConnection? = null
@@ -96,16 +109,44 @@ class GatewayCall {
     /** True from the first [cancel] on: a stop is never forgotten, whatever the connection does. */
     val isCancelled: Boolean get() = cancelled.get()
 
-    /** Marks this request cancelled and closes the connection when one is already in use. */
+    /**
+     * Marks this request cancelled and closes the connection when one is already in use. The mark and
+     * the disconnect happen under [decision], the same lock [startingConnection] takes to decide
+     * whether the connection may start, so the two outcomes are exhaustive: a stop that gets there
+     * first means no connection is ever started, and a stop that gets there second disconnects the
+     * connection that was just allowed to start.
+     */
     fun cancel() {
-        cancelled.set(true)
-        connection?.let { open -> runCatching { open.disconnect() } }
+        synchronized(decision) {
+            cancelled.set(true)
+            connection?.let { open -> runCatching { open.disconnect() } }
+        }
     }
 
     /** Remembers the connection for a later [cancel]; a stop that already happened closes it now. */
     internal fun attach(open: HttpURLConnection) {
-        connection = open
-        if (cancelled.get()) runCatching { open.disconnect() }
+        synchronized(decision) {
+            connection = open
+            if (cancelled.get()) runCatching { open.disconnect() }
+        }
+    }
+
+    /**
+     * The connection-start gate: runs [connect] — the platform call that establishes the connection
+     * (`getOutputStream`, `getResponseCode`, `getInputStream`) — unless a stop has already won.
+     *
+     * Checkpoints alone cannot cover this point: a check in front of the start can be followed by a
+     * pause, and a `disconnect()` during that pause is a no-op on a connection that has not started,
+     * so the paused thread would come back and start the connection anyway. Here the decision to
+     * start and the decision to stop are one critical section with [cancel], so either the stop was
+     * first and [connect] is never invoked, or the start was first and the stop disconnects the
+     * connection at once.
+     */
+    internal fun <T> startingConnection(connect: () -> T): T {
+        synchronized(decision) {
+            if (cancelled.get()) throw GatewayCancelled("请求已被取消")
+        }
+        return connect()
     }
 
     /** The gateway's checkpoint: a cancelled request throws instead of sending the next byte. */
@@ -114,25 +155,16 @@ class GatewayCall {
     }
 
     /**
-     * Hands back the stream the body is written into, with the switch read on both sides of the call
-     * that creates it.
-     *
-     * `connection.outputStream` is where a real connection is established, so a checkpoint in front
-     * of it cannot be the last word: this thread can be paused between that checkpoint and this call
-     * — and `disconnect()` on a connection that has not connected does nothing — so the paused
-     * thread would come back and start the connection anyway. Reading the switch again the moment
-     * the stream exists closes exactly that gap: whatever happened during the pause, the request
-     * never hands a body byte over. The stream that goes back asks the same switch before every
-     * write and every flush, so no later action can send a byte without verifying it again, and the
-     * switch only ever goes from false to true, so a stop that has been seen once is seen by every
-     * checkpoint after it.
+     * Hands back the stream the body is written into. The acquisition passes [startingConnection],
+     * because `connection.outputStream` is where a real connection is established: a stop that won
+     * the decision means the stream — and the connection behind it — is never created. The switch is
+     * read once more the moment the stream exists, so a stop that landed while it was being opened
+     * still wins before the first body byte, and the stream that goes back asks the same switch
+     * before every write and every flush. The switch only ever goes from false to true, so a stop
+     * that has been seen once is seen by every checkpoint after it.
      */
     internal fun bodyStream(open: () -> OutputStream): OutputStream {
-        // A stop that landed before this point opens nothing at all.
-        check()
-        val stream = open()
-        // The stream exists now: a stop that landed while it was being opened still wins, before the
-        // first body byte.
+        val stream = startingConnection(open)
         check()
         return StoppedBodyStream(stream, this)
     }
@@ -250,17 +282,18 @@ class OutboundGateway(
             call.check()
             if (request.body != null) {
                 connection.doOutput = true
-                // The stream acquisition is itself bracketed by the switch: the first read stops a
-                // request that was already cancelled before the connection could start, the second —
-                // taken once the stream exists — stops one whose stop landed while this thread was
-                // paused between the checkpoint above and the moment the connection really started.
-                // From there the stream keeps asking, so not one body byte leaves after a stop.
+                // The acquisition passes the connection-start gate, so a stop that won the decision
+                // means the stream is never created and the connection behind it never starts; a
+                // stop that lands while the stream is being opened is read by bodyStream's second
+                // checkpoint before the first body byte. Either way not one body byte leaves.
                 call.bodyStream { connection.outputStream }
                     .use { it.write(request.body.toByteArray(Charsets.UTF_8)) }
                 // The body is on the wire; a stop must still catch whatever comes back.
                 call.check()
             }
-            val status = connection.responseCode
+            // The other place a connection starts: a request without a body goes straight here, so
+            // the response read passes the same gate as the stream above.
+            val status = call.startingConnection { connection.responseCode }
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             GatewayResponse(status, body, request.body?.codePointCount() ?: 0)

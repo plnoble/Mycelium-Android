@@ -10,12 +10,14 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -319,25 +321,28 @@ class GatewayTest {
     }
 
     @Test
-    fun aStopWhileTheBodyStreamIsBeingOpenedWritesNoRequestBodyByte() {
-        // The window the review named: the gateway has already passed its last checkpoint and is
-        // inside `connection.outputStream`, which is where a real connection is established — and it
-        // is held still right there, before anything exists to send into and before one byte has
-        // been handed over. `disconnect()` on a connection that has not connected does nothing, so
-        // the connection object cannot remember this stop: only the request's own switch can, and
-        // only if it keeps applying after the checkpoint that already passed.
-        val acquiring = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val service = FrozenPeer(acquiring, release)
+    fun aStopBeforeTheConnectionStartsMeansThePeerNeverSeesAConnect() {
+        // Every checkpoint the gateway runs has already passed — the last one is the check after the
+        // headers — and the request is held just before the call that starts the connection. A stop
+        // here must mean the connection is never started at all. The peer is asserted on the connect
+        // attempts it saw, not on the bytes it received: refusing the body after a connection has
+        // already been started is exactly what the review found insufficient.
+        val pausedBeforeStart = CountDownLatch(1)
+        val resumeStart = CountDownLatch(1)
         val call = GatewayCall()
+        val peer = FrozenPeer(
+            call = call,
+            pausedBeforeStart = pausedBeforeStart,
+            resumeStart = resumeStart,
+        )
         val gateway = OutboundGateway(
             hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
             audit = AuditLog(File(directory, "privacy/audit.json")),
             clock = { "2026-10-18T00:00:00Z" },
-            open = { service },
+            open = { peer },
         )
         val outcome = AtomicReference<Result<GatewayResponse>?>(null)
-        val worker = thread(name = "gateway-body-stream") {
+        val worker = thread(name = "gateway-stop-before-connect") {
             outcome.set(
                 runCatching {
                     gateway.send(
@@ -352,45 +357,95 @@ class GatewayTest {
                 },
             )
         }
-        assertTrue(acquiring.await(5, TimeUnit.SECONDS), "网关没有进到取流")
+        assertTrue(pausedBeforeStart.await(5, TimeUnit.SECONDS), "网关没有停在建连之前")
         call.cancel()
-        val started = System.nanoTime()
-        release.countDown()
+        resumeStart.countDown()
         worker.join(5_000)
-        assertFalse(worker.isAlive, "取消之后网关没有及时返回")
-        val elapsedMs = (System.nanoTime() - started) / 1_000_000
-        assertTrue(elapsedMs < 2_000, "取消后等了 ${elapsedMs}ms，说明请求没有及时结束")
+        assertFalse(worker.isAlive, "取消之后网关没有返回")
+        assertEquals(0, peer.connects, "取消之后还是发起了建连：假服务端见了 ${peer.connects} 次")
+        assertEquals(0, peer.bytes, "取消之后假服务端收到了正文：${peer.body}")
         val failure = outcome.get()?.exceptionOrNull()
         assertTrue(failure is GatewayCancelled, "期望取消异常，实际是 $failure")
-        assertEquals(0, service.bytes, "取消之后假服务收到了正文：${service.body}")
-        // The connection is torn down on the way out, which is what ends a real request.
-        assertTrue(service.disconnects >= 1, "取消之后没有断开连接")
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertFalse(entry.succeeded, "被取消的请求不该记成成功")
+        assertNull(entry.status)
+        assertTrue(entry.sentCharacters > 0)
+    }
 
-        // Positive control over the same wiring: a fresh switch delivers that very body, so the zero
-        // above is the stop and not a peer that swallows everything.
-        val deliveredTo = FrozenPeer(CountDownLatch(0), CountDownLatch(0))
-        val delivered = OutboundGateway(
+    @Test
+    fun aStopWhileTheConnectionIsBeingStartedEndsThatConnectAtOnce() {
+        // The other branch: the start was already decided and the peer is inside `connect()`, held
+        // there the way the network holds a platform connect. Nothing in this test releases it — the
+        // exit time is the worker's own, measured from `cancel()` — so the only thing that can end
+        // the connect is the stop's disconnect.
+        val connectEntered = CountDownLatch(1)
+        val exitedAt = AtomicLong(0)
+        val call = GatewayCall()
+        val peer = FrozenPeer(call = call, connectEntered = connectEntered, holdConnect = true)
+        val gateway = OutboundGateway(
             hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
             audit = AuditLog(File(directory, "privacy/audit.json")),
             clock = { "2026-10-18T00:00:00Z" },
-            open = { deliveredTo },
-        ).send(
+            open = { peer },
+        )
+        val outcome = AtomicReference<Result<GatewayResponse>?>(null)
+        val worker = thread(name = "gateway-stop-during-connect") {
+            outcome.set(
+                runCatching {
+                    gateway.send(
+                        GatewayRequest(
+                            url = "https://api.deepseek.com/chat/completions",
+                            purpose = GatewayPurpose.RoundtableChat,
+                            method = "POST",
+                            body = """{"messages":[{"role":"user","content":"这句不该发出去"}]}""",
+                            call = call,
+                        ),
+                    )
+                },
+            )
+            exitedAt.set(System.nanoTime())
+        }
+        assertTrue(connectEntered.await(5, TimeUnit.SECONDS), "网关没有进到建连")
+        val started = System.nanoTime()
+        call.cancel()
+        worker.join(5_000)
+        assertFalse(worker.isAlive, "取消之后正在建立的连接没有被中断")
+        val elapsedMs = (exitedAt.get() - started) / 1_000_000
+        assertTrue(elapsedMs < 2_000, "取消后等了 ${elapsedMs}ms，建连没有被立刻断开")
+        val failure = outcome.get()?.exceptionOrNull()
+        assertTrue(failure is GatewayCancelled, "期望取消异常，实际是 $failure")
+        assertEquals(1, peer.connects, "应当恰好发起一次建连")
+        assertEquals(0, peer.bytes, "取消之后假服务端收到了正文：${peer.body}")
+        assertTrue(peer.disconnects >= 1, "取消之后没有断开正在建立的连接")
+    }
+
+    @Test
+    fun aRequestThatIsNotStoppedGoesThroughTheSameGateAndDeliversTheWholeBody() {
+        // Positive control for the two tests above: the same peer wiring with no stop delivers the
+        // body in full, so their zeros are the stop and not a peer that swallows everything.
+        val connectEntered = CountDownLatch(1)
+        val call = GatewayCall()
+        val peer = FrozenPeer(call = call, connectEntered = connectEntered)
+        val gateway = OutboundGateway(
+            hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
+            audit = AuditLog(File(directory, "privacy/audit.json")),
+            clock = { "2026-10-18T00:00:00Z" },
+            open = { peer },
+        )
+        val response = gateway.send(
             GatewayRequest(
                 url = "https://api.deepseek.com/chat/completions",
                 purpose = GatewayPurpose.RoundtableChat,
                 method = "POST",
                 body = "正常正文",
-                call = GatewayCall(),
+                call = call,
             ),
         )
-        assertEquals(200, delivered.status)
-        assertEquals("正常正文", deliveredTo.body, "放行的请求没有把正文交给假服务")
-
-        val entries = AuditLog(File(directory, "privacy/audit.json")).read()
-        assertEquals(2, entries.size, "被取消的和被放行的各留一条记录")
-        assertFalse(entries.first().succeeded, "被取消的请求不该记成成功")
-        assertNull(entries.first().status)
-        assertTrue(entries.first().sentCharacters > 0)
+        assertEquals(200, response.status)
+        assertEquals(1, peer.connects, "放行的请求没有发起建连")
+        assertEquals("正常正文", peer.body, "放行的请求没有把正文交给假服务端")
+        val entry = AuditLog(File(directory, "privacy/audit.json")).read().single()
+        assertTrue(entry.succeeded)
     }
 
     private fun gateway(base: String, cleartext: Boolean = false) = OutboundGateway(
@@ -402,17 +457,43 @@ class GatewayTest {
 }
 
 /**
- * A controlled stand-in for the service a request talks to, with the one hook the test needs:
- * `getOutputStream()` is where a real `HttpURLConnection` establishes its connection, so this one
- * can be held still exactly there — the gateway is already inside the acquisition, nothing has been
- * established and nothing has been sent. Everything the gateway hands over is counted, which is
- * precisely what the far end of a real request would have received.
+ * A controlled stand-in for the service a request talks to. It models the cancellation-relevant
+ * behaviour of a real `HttpURLConnection`:
+ *
+ *  * `getOutputStream()` starts the connection at its end, exactly like the platform implementation,
+ *    so `connect()` is the point at which a request really starts going out;
+ *  * `connect()` can be held inside the connect ([holdConnect]) and only `disconnect()` ends it: the
+ *    held `connect()` throws at once instead of waiting for a timeout, which is what a real
+ *    disconnect does to a connection that is still being established;
+ *  * a `connect()` after `disconnect()`, or after the request's own switch, throws at once, so a peer
+ *    never reports a connection that a stop already tore down;
+ *  * [connects] counts connect attempts while [bytes]/[body] count what was received, so a test can
+ *    tell "no connection was ever started" apart from "a connection started but no byte went out".
+ *
+ * [pausedBeforeStart]/[resumeStart] hold the peer just before the connection starts — `setDoOutput`
+ * runs after the gateway's last checkpoint and before the start gate — which is the window a stop
+ * must win. Nothing here releases a worker on its own: the only way out of [holdConnect] is
+ * `disconnect()`.
  */
 private class FrozenPeer(
-    private val acquiring: CountDownLatch,
-    private val release: CountDownLatch,
+    private val call: GatewayCall? = null,
+    private val connectEntered: CountDownLatch = CountDownLatch(0),
+    private val holdConnect: Boolean = false,
+    private val pausedBeforeStart: CountDownLatch? = null,
+    private val resumeStart: CountDownLatch? = null,
 ) : HttpURLConnection(URI("https://api.deepseek.com/chat/completions").toURL()) {
     private val received = ByteArrayOutputStream()
+    private val interrupted = CountDownLatch(1)
+
+    @Volatile
+    private var disconnected = false
+
+    @Volatile
+    private var established = false
+
+    @Volatile
+    var connects: Int = 0
+        private set
 
     @Volatile
     var disconnects: Int = 0
@@ -422,9 +503,18 @@ private class FrozenPeer(
 
     val body: String get() = synchronized(received) { String(received.toByteArray(), Charsets.UTF_8) }
 
+    /** The gateway sets this right before the start gate; the window a stop must win lives here. */
+    override fun setDoOutput(doOutput: Boolean) {
+        if (doOutput) {
+            pausedBeforeStart?.countDown()
+            resumeStart?.await(5, TimeUnit.SECONDS)
+        }
+        super.setDoOutput(doOutput)
+    }
+
     override fun getOutputStream(): OutputStream {
-        acquiring.countDown()
-        release.await(5, TimeUnit.SECONDS)
+        // A real HttpURLConnection establishes the connection here.
+        connect()
         return object : OutputStream() {
             override fun write(b: Int) {
                 synchronized(received) { received.write(b) }
@@ -436,7 +526,10 @@ private class FrozenPeer(
         }
     }
 
-    override fun getResponseCode(): Int = 200
+    override fun getResponseCode(): Int {
+        connect()
+        return 200
+    }
 
     override fun getInputStream(): InputStream = ByteArrayInputStream(body.toByteArray())
 
@@ -444,9 +537,22 @@ private class FrozenPeer(
 
     override fun disconnect() {
         disconnects += 1
+        disconnected = true
+        // This is what ends a connect that is still in progress, exactly as it does for a real one.
+        interrupted.countDown()
     }
 
     override fun usingProxy(): Boolean = false
 
-    override fun connect() {}
+    override fun connect() {
+        if (established) return
+        connects += 1
+        connectEntered.countDown()
+        if (holdConnect) {
+            interrupted.await(5, TimeUnit.SECONDS)
+            throw IOException("连接在建立过程中被取消")
+        }
+        if (disconnected || call?.isCancelled == true) throw IOException("连接已被取消")
+        established = true
+    }
 }
