@@ -1,0 +1,13 @@
+﻿  11:53:40.457 INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+  11:53:40.457 INSTRUMENTATION_STATUS: numtests=25
+> 11:53:40.458 INSTRUMENTATION_STATUS: stack=java.net.SocketException: Broken pipe
+  11:53:40.459 	at java.net.SocketOutputStream.socketWrite0(Native Method)
+  11:53:40.459 	at java.net.SocketOutputStream.socketWrite(SocketOutputStream.java:116)
+  11:53:40.460 	at java.net.SocketOutputStream.write(SocketOutputStream.java:144)
+  11:53:40.460 	at com.xavierxia.mycelium.net.LocalHttp.serve(LocalHttp.kt:69)
+  11:53:40.461 	at com.xavierxia.mycelium.net.LocalHttp.lambda$0$0(LocalHttp.kt:25)
+  11:53:40.461 	at com.xavierxia.mycelium.net.LocalHttp$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+  11:53:40.462 	at java.lang.Thread.run(Thread.java:1119)
+  11:53:40.462 
+  11:53:40.462 INSTRUMENTATION_STATUS: stream=
+  11:53:40.463 Process crashed while executing scrollingBackAcrossMessagesKeepsTheViewportStillWhileTokensArrive(com.xavierxia.mycelium.hearth.HearthTimelineFollowDeviceTest):

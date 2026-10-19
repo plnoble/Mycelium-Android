@@ -11,9 +11,12 @@ import com.xavierxia.mycelium.roundtable.CloudSettingsStore
 import com.xavierxia.mycelium.roundtable.KeystoreSecretBox
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
 import org.junit.runner.RunWith
 import java.io.File
 import java.time.LocalDateTime
@@ -30,9 +33,17 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * 两条都不点屏幕：直接驱动 [HearthViewModel]，假服务是进程内的 [LocalHttp]（睡 5 秒模拟慢返回）。
  * 时序用轮询等待表达，所以断言本身就带着「最迟多久必须停下」。
+ *
+ * 每一个等待都是有界的，超时会把全部线程栈打进 instrument 输出；闸门一律在 `finally` 里放行
+ * （[GatedHearthSessions.releaseAll]），「什么都没发生」用有界观察窗口（[expectNothingFor]）表达，
+ * 不用「睡一会儿」去撞窗口；整个用例另有一道 [BoundedDeviceTest] 硬上限。
  */
 @RunWith(AndroidJUnit4::class)
 class HearthNavigationDuringTurnDeviceTest {
+
+    /** 单个用例的硬上限：到点连线程栈一起报出来，再判失败，绝不再出现「没人管地挂住」。 */
+    @get:Rule
+    val bounded: TestRule = BoundedDeviceTest(240_000)
 
     @Test
     fun switchingConversationOrModeWhileGeneratingStopsTheTurnAndFreesThePage() {
@@ -82,20 +93,20 @@ class HearthNavigationDuringTurnDeviceTest {
             val model = HearthViewModel(context)
 
             model.openChat(character)
-            waitUntil(20_000) { model.state.value.openCharacter?.id == character.id }
+            awaitOpenCharacter(model, character)
 
             // 第一轮：生成中「新对话」。
-            model.send(question)
-            waitUntil(20_000) { model.state.value.busy }
+            sendOrFail(model, question)
+            waitUntil(20_000, "第一轮开始生成（busy）", state(model)) { model.state.value.busy }
             assertEquals("第一次请求应该已经到达假服务", 1, calls.get())
             model.newConversation()
-            waitUntil(5_000) { !model.state.value.busy }
+            waitUntil(5_000, "换会话之后不再生成中") { !model.state.value.busy }
             assertFalse("换会话之后不该还显示生成中", model.state.value.busy)
             assertNull("换会话之后不该还挂着流式内容", model.state.value.streaming)
             assertNull("换会话之后不该留着等待确认的问题", model.state.value.sendConfirm)
 
             // 旧请求晚到的回答不能上屏、不能入库。
-            waitUntil(20_000) { !model.state.value.busy }
+            waitUntil(20_000, "旧的一轮已经收尾") { !model.state.value.busy }
             assertFalse(
                 "晚到的回答上屏了",
                 model.state.value.messages.any { it.text.contains(lateAnswer) },
@@ -103,14 +114,16 @@ class HearthNavigationDuringTurnDeviceTest {
             assertTrue("晚到的回答入库了", log.conversations(character.id).isEmpty())
 
             // 页面确实能继续用：再发一次，请求必须真的发出去。
-            model.send("$question 第二轮")
-            waitUntil(20_000) { calls.get() >= 2 }
+            sendOrFail(model, "$question 第二轮")
+            waitUntil(20_000, "第二轮请求到达假服务", state(model)) { calls.get() >= 2 }
             assertEquals("页面应该还能继续发送", 2, calls.get())
-            waitUntil(20_000) { model.state.value.busy }
+            waitUntil(20_000, "第二轮开始生成", state(model)) { model.state.value.busy }
 
             // 第二轮：生成中切到测试模式。同样必须停下并清干净。
             model.setMode(HearthMode.TEST)
-            waitUntil(5_000) { !model.state.value.busy && model.state.value.mode == HearthMode.TEST }
+            waitUntil(5_000, "切到测试模式后不再生成中") {
+                !model.state.value.busy && model.state.value.mode == HearthMode.TEST
+            }
             assertFalse("切模式之后不该还显示生成中", model.state.value.busy)
             assertTrue("测试模式不该有沉浸历史", model.state.value.conversations.isEmpty())
             assertTrue("切模式时不该写库", log.conversations(character.id).isEmpty())
@@ -165,6 +178,7 @@ class HearthNavigationDuringTurnDeviceTest {
         var serviceId: String? = null
         var characterId: String? = null
         var hold: HearthStageHold? = null
+        var gates: GatedHearthSessions? = null
         try {
             val service = settings.addService(null, serviceName, baseUrl, "test-key-127")
             serviceId = service
@@ -183,28 +197,34 @@ class HearthNavigationDuringTurnDeviceTest {
                 now(),
             ).id
             val character = requireNotNull(characters.character(requireNotNull(characterId)))
-            val gates = GatedHearthSessions(database)
-            val model = HearthViewModel(context, gates::open)
+            val gatekeeper = GatedHearthSessions(database)
+            gates = gatekeeper
+            val model = HearthViewModel(context, gatekeeper::open)
 
             model.openChat(character)
-            waitUntil(20_000) { !model.state.value.historyLoading }
+            awaitOpenCharacter(model, character)
+            // 再等 ViewModel 启动时那次读取（seeder、服务列表）收尾：它自己那次写事务不能被下面这道
+            // 闸门抢走，否则被停住的不是确认写，断言就变成假阴性。
+            waitUntil(20_000, "ViewModel 启动读取完成", state(model)) { model.state.value.services.any { it.id == serviceId } }
             // 进测试模式：这一轮不留记录，库里之后出现的任何变化都只可能来自确认任务本身。
             model.setMode(HearthMode.TEST)
-            waitUntil(20_000) { model.state.value.mode == HearthMode.TEST }
+            waitUntil(20_000, "切到测试模式") { model.state.value.mode == HearthMode.TEST }
             model.send(question)
-            waitUntil(20_000) { model.state.value.sendConfirm != null }
+            waitUntil(20_000, "弹出云端确认框") { model.state.value.sendConfirm != null }
             assertEquals("弹确认框的时候不该有请求", 0, calls.get())
 
             // 场景一：确认任务卡在数据库写事务上时取消弹窗，并在同一时刻改一次人物名字。
-            hold = gates.hold(HearthStage.Transaction(2))
+            hold = gatekeeper.hold(HearthStage.Transaction(2))
             model.confirmSend()
             hold.await()
             model.dismissSendConfirm()
             val editedName = "导航复验人物（改过名字）$tag"
             characters.update(character.id, draftOf(character).copy(name = editedName), now())
             hold.letGo()
+            // 用「这次写事务真的走完」当同步点，而不是睡一会儿：它回来就代表写库的判定做完了。
+            hold.awaitCallFinished(20_000)
             hold = null
-            Thread.sleep(1_500)
+            expectNothingFor(2_000, "取消弹窗之后这个确认任务不该发出请求") { calls.get() != 0 }
 
             assertEquals("取消弹窗之后这个确认任务不该发出请求", 0, calls.get())
             val afterDismiss = requireNotNull(characters.character(character.id))
@@ -215,14 +235,15 @@ class HearthNavigationDuringTurnDeviceTest {
 
             // 场景二：再来一次，这次在同一个窗口里直接离开页面。
             model.send(secondQuestion)
-            waitUntil(20_000) { model.state.value.sendConfirm != null }
-            hold = gates.hold(HearthStage.Transaction(2))
+            waitUntil(20_000, "第二次弹出云端确认框") { model.state.value.sendConfirm != null }
+            hold = gatekeeper.hold(HearthStage.Transaction(2))
             model.confirmSend()
             hold.await()
             model.leaveHearth()
             hold.letGo()
+            hold.awaitCallFinished(20_000)
             hold = null
-            Thread.sleep(1_500)
+            expectNothingFor(2_000, "离开页面之后这个确认任务不该发出请求") { calls.get() != 0 }
 
             assertEquals("离开页面之后这个确认任务不该发出请求", 0, calls.get())
             val afterLeave = requireNotNull(characters.character(character.id))
@@ -232,6 +253,7 @@ class HearthNavigationDuringTurnDeviceTest {
             assertTrue("提问框的内容应该跟着页面一起收走", model.state.value.pendingQuestion == null)
         } finally {
             hold?.letGo()
+            gates?.releaseAll()
             characterId?.let { characters.delete(it) }
             serviceId?.let { settings.removeService(it) }
             restoreAudit(audit, auditBefore)
@@ -301,7 +323,7 @@ class HearthNavigationDuringTurnDeviceTest {
             val gates = GatedHearthSessions(database)
             val model = HearthViewModel(context, gates::open)
             model.openChat(character)
-            waitUntil(20_000) { !model.state.value.historyLoading && model.state.value.openConversation != null }
+            awaitOpenCharacter(model, character)
             assertEquals("默认应该打开最新的一段", newest, model.state.value.openConversation)
 
             // 切到旧的一段，并把这次读取停在半路。
@@ -313,18 +335,18 @@ class HearthNavigationDuringTurnDeviceTest {
 
             // 就在这个窗口里发送：一次都不该出去，也不许被改派给上一段对话。
             model.send(refused)
-            Thread.sleep(500)
-            assertEquals("历史还没就绪时一次都不该发出请求", 0, calls.get())
-            assertEquals("历史还没就绪时目标不该被改回上一段对话", older, model.state.value.openConversation)
+            expectNothingFor(1_000, "历史还没就绪时一次都不该发出请求，目标也不该被改回上一段对话") {
+                calls.get() != 0 || model.state.value.openConversation != older
+            }
 
             hold.letGo()
             hold = null
-            waitUntil(20_000) { !model.state.value.historyLoading }
+            waitUntil(20_000, "放行之后历史读完") { !model.state.value.historyLoading }
             assertTrue("旧对话的历史应该已经上屏", model.state.value.messages.any { it.text.contains(olderQuestion) })
 
             model.send(accepted)
-            waitUntil(20_000) { calls.get() == 1 }
-            waitUntil(20_000) { !model.state.value.busy }
+            waitUntil(20_000, "历史就绪后的这一句到达假服务") { calls.get() == 1 }
+            waitUntil(20_000, "这一轮收尾") { !model.state.value.busy }
             assertTrue(
                 "历史就绪后的问题应该进刚打开的那一段",
                 log.messages(older).any { it.text.contains(accepted) },
@@ -404,10 +426,10 @@ class HearthNavigationDuringTurnDeviceTest {
             val gates = GatedHearthSessions(database)
             val model = HearthViewModel(context, gates::open)
             model.openChat(character)
-            waitUntil(20_000) { !model.state.value.historyLoading && model.state.value.openConversation != null }
+            awaitOpenCharacter(model, character)
             // 离开之前停在旧的那一段：回来时页面默认要开最新的一段。
             model.openConversation(older)
-            waitUntil(20_000) { !model.state.value.historyLoading }
+            waitUntil(20_000, "切到旧的那一段", state(model)) { !model.state.value.historyLoading }
             assertEquals(older, model.state.value.openConversation)
 
             model.leaveHearth()
@@ -417,18 +439,17 @@ class HearthNavigationDuringTurnDeviceTest {
             hold.await()
 
             model.send(refused)
-            Thread.sleep(500)
-            assertEquals("刚回到页面、历史还没到时就该拒绝发送", 0, calls.get())
+            expectNothingFor(1_000, "刚回到页面、历史还没到时就该拒绝发送") { calls.get() != 0 }
 
             hold.letGo()
             hold = null
-            waitUntil(20_000) { !model.state.value.historyLoading }
+            waitUntil(20_000, "放行之后历史读完") { !model.state.value.historyLoading }
             assertEquals("回到页面应该重新打开最新的一段", newest, model.state.value.openConversation)
             assertTrue("最新一段的历史应该已经上屏", model.state.value.messages.any { it.text.contains(newestQuestion) })
 
             model.send(accepted)
-            waitUntil(20_000) { calls.get() == 1 }
-            waitUntil(20_000) { !model.state.value.busy }
+            waitUntil(20_000, "回到页面后的这一句到达假服务") { calls.get() == 1 }
+            waitUntil(20_000, "这一轮收尾") { !model.state.value.busy }
             assertTrue(
                 "重新进入后的问题应该进默认打开的那一段",
                 log.messages(newest).any { it.text.contains(accepted) },
@@ -456,7 +477,8 @@ class HearthNavigationDuringTurnDeviceTest {
      * 会话列表与消息读回来刷新页面时，用户打开了另一段对话。这次刷新再晚也绝不能把页面拉回旧
      * 的一段——两条收尾路径都在最后读取之后复令牌。
      *
-     * 时序同样用闸门摆：假服务先睡 1 秒，测试在这段里把那次「读消息」停住，再切对话。
+     * 时序同样用闸门摆：假服务先睡 1 秒，测试在「这一轮已经开始生成」之后把闸门摆上，停住的是
+     * 写库之后那次「读消息」，再切对话。闸门摆早了停的是 window 读，那时 busy 还没置上。
      */
     @Test
     fun aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened() {
@@ -512,23 +534,24 @@ class HearthNavigationDuringTurnDeviceTest {
             val gates = GatedHearthSessions(database)
             val model = HearthViewModel(context, gates::open)
             model.openChat(character)
-            waitUntil(20_000) { !model.state.value.historyLoading }
+            awaitOpenCharacter(model, character)
 
-            // 第一轮：发出去，等它入库，并把写库之后那次「读消息」停住。
+            // 第一轮：先发出去、等这一轮真的开始生成（那次 window 读已经过去），再把「写库之后那次
+            // 读消息」停住。闸门摆早了停的是 window 读，那时 busy 还没置上，等 busy 就永远等不到。
+            sendOrFail(model, question)
+            waitUntil(20_000, "第一轮开始生成（busy）", state(model)) { model.state.value.busy }
             hold = gates.hold(HearthStage.Read(MESSAGES_READ))
-            model.send(question)
-            waitUntil(20_000) { model.state.value.busy }
             hold.await()
             val stored = log.conversations(character.id).single()
             assertTrue("这一轮应该已经入库", log.messages(stored.id).any { it.text.contains(question) })
 
             val other = log.append(character.id, null, "刷新窗口复验：另一段 $tag", otherAnswer, "本机 · 测试", minutesAgo(5))
             model.openConversation(other)
-            waitUntil(20_000) { model.state.value.openConversation == other && !model.state.value.historyLoading }
+            waitUntil(20_000, "切到另一段对话") { model.state.value.openConversation == other && !model.state.value.historyLoading }
             hold.letGo()
+            hold.awaitCallFinished(20_000)
             hold = null
-            Thread.sleep(1_000)
-            assertEquals("晚到的刷新不该把页面拉回上一段对话", other, model.state.value.openConversation)
+            expectNothingFor(1_500, "晚到的刷新不该把页面拉回上一段对话") { model.state.value.openConversation != other }
             assertTrue("页面应该显示刚打开的那一段", model.state.value.messages.any { it.text.contains(otherAnswer) })
             assertFalse("换过页面之后不该还挂着生成中", model.state.value.busy)
 
@@ -537,16 +560,17 @@ class HearthNavigationDuringTurnDeviceTest {
             // 拦住这一轮把旧回答盖到新页面上。停在读上是停不住这条路径的。
             val third = log.append(character.id, null, "刷新窗口复验：第三段 $tag", thirdAnswer, "本机 · 测试", minutesAgo(10))
             model.openConversation(stored.id)
-            waitUntil(20_000) { model.state.value.openConversation == stored.id && !model.state.value.historyLoading }
+            waitUntil(20_000, "切回这一段") { model.state.value.openConversation == stored.id && !model.state.value.historyLoading }
             hold = gates.hold(HearthStage.Transaction(2))
             model.regenerate()
             hold.await()
 
             model.openConversation(third)
-            waitUntil(20_000) { model.state.value.openConversation == third && !model.state.value.historyLoading }
+            waitUntil(20_000, "切到第三段") { model.state.value.openConversation == third && !model.state.value.historyLoading }
             hold.letGo()
+            hold.awaitCallFinished(20_000)
             hold = null
-            Thread.sleep(1_500)
+            expectNothingFor(1_500, "replaceTurn 的晚到刷新不该改动页面") { model.state.value.openConversation != third }
             assertEquals("replaceTurn 的晚到刷新也不该改动页面", third, model.state.value.openConversation)
             assertTrue("页面应该显示第三段", model.state.value.messages.any { it.text.contains(thirdAnswer) })
             assertEquals(
@@ -579,14 +603,66 @@ private fun minutesAgo(minutes: Long): String =
 /** [ConversationLog.messages] 的 SQL 前缀：闸门用它认出「读这一段的历史」。 */
 private const val MESSAGES_READ = "SELECT role, text, model FROM messages"
 
-/** 等一个条件成立；等不到就让断言失败，而不是让测试挂住。 */
-private fun waitUntil(timeoutMs: Long, condition: () -> Boolean) {
+/** 等一个条件成立；等不到就让断言失败（带页面状态与全部线程栈），而不是让测试挂住。 */
+private fun waitUntil(
+    timeoutMs: Long,
+    what: String = "条件",
+    state: () -> String = { "" },
+    condition: () -> Boolean,
+) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
         if (condition()) return
         Thread.sleep(50)
     }
-    assertTrue("等待超时（${timeoutMs}ms）：条件一直没成立", condition())
+    assertTrue(
+        "等待超时（${timeoutMs}ms）：$what 一直没成立。${state()}\n全部线程栈：\n${threadDump()}",
+        condition(),
+    )
+}
+
+/** 失败信息里带上页面状态：断言为什么没成立，一眼能看出来。 */
+private fun state(model: HearthViewModel): () -> String = { "\n页面状态=${model.state.value}" }
+
+/**
+ * 这一轮必须真的被页面接住。页面拒绝发送（这一段的历史没读出来）、还没打开人物、或把它停在
+ * 云端确认框上，都会让下面的 `busy` 永远等不到，所以这几个前提先单独断言掉，失败信息直接指向原因。
+ */
+private fun sendOrFail(model: HearthViewModel, text: String) {
+    model.send(text)
+    val current = model.state.value
+    assertNotNull("发送没有落点：页面还没打开人物（发送被静默丢弃）", current.openCharacter)
+    assertFalse("发送被拒：这一段的历史没读出来（页面提示：${current.notice}）", current.historyFailed)
+    assertNull("发送停在云端确认框上，没有真的开始（待确认：${current.sendConfirm}）", current.sendConfirm)
+}
+
+/**
+ * 等到页面真的打开了这个人物、并且这一段的历史读完。
+ *
+ * 不能只等 `!historyLoading`：ViewModel 刚建出来时 `historyLoading` 的默认值就是 false，
+ * 只等它会在 `openChat` 的协程还没跑起来时就直接通过，接着的 `send` 会因为「还没有打开的人物」
+ * 被静默丢掉——这正是 `aLateRefresh…` 这一例原来真机上必挂的原因。
+ */
+private fun awaitOpenCharacter(model: HearthViewModel, character: HearthCharacter) {
+    waitUntil(20_000, "打开人物、这一段的历史读完", state(model)) {
+        model.state.value.openCharacter?.id == character.id && !model.state.value.historyLoading
+    }
+    assertFalse("打开人物时历史读取失败了：${model.state.value.notice}", model.state.value.historyFailed)
+}
+
+/**
+ * 在一段**有界**的观察窗口里一直盯着「不该发生的事」：一发生立刻失败，窗口走完才放行。
+ *
+ * 「什么都没发生」这种断言本来就需要看一段时间，这里不把它当同步用（不用「睡一会儿再断言」
+ * 去撞窗口），而是把窗口本身变成断言：窗口里任何一刻违反了 [forbidden]，失败信息指到那一刻。
+ */
+private fun expectNothingFor(millis: Long, what: String, forbidden: () -> Boolean) {
+    val deadline = System.currentTimeMillis() + millis
+    while (true) {
+        assertFalse("$what（${millis}ms 观察窗口里出现了）", forbidden())
+        if (System.currentTimeMillis() >= deadline) return
+        Thread.sleep(25)
+    }
 }
 
 /** 这一族真机测试自己用的名字前缀和问句，只用来认自己留下的东西。 */

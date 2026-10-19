@@ -1,0 +1,9 @@
+RUN 01 single class (HearthNavigationDuringTurnDeviceTest) started 2026-10-19 11:46:45; hard cap = 3 min without log growth; freezer guard on
+RUN 02 full androidTest (25 tests) started 2026-10-19 11:47:53; hard cap = 3 min without log growth; freezer guard on
+WATCHDOG 2026-10-19 11:51:27 no log growth for 3 min (size 9568 bytes)
+started  : plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile | changingTheSavedAddressMakesTheNextSendAskAgain | aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer | stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer | aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened | aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected | comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+finished : plaintextCharacterAndDialogueAreAbsentFromTheDatabaseFile | changingTheSavedAddressMakesTheNextSendAskAgain | aStoppedCloudTurnNeverShowsOrStoresTheLateAnswer | stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer | aLateRefreshAfterAStoredTurnNeverOverwritesTheConversationTheUserOpened | aQuestionSentWhileAnotherConversationIsStillLoadingIsRefusedAndNeverRedirected
+stuck    : comingBackToThePageRefusesASendUntilTheStoredHistoryIsThere
+action   : force-stop com.xavierxia.mycelium.debug and com.xavierxia.mycelium.debug.test
+STICKY 2026-10-19 11:52:53 am unfreeze --sticky com.xavierxia.mycelium.debug -> Unfreezing process com.xavierxia.mycelium.debug (9507) sticky=true
+RUN 03 full androidTest (25 tests) started 2026-10-19 11:52:53; in-process bound 4 min (prints all thread stacks), host cap 6 min without log growth; freezer guard on
