@@ -9,18 +9,28 @@
 #   * failing or errored test cases
 #   * an expected task did not run, or an expected report / APK is missing (a missing report is
 #     never counted as zero)
+#   * a lint report without a summary line (a report is never silently counted as clean)
+#   * lint errors or lint warnings
+#
+# Lint hints (informational) are NOT a failure: they are counted and shown in the lint table, so
+# both gates agree (ruling 2026-10-19). This mirrors scripts/check-all.ps1.
 #
 # llama.cpp's own sources and headers are pinned third-party code, so their warnings are exempt
 # (see llm/README.md); lines whose path contains llm/vendor are counted separately.
 #
 # Usage:
 #   scripts/check-all.sh [--online] [--skip-llama-prepare] [--tasks a,b,c] [upstream-url]
+#   scripts/check-all.sh --self-test [--self-test-report FILE]...
 #
 #   --online               let Gradle resolve dependencies (the runner has network; local runs must
 #                          stay offline because Maven Central handshakes fail on this machine)
 #   --skip-llama-prepare   llm/vendor/llama.cpp is already prepared
 #   --tasks                comma-separated Gradle selectors for a subset run (debugging only)
 #   upstream-url           passed to scripts/prepare-llama.sh (default: the official repository)
+#   --self-test            only run the lint summary parser / gate self test and exit (no Gradle,
+#                          no environment check)
+#   --self-test-report F   extra real lint report to parse in the self test (repeatable); a report
+#                          whose summary line cannot be found fails the self test
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,12 +39,16 @@ ONLINE=0
 SKIP_LLAMA=0
 UPSTREAM=""
 SUBSET_TASKS=""
+SELF_TEST=0
+SELF_TEST_REPORTS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --online) ONLINE=1 ;;
     --skip-llama-prepare) SKIP_LLAMA=1 ;;
     --tasks) shift; SUBSET_TASKS="${1:-}" ;;
+    --self-test) SELF_TEST=1 ;;
+    --self-test-report) shift; SELF_TEST_REPORTS+=("${1:-}") ;;
     *) UPSTREAM="$1" ;;
   esac
   shift
@@ -44,6 +58,148 @@ fail() {
   echo "check-all: $1" >&2
   exit 1
 }
+
+# --- lint summary parsing (shared by the real run and by --self-test) ---------
+#
+# AGP's lint text report ends with either "No issues found." or a summary line. When informational
+# issues exist the summary has a third group, "<n> errors, <n> warnings, <n> hints" (and "1 hint" /
+# "1 warning" / "1 error" in the singular). Ruling 2026-10-19: only errors and warnings fail the
+# gate; a hint is counted and printed in the lint table but is not a failure. A report without a
+# summary line is never treated as clean (that silently-passing case is why the two gates disagreed).
+# Prints "errors warnings hints parsed" (parsed is 1 only when a summary line was found).
+lint_counts() {
+  local file="$1" line errors warnings hints
+  line="$(grep -E '^[[:space:]]*[0-9]+ errors?, [0-9]+ warnings?(, [0-9]+ hints?)?[[:space:]]*$' "$file" | tail -1)"
+  if [ -z "$line" ]; then
+    if grep -q 'No issues found' "$file"; then echo "0 0 0 1"; else echo "0 0 0 0"; fi
+    return
+  fi
+  errors="$(echo "$line" | grep -oE '^[[:space:]]*[0-9]+' | grep -oE '[0-9]+')"
+  warnings="$(echo "$line" | grep -oE '[0-9]+ warnings?' | grep -oE '^[0-9]+')"
+  hints="$(echo "$line" | grep -oE '[0-9]+ hints?' | grep -oE '^[0-9]+')"
+  [ -n "$hints" ] || hints=0
+  echo "$errors $warnings $hints 1"
+}
+
+# Rewrites the summary line of a lint report so that it advertises a single informational hint. Used
+# by the self test to prove with real report text that a hint cannot change the outcome.
+lint_text_with_hint() {
+  local file="$1" line errors warnings
+  line="$(grep -E '^[[:space:]]*[0-9]+ errors?, [0-9]+ warnings?(, [0-9]+ hints?)?[[:space:]]*$' "$file" | tail -1)"
+  if [ -n "$line" ]; then
+    errors="$(echo "$line" | grep -oE '^[[:space:]]*[0-9]+' | grep -oE '[0-9]+')"
+    warnings="$(echo "$line" | grep -oE '[0-9]+ warnings?' | grep -oE '^[0-9]+')"
+    sed -E "s|^[[:space:]]*[0-9]+ errors?, [0-9]+ warnings?(, [0-9]+ hints?)?[[:space:]]*\$|${errors} errors, ${warnings} warnings, 1 hint|" "$file"
+  else
+    sed 's|^[[:space:]]*No issues found.*$|0 errors, 0 warnings, 1 hint|' "$file"
+  fi
+}
+
+# One self-test case: the sample text arrives on stdin (a heredoc, like a real report), is written
+# to a temporary file, parsed and compared with the expected outcome. "pass" is only possible for a
+# parsed report with 0 errors and 0 warnings; an unparsed report must always come out as "fail".
+SELF_FAILURES=0
+self_case() {
+  local name="$1" want="$2" text tmp errors warnings hints parsed got
+  text="$(cat)"
+  tmp="$(mktemp)"
+  printf '%s\n' "$text" > "$tmp"
+  read -r errors warnings hints parsed <<< "$(lint_counts "$tmp")"
+  rm -f "$tmp"
+  got="fail"
+  [ "$parsed" = "1" ] && [ "$errors" = "0" ] && [ "$warnings" = "0" ] && got="pass"
+  if [ "$got" = "$want" ]; then
+    printf 'PASS  %s\n' "$name"
+  else
+    printf 'FAIL  %s\n' "$name"
+    SELF_FAILURES=$((SELF_FAILURES + 1))
+  fi
+  printf '      errors=%s warnings=%s hints=%s parsed=%s -> %s (expected %s)\n' \
+    "$errors" "$warnings" "$hints" "$parsed" "$got" "$want"
+}
+
+run_lint_self_test() {
+  local tmp_real tmp_hint r_errors r_warnings r_hints r_parsed h_errors h_warnings h_hints h_parsed r_got h_got report
+  echo "check-all self test: lint summary parser and gate"
+  echo
+
+  # Real AGP wording, both number forms (singular and plural) and the missing summary line.
+  self_case "hints only, singular (0 errors, 0 warnings, 1 hint)" pass <<'EOF'
+0 errors, 0 warnings, 1 hint
+EOF
+  self_case "hints only, plural (0 errors, 0 warnings, 3 hints)" pass <<'EOF'
+0 errors, 0 warnings, 3 hints
+EOF
+  self_case "hints only, no errors/warnings words (No issues found.)" pass <<'EOF'
+No issues found.
+EOF
+  self_case "zero of everything (0 errors, 0 warnings, 0 hints)" pass <<'EOF'
+0 errors, 0 warnings, 0 hints
+EOF
+  self_case "one warning, singular (0 errors, 1 warning, 0 hints)" fail <<'EOF'
+0 errors, 1 warning, 0 hints
+EOF
+  self_case "one warning, singular, no hints group (0 errors, 1 warning)" fail <<'EOF'
+0 errors, 1 warning
+EOF
+  self_case "two warnings, real AGP form (0 errors, 2 warnings)" fail <<'EOF'
+0 errors, 2 warnings
+EOF
+  self_case "one error, singular (1 error, 0 warnings, 0 hints)" fail <<'EOF'
+1 error, 0 warnings, 0 hints
+EOF
+  self_case "errors plus hints (2 errors, 0 warnings, 3 hints)" fail <<'EOF'
+2 errors, 0 warnings, 3 hints
+EOF
+  self_case "errors and warnings plus hints (1 error, 4 warnings, 2 hints)" fail <<'EOF'
+1 error, 4 warnings, 2 hints
+EOF
+  self_case "no summary line, issue text only" fail <<'EOF'
+app/src/main/java/Foo.kt:12: Warning: unused [UnusedResources]
+EOF
+  self_case "empty report (no summary line)" fail <<'EOF'
+EOF
+
+  # Real report text: the summary line must be found and appending a hint must not change the
+  # outcome. Everything happens in temporary copies; the repository is not touched.
+  for report in ${SELF_TEST_REPORTS[@]+"${SELF_TEST_REPORTS[@]}"}; do
+    if [ ! -f "$report" ]; then
+      printf 'FAIL  real report not found: %s\n' "$report"
+      SELF_FAILURES=$((SELF_FAILURES + 1))
+      continue
+    fi
+    tmp_real="$(mktemp)"; tmp_hint="$(mktemp)"
+    cp "$report" "$tmp_real"
+    lint_text_with_hint "$report" > "$tmp_hint"
+    read -r r_errors r_warnings r_hints r_parsed <<< "$(lint_counts "$tmp_real")"
+    read -r h_errors h_warnings h_hints h_parsed <<< "$(lint_counts "$tmp_hint")"
+    rm -f "$tmp_real" "$tmp_hint"
+    r_got="fail"; [ "$r_parsed" = "1" ] && [ "$r_errors" = "0" ] && [ "$r_warnings" = "0" ] && r_got="pass"
+    h_got="fail"; [ "$h_parsed" = "1" ] && [ "$h_errors" = "0" ] && [ "$h_warnings" = "0" ] && h_got="pass"
+    if [ "$r_parsed" = "1" ] && [ "$h_parsed" = "1" ] && [ "$h_hints" -ge 1 ] && [ "$r_got" = "$h_got" ]; then
+      printf 'PASS  real report: %s\n' "$report"
+    else
+      printf 'FAIL  real report: %s\n' "$report"
+      SELF_FAILURES=$((SELF_FAILURES + 1))
+    fi
+    printf '      errors=%s warnings=%s hints=%s parsed=%s -> %s\n' \
+      "$r_errors" "$r_warnings" "$r_hints" "$r_parsed" "$r_got"
+    printf '      same text with "1 hint" in the summary: errors=%s warnings=%s hints=%s parsed=%s -> %s (must match)\n' \
+      "$h_errors" "$h_warnings" "$h_hints" "$h_parsed" "$h_got"
+  done
+
+  echo
+  if [ "$SELF_FAILURES" -eq 0 ]; then
+    echo "check-all self test: PASS"
+    exit 0
+  fi
+  echo "check-all self test: FAIL ($SELF_FAILURES case(s))" >&2
+  exit 1
+}
+
+if [ "$SELF_TEST" = "1" ]; then
+  run_lint_self_test
+fi
 
 # --- 1. environment ----------------------------------------------------------
 
@@ -184,24 +340,22 @@ for dir in "$ROOT"/*/build/test-results/*/; do
   TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
 done
 
-TOTAL_LINT_ERRORS=0; TOTAL_LINT_WARNINGS=0
+TOTAL_LINT_ERRORS=0; TOTAL_LINT_WARNINGS=0; TOTAL_LINT_HINTS=0
 LINT_TABLE=""
+LINT_UNPARSED=""
 for file in "$ROOT"/*/build/reports/lint-results-*.txt; do
   [ -f "$file" ] || continue
   module="$(module_of_path "$file")"
   variant="$(basename "$file" .txt)"; variant="${variant#lint-results-}"
   suffix="$(echo "${variant:0:1}" | tr '[:lower:]' '[:upper:]')${variant:1}"
   [ "$(task_state "$module:lint$suffix")" != "没有运行" ] || continue
-  counts="$(grep -oE '[0-9]+ errors?, [0-9]+ warnings?' "$file" | tail -1)"
-  if [ -n "$counts" ]; then
-    errors="$(echo "$counts" | grep -oE '^[0-9]+')"
-    warnings="$(echo "$counts" | grep -oE '[0-9]+ warnings?' | grep -oE '^[0-9]+')"
-  else
-    errors=0; warnings=0
-  fi
-  LINT_TABLE+="| $module | $variant | $errors | $warnings |"$'\n'
+  read -r errors warnings hints parsed <<< "$(lint_counts "$file")"
+  # No summary line: never silently counted as clean (fail, like the PowerShell gate does).
+  [ "$parsed" = "1" ] || LINT_UNPARSED+="$file"$'\n'
+  LINT_TABLE+="| $module | $variant | $errors | $warnings | $hints |"$'\n'
   TOTAL_LINT_ERRORS=$((TOTAL_LINT_ERRORS + errors))
   TOTAL_LINT_WARNINGS=$((TOTAL_LINT_WARNINGS + warnings))
+  TOTAL_LINT_HINTS=$((TOTAL_LINT_HINTS + hints))
 done
 
 APK_TABLE=""
@@ -272,12 +426,19 @@ fi
 
 [ "$TOTAL_FAILURES" -eq 0 ] || add_problem "测试失败 $TOTAL_FAILURES 个"
 [ "$TOTAL_ERRORS" -eq 0 ] || add_problem "测试出错 $TOTAL_ERRORS 个"
+# lint 的提示（hint / informational）只计数、只进汇总表，不算失败（2026-10-19 裁定）；error 和
+# warning 照旧失败。
+if [ -n "$LINT_UNPARSED" ]; then
+  while IFS= read -r report; do
+    [ -n "$report" ] && add_problem "lint 报告没有汇总行：$report"
+  done <<< "$LINT_UNPARSED"
+fi
 [ "$TOTAL_LINT_ERRORS" -eq 0 ] || add_problem "lint error $TOTAL_LINT_ERRORS 条"
 [ "$TOTAL_LINT_WARNINGS" -eq 0 ] || add_problem "lint warning $TOTAL_LINT_WARNINGS 条"
 [ "$WARNING_COUNT" -eq 0 ] || add_problem "输出里的警告 $WARNING_COUNT 条"
 
 if [ -z "$PROBLEMS" ]; then
-  RESULT="**通过**：0 失败、0 警告，退出码 0。"
+  RESULT="**通过**：0 失败、0 警告，退出码 0（lint hint $TOTAL_LINT_HINTS 条，仅提示，不算失败）。"
 else
   RESULT="**失败**："$'\n'"$PROBLEMS"
 fi
@@ -304,10 +465,12 @@ fi
   echo
   echo "## lint"
   echo
-  echo "| 模块 | 变体 | error | warning |"
-  echo "|---|---|---|---|"
+  echo "| 模块 | 变体 | error | warning | hint |"
+  echo "|---|---|---|---|---|"
   printf '%s' "$LINT_TABLE"
-  echo "| **合计** | | **$TOTAL_LINT_ERRORS** | **$TOTAL_LINT_WARNINGS** |"
+  echo "| **合计** | | **$TOTAL_LINT_ERRORS** | **$TOTAL_LINT_WARNINGS** | **$TOTAL_LINT_HINTS** |"
+  echo
+  echo "- lint hint（提示，仅计数、不算失败）：$TOTAL_LINT_HINTS 条"
   echo
   echo "## 构建产物"
   echo
