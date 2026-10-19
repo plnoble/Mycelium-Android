@@ -8,6 +8,11 @@
 #  3. Classification: the guard never treats "some INSTRUMENTATION_CODE appeared" as a normal
 #     finish, and a freeze probe that fails to parse is NEVER silently read as "not frozen".
 #
+# The log this guard is pointed at is normally the one written by `scripts/run-timestamped.ps1`, whose
+# every line carries a host-side `HH:mm:ss.fff` prefix. All log parsing therefore strips that leading
+# timestamp first (Strip-LineTimestamp); without it a finished run whose tail is
+# `12:19:33.335 INSTRUMENTATION_CODE: -1` would be misread as RUNNING.
+#
 # Exit codes (semantically distinct; see the table in ../README.md section 4):
 #   0 DONE            the log ends with `INSTRUMENTATION_CODE: -1` -> this invocation finished
 #                     (whether the tests passed is in the tail, not this code)
@@ -45,6 +50,20 @@ $script:Adb = $Adb
 function Read-TextFile([string]$path) {
     if (-not (Test-Path $path)) { return '' }
     return [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+}
+
+# Every host-side text parser below runs on whatever file the guard is pointed at. In the normal
+# workflow that file is the one `scripts/run-timestamped.ps1` writes, whose every line starts with
+# a host-side `HH:mm:ss.fff` timestamp (the per-case durations are derived from it). Stripping that
+# prefix BEFORE matching is what keeps `INSTRUMENTATION_*` detection working on the real archives
+# (04c/04d end in `INSTRUMENTATION_CODE: -1` and must classify as DONE).
+#
+# Only the line-leading `HH:mm:ss[.fff]` plus its following whitespace run is removed, so an inline
+# clock ("... at 12:19:33.334 ...") and everything else on the line survive untouched. No timestamp
+# -> the line is returned unchanged.
+function Strip-LineTimestamp([string]$Line) {
+    if ($null -eq $Line) { return '' }
+    return [regex]::Replace([string]$Line, '^\d{1,2}(:\d{2}){1,3}(\.\d{1,3})?\s+', '')
 }
 
 # Run one adb command and return its merged stdout+stderr as text. A missing/broken adb is turned
@@ -130,8 +149,11 @@ function Get-FreezeProbe([string]$PidOfText, [string]$PsText) {
     for ($n = 1; $n -lt $rows.Count; $n++) {
         $line = $rows[$n].Trim()
         $cells = @($line -split '\s+')
-        if ($cells.Count -le $wchanIdx) {
-            $r.Reason = "ps row $($n + 1) has fewer than $($wchanIdx + 1) columns (no WCHAN value): '$line'"
+        # Column count must match the header exactly. Too few cells means there is no WCHAN value
+        # (toybox drops the trailing blank column); too many means the row is not the table we think
+        # it is and WCHAN would be read out of the wrong cell. Both are UNKNOWN, never "not frozen".
+        if ($cells.Count -ne $cols.Count) {
+            $r.Reason = "ps row $($n + 1) has $($cells.Count) columns but the header has $($cols.Count): '$line'"
             return $r
         }
         if ($cells[$pidIdx] -notmatch '^\d+$') {
@@ -161,16 +183,20 @@ function Get-FreezeProbe([string]$PidOfText, [string]$PsText) {
 #   CRASH   : any other code together with a crash marker, or a crash marker alone
 #   UNKNOWN : any other code with no crash marker (e.g. a lone `INSTRUMENTATION_CODE: 0`)
 #   RUNNING : no terminal marker yet
+#
+# Every line is timestamp-normalized first (see Strip-LineTimestamp) so that the same parser works
+# on a plain `am instrument` capture and on the timestamped capture of run-timestamped.ps1, which is
+# what the guard is actually pointed at during a run.
 # ---------------------------------------------------------------------------
 function Get-RunTerminal([string[]]$Lines) {
     $code = $null
     for ($i = $Lines.Count - 1; $i -ge 0; $i--) {
-        $m = [regex]::Match([string]$Lines[$i], '^INSTRUMENTATION_CODE:\s*(-?\d+)\s*$')
+        $m = [regex]::Match((Strip-LineTimestamp ([string]$Lines[$i])), '^INSTRUMENTATION_CODE:\s*(-?\d+)\s*$')
         if ($m.Success) { $code = [int]$m.Groups[1].Value; break }
     }
     $marker = ''
     foreach ($line in $Lines) {
-        $s = [string]$line
+        $s = Strip-LineTimestamp ([string]$line)
         if ($s -match 'shortMsg=Process crashed' -or $s -match 'Process crashed while executing' -or
             $s -match 'FATAL EXCEPTION' -or $s -match 'INSTRUMENTATION_FAILED') {
             $marker = $s.Trim()
@@ -192,7 +218,7 @@ function Get-RunProgress([string[]]$Lines) {
     $finished = New-Object System.Collections.ArrayList
     $current = '(unknown)'
     foreach ($line in $Lines) {
-        $s = [string]$line
+        $s = Strip-LineTimestamp ([string]$line)
         if ($s -match 'INSTRUMENTATION_STATUS: test=(.+)$') { $current = $Matches[1] }
         elseif ($s -match 'INSTRUMENTATION_STATUS_CODE: 1$') { [void]$started.Add($current) }
         elseif ($s -match 'INSTRUMENTATION_STATUS_CODE: (-?\d+)$' -and $Matches[1] -ne '1') { [void]$finished.Add($current) }

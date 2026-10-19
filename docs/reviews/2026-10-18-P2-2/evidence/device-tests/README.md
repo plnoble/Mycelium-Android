@@ -116,17 +116,22 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 ### 4.1 冻结守卫脚本：2026-10-19 的修正与验证到哪一步
 
 第四次复审（`REVIEW-r4.md` 必修 4）与第五次复审（`REVIEW-r5.md` 第 12 行、必修 3）都指出：归档的
-`guards.ps1` 不能按声明工作。本轮改了三处：
+`guards.ps1` 不能按声明工作。本轮改了三处（第六次复审 r6 的两条「必须修改」后，前两处又各自补齐了一处）：
 
 1. **进程号**：原来给 `$pid` 赋值——PowerShell 不区分大小写，`$PID` 是只读自动变量，赋值拿不到目标进程号
-   （取到的是宿主 PowerShell 自己的 PID），后面的 `ps -p` 也就查了个不存在的号。现在改用 `$testPid`，
-   并把 `pidof` 的「进程不在」与「adb 报错」两条分支分开。
+   （取到的是宿主 PowerShell 自己的 PID），后面的 `ps -p` 也就查了个不存在的号。目标进程号现在从
+   `Select-TargetPid` 的返回值 `$sel.Pid` 取（`guards.ps1` 里**没有** `$testPid` 这个变量，`-p $sel.Pid` 才
+   是维护者该看的地方），`pidof` 的「进程不在」与「adb 报错」两条分支分开；`$sel.Pid` 同时写进报告行。
 2. **WCHAN 解析**：原来那条 `ps -o WCHAN` 只打印一列，而代码要求行首是数字，正常输出一行都匹配不上，
-   于是静默当成「没冻结」——守卫形同虚设。现在改成 `ps -T -p <pid> -o PID,TID,STAT,WCHAN`，**按表头列位解析**
-   （对齐真机摘录的四列形状，见 `hang-record/03` 第 165–170 行）；缺列、`WCHAN` 为空或为 `-`、列数不匹配、
-   `ps`/`adb` 报错，一律判 `PROBE-UNKNOWN` 并写进报告，**绝不**折成「没冻结」。
+   于是静默当成「没冻结」——守卫形同虚设。现在改成 `ps -T -p $sel.Pid -o PID,TID,STAT,WCHAN`，**按表头列位解析**
+   （对齐真机摘录的四列形状，见 `hang-record/03` 第 165–170 行），并且**每行列数必须与表头完全一致**：
+   少列（`WCHAN` 整格缺失）、多列、`WCHAN` 为空或为 `-`/`?`、`PID` 格不是数字、没有线程行、`ps`/`adb` 报错，
+   **一律**判 `PROBE-UNKNOWN` 并写进报告，**绝不**折成「没冻结」。
 3. **退出分类**：原来只要出现任意 `INSTRUMENTATION_CODE` 就写 `run finished normally`（连 `CODE: 0` +
-   `shortMsg=Process crashed.` 也这么记）。现在按语义分开：
+   `shortMsg=Process crashed.` 也这么记）。现在按语义分开。另外，**解析前统一剥离每行行首的主机时间戳**
+   （`run-timestamped.ps1` 写出的日志每行都是 `HH:mm:ss.fff` 开头；正则 `^\d{1,2}(:\d{2}){1,3}(\.\d{1,3})?\s+`
+   只吃行首这一段，行内其它内容不动）：r6 指出不剥离时真实归档 `04c`/`04d` 的成功终止行读不到、整份日志被
+   误判成 `RUNNING`，本次已修并接进回归（场景 `12-done-timestamped`）。
 
 | 退出码 | 判定 | 依据 |
 | --- | --- | --- |
@@ -141,11 +146,13 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 逐场景断言退出码、必须出现与绝不能出现的报告行、以及本该发出的 `am unfreeze`/`am force-stop` 动作；另有第 2 阶段
 用夹具 adb（`guards-samples/fake-adb.ps1`，固定回「没有设备」）把**真的 live 循环**跑几秒，证明 adb 采集 → 探针 →
 报告 → 总时限这条通路没有被 replay 绕开，且全程不碰真机。本轮实跑（Windows PowerShell 5.1.26100.9711）：
-**11 个 replay 场景 + 1 个 live 冒烟全过**，原始输出 `guards-samples/selftest-output.txt`，
-每个夹具是真机摘录、派生还是构造，见 `guards-samples/README.md`。
+**15 个 replay 场景 + 1 个 live 冒烟全过**（脚本按 `scenarios/*.json` 实际个数统计，摘要行不会再与实际脱节），
+原始输出 `guards-samples/selftest-output.txt`；每个夹具是真机摘录、派生还是构造，以及**每个形状由哪个场景真跑到**，
+见 `guards-samples/README.md` 第 1、4 节（该表就是覆盖声明本身，清单里没接场景的夹具不算已验证）。
 
-**哪些分支只做了文本级验证**：`ps -T` 表头/列解析的各种形状、`pidof` 的两条分支、`INSTRUMENTATION_CODE`
-的三种分类、停涨看门狗按探针状态分出的三种退出、报告行与 adb 动作——这些都是样例驱动的**文本级**验证。
+**哪些分支只做了文本级验证**：`ps -T` 表头/列解析的各个形状（含少列、多列、`-`、整格缺失、`ps` 错误文本、旧
+`-o WCHAN` 一列形状）、`pidof` 的两条分支、`INSTRUMENTATION_CODE` 的三种分类（无时间戳与**带主机时间戳**两种
+日志形状）、停涨看门狗按探针状态分出的三种退出、报告行与 adb 动作——这些都是样例驱动的**文本级**验证。
 **需要真机才能确认的**：真机上 `pidof`/`ps -T` 的真实输出形状是否与摘录一致；真机真的被冻住时探针能否当场判出
 `FROZEN`；`am unfreeze --sticky` 是否真能让日志恢复增长；`-Seconds` 总时限与轮询节奏在真机上的实际行为
 （replay 用确定性时钟，不睡眠）。
@@ -243,9 +250,9 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
 | `hang-record/06`、`07` | 修复后全量跑到第 15 例进程崩溃（第一次） |
 | `hang-record/08-crash-stack-broken-pipe.txt` | 崩溃栈：`LocalHttp.serve` → `SocketException: Broken pipe` |
 | `hang-record/09`、`10` | 同位置的崩溃复现（含 `pm clear` 之后那一次） |
-| `scripts/guards.ps1` | 主机侧守卫（冻结检测 + 无增长硬上限 + force-stop + 退出分类）。2026-10-19 修好 `$testPid`、`ps -T` 列解析与退出分类；**文本级验证见 4.1**，真机路径仍待复核，不再是「拿来即用」的声明 |
-| `scripts/guards-selftest.ps1` | 守卫的样例驱动自检：以 `-ReplayDir` 跑 `guards-samples/scenarios/*.json`，断言退出码、报告行与 adb 动作；**只做文本级验证**（不连设备），用法见 4.1 |
-| `guards-samples/` | 守卫的样例夹具与场景（真机摘录 + 少量构造）、出处清单 `README.md`、本轮自检原始输出 `selftest-output.txt` |
+| `scripts/guards.ps1` | 主机侧守卫（冻结检测 + 无增长硬上限 + force-stop + 退出分类）。2026-10-19 修好 `$sel.Pid` 取进程号、按 `ps -T` 表头列位解析并做行/表头**列数一致性**校验、退出分类、以及**解析前剥离行首主机时间戳**；**文本级验证见 4.1**，真机路径仍待复核，不再是「拿来即用」的声明 |
+| `scripts/guards-selftest.ps1` | 守卫的样例驱动自检：以 `-ReplayDir` 跑 `guards-samples/scenarios/*.json`（15 个场景），断言退出码、报告行与 adb 动作，另有 live 循环冒烟；场景数按目录实际个数统计。**只做文本级验证**（不连设备），用法见 4.1 |
+| `guards-samples/` | 守卫的样例夹具与场景（真机摘录 + 少量构造）、出处与「哪个形状由哪个场景跑到」的对应表（`README.md` 第 1、4 节）、本轮自检原始输出 `selftest-output.txt` |
 | `scripts/run-timestamped.ps1` | 主机侧跑测器：force-stop → `am unfreeze --sticky` → 流式读 `am instrument -w -r` 并给每行加主机时间戳（`04*` 的原始输出就是它产生的），可直接复用 |
 | `scripts/extract-timings.ps1` | 把带时间戳的原始输出变成逐例耗时表 |
 
@@ -267,3 +274,7 @@ adb shell am instrument -w -r com.xavierxia.mycelium.debug.test/androidx.test.ru
    判出 `FROZEN`、`am unfreeze --sticky` 是否真能让日志恢复增长，本轮都没有实测；`guards-samples/` 里
    `ps-not-frozen-*`、`ps-wchan-*`、`log-code0-no-marker-*` 这几份是构造或派生的，不是真机原文（出处见
    `guards-samples/README.md`）。
+6. **带时间戳日志的回归只钉了 `04c` 一份**：`12-done-timestamped` 用的是 `04c` 归档末尾 9 行的逐字节副本；
+   `04d`（同为成功终止）没有单独夹具，只在本次修正时按同一个 `Get-RunTerminal` 复算过（`DONE`，`04c` 同样
+   `DONE`；对照修复前的行首锚定版本，两份都读成 `RUNNING`）。`run-timestamped.ps1` 若以后改时间戳格式或给行首
+   加别的前缀，守卫的剥离正则和这个场景要一起改，否则会重新出现「跑完了却被判 `RUNNING`」。

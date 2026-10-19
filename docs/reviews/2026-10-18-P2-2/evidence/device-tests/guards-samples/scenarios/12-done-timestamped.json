@@ -1,0 +1,13 @@
+{
+  "name": "12-done-timestamped",
+  "why": "Regression guard for the r6 item 1 bug: in the normal workflow the guard is pointed at the file written by run-timestamped.ps1, whose every line starts with a host-side HH:mm:ss.fff timestamp. This fixture is the verbatim final status block of the real archive 04c-follow-class-green-timed.txt (LF endings kept). Before the fix, the line-anchored INSTRUMENTATION_CODE regex never matched it, the tail was misread as RUNNING, and the guard stayed in its wait loop. Fixed behaviour: DONE / exit 0.",
+  "args": { "StaleMinutes": 1, "PollSeconds": 15, "Seconds": 600 },
+  "expectExit": 0,
+  "expectReport": ["^DONE .*run finished normally \\(INSTRUMENTATION_CODE: -1\\); guards stop"],
+  "expectNoReport": ["^CRASH ", "^UNKNOWN ", "^WATCHDOG ", "^FREEZER ", "^PROBE-UNKNOWN "],
+  "expectCommands": [],
+  "steps": [
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-running.txt" },
+    { "pidof": "21272", "ps": "ps-not-frozen-constructed.txt", "log": "log-done-timestamped.txt" }
+  ]
+}

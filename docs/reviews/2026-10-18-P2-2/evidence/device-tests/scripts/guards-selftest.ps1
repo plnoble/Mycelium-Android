@@ -12,6 +12,11 @@
 #   - and, for every unreadable/unparsable probe, that the report says PROBE-UNKNOWN and the run
 #     ends as UNKNOWN instead of being folded into "not frozen".
 #
+# The scenario count is read from the directory, so the summary always matches what ran. Two
+# families exist because of r6 review items 1 and 2: 12-done-timestamped feeds the guard the
+# timestamped tail that run-timestamped.ps1 actually writes (verbatim from the 04c archive), and
+# 13/14/15 drive the WCHAN column-count, `-` and blank-cell shapes that README section 4 claims.
+#
 # Phase 2 runs the *live* loop of the same guards.ps1 for a few seconds with `-Adb` pointing at
 # guards-samples/fake-adb.ps1 (a fixture that always reports "no device"), to prove the live wiring
 # (adb capture -> probe -> report -> time cap) is not bypassed by the replay path. It still touches
@@ -43,7 +48,10 @@ $failures = New-Object System.Collections.ArrayList
 
 Write-Output "guards-selftest: text-level replay only (no adb, no device); samples: $sampleRoot"
 
-foreach ($file in @(Get-ChildItem -Path $scenarioDir -Filter '*.json' | Sort-Object Name)) {
+$scenarioFiles = @(Get-ChildItem -Path $scenarioDir -Filter '*.json' | Sort-Object Name)
+$scenarioCount = $scenarioFiles.Count
+
+foreach ($file in $scenarioFiles) {
     $scenario = Get-Content -Path $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     $report = Join-Path $tmpRoot ($file.BaseName + '.report.txt')
     $trace = "$report.commands.txt"
@@ -126,6 +134,6 @@ if (-not (Test-Path $fakeAdb)) {
 
 Write-Output ""
 Write-Output ("guards-selftest: {0} passed, {1} failed (scenarios in {2})" -f $pass, $fail, $scenarioDir)
-Write-Output "note: 11 replay scenarios + 1 live-loop smoke test, all text level; the real device paths still need a device run."
+Write-Output ("note: {0} replay scenarios + 1 live-loop smoke test, all text level; the real device paths still need a device run." -f $scenarioCount)
 if ($fail -gt 0) { exit 1 }
 exit 0
