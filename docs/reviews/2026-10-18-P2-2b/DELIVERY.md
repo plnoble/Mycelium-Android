@@ -46,3 +46,13 @@
 **第 7 步大小**：正式包只带 arm64 之前 / 之后的 release 未签名包大小差，见第四节门禁原文里的产物表（本轮门禁实测 **38.9 MiB**）。
 
 各步更细的方案—实现—证据对应，见本目录 `PLAN.md`、`SURVEY.md`、`IMPL-BRIEFS.md`、`PLAN-REVIEW-MUSTFIX.md` 与仓库外施工笔记 `p2-2-work\step1-notes.md`、`step3-notes.md`、`step4-notes.md`、`step5-notes.md`。
+
+## 二、并 main 的冲突怎么解的
+
+- 合并提交 `c1cfe12`（`Merge branch 'main' into wp/P2-2b-release-ready`）。第一父是本分支此前的尖端 `5c33c55`，第二父是当时 `main` 的 `286f86a`（含 P2-2 合并 `0b89bd4` 与 P2-2 六轮复审收口）。
+- 提交信息里记下的**真冲突只有两个文件**（其余文件由 git 自动合）：`app/src/main/java/com/xavierxia/mycelium/hearth/HearthSpace.kt` 与 `docs/tracks/开发线.md`。
+- `HearthSpace.kt`：本分支那侧只改了一处 lint 提示（`dragSessions` 的 `mutableStateOf(0)` → `mutableIntStateOf(0)`），`main` 那侧带的是 P2-2 六轮复审后的整版（会话段身份 `conversationSegment`、`navigate()` 统一入口、`state.canSend` 就绪判据等）。**解决方式：整份取 `main` 侧版本。** 依据可复核：合并结果与该文件在 `main` 侧**逐字节相同**（`git diff c1cfe12^2 c1cfe12 -- <该文件>` 无输出），且 `main` 这一版本身用的就是 `mutableIntStateOf`（`HearthSpace.kt:39`、`:562`、`:566`），本分支那处 lint 修复没有因此丢掉 —— 事后门禁 lint 0/0 也印证了。
+- `docs/tracks/开发线.md`：两边都往这一页加了各自的小节，**取并集**。相对本分支侧是 +2/−1（把 P2-2 那节标题更新成「六轮复审收口，最终门禁 169/0 全绿，已并入 main」），相对 `main` 侧是 +32/−8（补上本包的九步落地与方案审整改记录）。
+- **不在冲突清单、但两边都改过的**是 `net/src/main/kotlin/com/xavierxia/mycelium/net/Gateway.kt`（git 自动合上了）。合并结果**两边都保留**：`main` 侧的连接/读取超时归一化与取消闸门（`check()` / `startingConnection`）、本分支侧的文件下载入口；并把白名单抽成 `HostPolicy` 接口、由 `AllowedHosts` 实现，好让下载的跳转走查（`HopWalker`）**每一跳用同一套策略**；`Update` 用途补上 GitHub 发布下载真正跳到的域名。
+- 合并之后需要一次接线收口：`f74e63e` 把下载路径接到合并进来的同一套取消闸门与超时归一化上（下一节）。
+- **冲突解决只动了上面这两个文件**；合并里出现的其余改动都是 `main` 侧原样带入的。合并后的门禁读数见第四节。
