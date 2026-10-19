@@ -1,11 +1,11 @@
 # P2-2 交付报告：炉边（人物与对话，2026-10-18 修订）
 
-- 分支：`wp/P2-2-hearth-chat`（已并入 `main`，最新基线 `a54c604`）；本报告本轮在 detached 工作树 `p2-2-r3-doc` 上更新，**改写前的分支 tip 为 `758bbf2`**（第三次复审审的即这一提交）
+- 分支：`wp/P2-2-hearth-chat`（已并入 `main`，最新基线 `a54c604`）；本报告在 detached 工作树 `p2-2-r4-doc` 上按第四次复审意见更正表述，**改写前的分支 tip 为 `5ba4376`**（第四次复审审的即这一提交）
 - 本报告对应的提交：见第八节「提交与证据对应表」
-- 本报告已于 2026-10-19 更新到**第二轮整改、最终门禁与第三次复审结论**（见 3.5、3.6、第十节）
+- 本报告已于 2026-10-19 更新到**第二轮整改、真机复跑、最终门禁与第三、四次复审结论**（见 3.5、3.6、3.7、4.6、第十节）；3.7 是按 `REVIEW-r4.md` 意见对表述的更正
 - 任务书：`docs/work-packages/P2-2-hearth-characters-chat.md`（以文末「2026-10-18 修订」「附录：预设人物」「2026-10-18 统筹裁定」为准）
-- 审核报告：`PLAN-REVIEW.md`（方案审，结论需修改）、`SPECIAL-隐私出网.md`（专项审，结论需修改）、`REVIEW.md`（全量审，9 条）、`REVIEW-r2.md`（复审，本分支已入库 `e6c1d65`；判第 5、6 条通过、其余七条不通过）、**`REVIEW-r3.md`（第三次复审，审 `758bbf2`、对照 r2 基线 `cb6c2db`；已产出并随本次提交入库，结论见 3.6）**
-- 本包当前状态：**待审**——第三次复审 `REVIEW-r3.md` 判**仍需修改**（第 3、4 条核心缺陷已修复、第 5、6 条维持通过；第 1、2、7、8 条仍有遗漏，第 9 条表述需改），**仍不得交付、不得推送**（第二轮整改见 3.5，最终门禁见第十节，审核链见 3.6）
+- 审核报告：`PLAN-REVIEW.md`（方案审，结论需修改）、`SPECIAL-隐私出网.md`（专项审，结论需修改）、`REVIEW.md`（全量审，9 条）、`REVIEW-r2.md`（复审，本分支已入库 `e6c1d65`；判第 5、6 条通过、其余七条不通过）、`REVIEW-r3.md`（第三次复审，审 `758bbf2`、对照 r2 基线 `cb6c2db`；已入库 `b6dbc6c`，结论见 3.6）、**`REVIEW-r4.md`（第四次复审，审 `5ba4376`；已产出并随本次提交入库，结论见 3.7）**
+- 本包当前状态：**待审**——第四次复审 `REVIEW-r4.md` 判**仍需修改**（必修 3、5 通过；必修 2 核心防护已补但页面接线有新回归；必修 1 仍未封闭；必修 4 部分修复；原第 9 条表述仍需改），**仍不得交付、不得推送**（第二轮整改见 3.5，最终门禁见第十节，审核链见 3.6、3.7）
 
 ## 一、这一包做了什么
 
@@ -52,11 +52,13 @@
 
 同一条腿再用 **CI 用的脚本**验一遍（`android-ci.yml` 跑的就是它）：在同一个全新 worktree 里用 Git Bash 跑
 `bash scripts/check-all.sh --skip-llama-prepare` → **通过：0 失败、0 警告、退出码 0**（`p2-2-work/checkall-sh4.txt`）。
-两条门禁脚本在 P2-2 的改动上都验过了；GitHub 上的远端 CI 仍需推送后才能看到（推送由用户决定）。
+两条门禁脚本在 P2-2 **这一节所记的改动上**验过了（后来两轮改动另行跑过门禁，见下方引用框与第十节）；
+GitHub 上的远端 CI 仍需推送后才能看到（推送由用户决定）。
 
 > **本节的记录早于第二轮整改**（133 用例、提交 `f614d36` / `5005bc4` 等）。第二轮整改后的从零门禁结论见
 > **第十节「最终门禁」**：提交 `c91eaaa`、**154 用例 0 失败**、lint 0 error / 0 warning，`check-all.ps1` 与
-> `check-all.sh` 都给出通过结论。
+> `check-all.sh` 都给出通过结论；两笔设备测例改动（`bce89e8`、`204c7c1`）之后，第四次复审记门禁跑在
+> `204c7c1`、**163 用例 0 失败**、lint 0/0——**这些结论只对应各自跑门禁时的提交，不能外推到当前 tip**（见第十节）。
 
 ## 三、三轮审核与逐条落实
 
@@ -158,7 +160,7 @@
 
 ### 3.5 第二轮整改（复审第 1、2、3、4、7、8、9 条，2026-10-19）
 
-复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条不通过。第二轮逐条整改如下——**判别力实证按条分级，此前「每条都
+复审 `REVIEW-r2.md` 判第 1、2、3、4、7、8、9 条不通过（该报告审的是 `cb6c2db`；第三次复审 `REVIEW-r3.md` 改判第 3、4 条基本通过、第 5、6 条维持通过，第 1、2、7、8 条仍有遗漏，见 3.6）。第二轮逐条整改如下——**判别力实证按条分级，此前「每条都
 验过判别力」的说法与现有证据不符，撤回**：**第 1、3、4、7 条有归档的实证**（第 1 条的失败原文按提交 `42fee21`
 的提交信息与笔记抄录、未另存独立证据文件；第 3、4、7 条为 2026-10-19 在一次性（detached）工作树里
 「改坏 → 只跑相关用例 → 抓失败原文 → 还原 → 复绿」重跑并归档的原文，用的都是**已入库的 JVM 用例**）；
@@ -212,10 +214,10 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 → 第一轮整改（`313e745` 九条整改 + `a196aed` 第 5 条补验测例；其间 `5314e34` 消掉 lint hint）
 → 复审 `REVIEW-r2.md`（审 `cb6c2db`）：**第 5、6 条通过，第 1、2、3、4、7、8、9 条不通过**
 → 第二轮整改（3.5 的七条：`42fee21`、`bfa9217`、`6fd00c8`、`e152472`、`c91eaaa`、`3bfbdc3`、`b9efc1d`）
-→ **第三次复审 `REVIEW-r3.md` 已产出**：任务挂在 2026-10-19 07:06:40（额度重置）后自动执行（等待任务见
-`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\review-r3-wait.log`），报告审 `758bbf2`、对照 r2 基线 `cb6c2db`，
-全程只读；**该报告已随本次提交入库**（提交信息 `docs(P2-2): 复审 r3 结论与判别力表述按证据分级`，
-路径 `docs/reviews/2026-10-18-P2-2/REVIEW-r3.md`）。
+→ 第三次复审 `REVIEW-r3.md`（审 `758bbf2`）：任务挂在 2026-10-19 07:06:40（额度重置）后自动执行（等待任务见
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\review-r3-wait.log`），对照 r2 基线 `cb6c2db`，全程只读；
+**该报告已随 `b6dbc6c` 入库**（路径 `docs/reviews/2026-10-18-P2-2/REVIEW-r3.md`）
+→ 第四次复审 `REVIEW-r4.md`（审 `5ba4376`；**已随本次提交入库**，结论见 3.7）。
 
 **r3 的结论（`REVIEW-r3.md` 第 1 行）**：**结论：需修改**——**第 3、4 条核心缺陷已修复**（第 3 条「通过，有测试
 表述限制」：夹具已能抓「校验移到写事务外」的变异，但闩锁实际停在底层 `BEGIN` 之前；第 4 条「通过，按事务入口
@@ -227,7 +229,8 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 新增/改写设备测例的执行结果、第 8 条动态判别力、真实 Android 建连取消时序仍未验证。
 
 **结论：本包仍属「待审」——不得交付、不得推送。** 本报告以及第十节的最终门禁只说明「第二轮整改后的提交能构建、
-154 个 JVM 用例与 lint 通过」，**不构成复审通过**；r3 判第 1、2、7、8 条仍有遗漏、第 9 条表述需改，须再整改后再审。
+JVM 用例与 lint 通过」，**不构成复审通过**；r3 判第 1、2、7、8 条仍有遗漏、第 9 条表述需改，须再整改后再审
+（第四次复审 `REVIEW-r4.md` 的裁定见 3.7）。
 
 另外两点如实记：
 
@@ -237,6 +240,41 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
   并进了全量审（`REVIEW.md` 第 5、6、9 条）一起审。
 - 复审第一次尝试（22:11 起跑）撞额度上限、未产出报告；第二次由无人值守任务在 02:07:36–02:15:26
   产出 `REVIEW-r2.md`（13087 字节，结论需修改），现已随 `e6c1d65` 入库。
+
+### 3.7 第四次复审（`REVIEW-r4.md`，审 `5ba4376`）的结论与本次表述更正
+
+**结论（`REVIEW-r4.md` 第 1 行原文要点）**：**需修改**——r3 必修第 3、5 项**已修复**（第 3 项标「通过，测试覆盖
+有限」；第 5 项标「通过，限所述回归」），第 2 项**核心防护已补但页面接线有新回归**（`HearthSpace.kt:457` 只按
+`historyLoading` 禁用发送，失败态下先 `setText("")` 再调用的 `send()` 直接返回 → 静默丢输入、生产页面没有
+`retryHistory()` 调用点；`historyReady():229` 对 TEST 无条件返回 true，模式切换期间可绕过发送守卫），第 1 项
+**仍未封闭**（`Gateway.kt:145` 锁内检查、锁外 `connect()`，r4 判定新增测例的停点设在 `setDoOutput()`、即新检查
+**之前**，夹具还替真实底层提供了它没有的取消行为），第 4 项**部分修复**（收尾的入口令牌复检已补，但仍无复检
+`stillWanted()`），原第 9 条（表述与证据一致）**部分修复、仍需改**。r4 另指出：归档的冻结检测脚本
+（`evidence/device-tests/scripts/guards.ps1`）赋值 `$pid`（PowerShell 里 `$PID` 是只读自动变量）、`WCHAN` 解析要求
+数字开头、只看到任意 `INSTRUMENTATION_CODE` 就记 `run finished normally`，故 `04f` 不能作为「正常跑完」的证据；
+`04e:46`「前 14 例通过」的写法也不成立。
+
+**真机归档的裁定**：r4 认为归档足以支持**特定测例运行结果**（独立解析原文确认导航类 **5/5 通过**、时间线类
+**10/10 通过两轮**，三组带时间戳与去时间戳日志逐行一致；`04b` 的 `total=41`、`lastIndex=22`、`atBottom=false`
+支持第 8 条「首次保存 vs 导航」那一半的判别力；冻结现场与 `Broken pipe` 两种现象应分开），但**不足以支持本轮
+全部整改通过**。r4 同时指出：若合并 **02b 与最终 04c/04d**，可得到跨次运行的 **21 通过／3 失败／1 跳过**，
+仍不是一次完整的全量通过——本报告的 **19／5／1** 应标明是**改稳之前的历史并集**（本版 4.6 已按此更正，
+并把「一次 invocation 跑不完」写成事实）。
+
+**结论：本包仍属「待审」——不得交付、不得推送。** `REVIEW-r4.md` 已随本次提交入库
+（`docs/reviews/2026-10-18-P2-2/REVIEW-r4.md`）。
+
+**本轮（按 r4 意见只改文档）的处置与仍未验证的项**：本次**只改文档**——未跑 Gradle、未联网、未连设备、未 push、
+未改源码，因此 r4 点到的**代码侧**事项（必修 1 的剩余竞态窗口、必修 2 的页面接线回归与 `retryHistory()` 接线、
+必修 4 的 `stillWanted()` 复检、必修 3 的引擎启动边界停止标记）**均未在本轮处理**，仍待整改。表述层面已按 r4
+更正：全量结果的来源（多次 invocation 的并集、有一次全量被脚手架崩溃中断）、模型失败的归因（**原始异常是
+「指定的 Qwen3.5-4B 未登记」**；真机只登记了 `copied:false` 的外置 SAF 模型、私有目录里没有测例要的模型文件，
+`#21` 还停在导入这一步）、当前提交门禁的适用性（见第十节，结论对应跑门禁时的提交）、以及全篇的「都/全部」类总括词。
+
+仍未验证 / 未归档的项（如实保留）：第 8 条「手势协程与状态同键」那一半的变异实验；1500 token 测速的 token 数
+与耗时明细（**无法验证**）；正式版装前装后 `dumpsys package` 原文（**未归档，无法复核**）；2026-10-18 22:35
+四类九例输出（**未归档**）；真实 Android 建连取消延迟、真实本地引擎剩余停止窗口；以及 4.6 里那 5 例失败中
+`#10`/`#21`/`#22` 三例（模型未登记）在该设备上**按现状不可能变绿**——它们不构成本次改动的证据，也不构成本次改动的回归。
 
 ## 四、真机走查
 
@@ -349,13 +387,18 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 被静默丢掉的夹具竞态（ViewModel 刚建出来时 `!historyLoading` 即为 `false`，改用 `awaitOpenCharacter()` 等到
 「人物已打开 + 这一段历史读完」，并用 `sendOrFail()` 把静默失败变成带页面状态的断言）。
 
-**真机结果（原始输出已归档）**：
+**真机结果（原始输出已归档）**：25 例的逐例结论**不是一次 invocation 跑完的结果，而是多次 invocation 的并集**——三次全量都在 `#15` 那一格被 `LocalHttp` 的 `Broken pipe` 把进程带走，另有早期的全量停在第 9 例附近（`01`–`04g`、`hang-record/02`–`10`）。
 
 | 运行 | 结果 | 出处 |
 |---|---|---|
 | 单类复跑 `HearthNavigationDuringTurnDeviceTest` | **OK (5 tests)**，`Time: 22.187`，0 失败 | `01-single-class-…-timed.txt`、`03-timings-single-class.md` |
 | 单类复跑 `HearthTimelineFollowDeviceTest` | **OK (10 tests)**，连跑两次 `Time: 11.234` / `11.278` | `04c`/`04d` |
-| 25 例并集 | **通过 19 / 失败 5 / 跳过 1 / 挂死 0** | `03e-timings-all-25-cases.md`（结果来自 3 次 invocation 的并集） |
+| 全量（一次 invocation） | **跑不完**：`#1`–`#15` 里 `#4` 跳过、`#10` 失败、`#15` 因 `Broken pipe` 进程崩溃，其后用例未运行（`#11` 此时已通过） | `04g-full-suite-after-test-fix-timed.txt`、`04g-…-timings.md` |
+| 分批跑 B（除 `HearthTimelineFollowDeviceTest` 外的 10 个类，15 例） | `Tests run: 15, Failures: 3`（`#10`、`#21`、`#22`） | `02b-remaining-classes.txt`、`03b-timings-split-run-b.md` |
+| 分批跑 C（`HearthTimelineFollowDeviceTest` 剩下 5 例） | **OK (5 tests)** | `02c`、`03c-timings-split-run-c.md` |
+| 25 例并集（跨次汇总，**不是**一次全量） | **通过 19 / 失败 5 / 跳过 1（`#4`，assumption）/ 挂死 0**；另有 **1 次进程崩溃**（`#15`） | `03e-timings-all-25-cases.md` |
+
+并集里那 5 例失败的构成：`#10`、`#21`、`#22` 与真机本地模型有关；`#11` 是测例自身假红（04g 已通过）、`#15` 是进程被 `Broken pipe` 带走。**该并集是 4.6 那一轮（测例改稳之前）的快照**；此后改稳测例的复跑（`04c`/`04d`/`04g`）中 `#11` 已通过。
 
 原挂死用例 `HearthNavigationDuringTurnDeviceTest#aConfirmationTheUserLeftBehindCannotSendOrWriteAnything` 在单类
 复跑与分批跑 B 里都通过（6106/6119ms），断言未放宽。
@@ -369,16 +412,22 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 **仍然存在的限制（如实记）**：
 
 1. **一次 invocation 跑完全部 25 例做不到**：全量跑到当时那一例时，`LocalHttp.serve` 在请求线程里往已关闭的
-   socket 写、非主线程未捕获 `SocketException: Broken pipe` 把进程带走（三次全量都停在第 15 例附近、一次停在
-   第 9 例，`04g` 又在第 15 例）；修它要动 `net` 的 **main** 源集（测试假服务器位于生产源码集，这本身也是 P2-2b
-   方案审已点出的问题），本轮未改。25 例结论由多次 invocation 的**并集**给出，**不是**一次性全量（`hang-record/08`）。
-2. **4 例与真机本地模型有关**：3 例失败——`HearthPromptSpeedDeviceTest#threeRunsWithAnAbout1500TokenPrompt`
-   （第 10 例，10ms 即失败）、`LocalModelDeviceTest#loadStreamStopUnloadWithUserSelectedModel`（第 21 例）、
-   `LongGenerationDeviceTest#generate256Tokens`（第 22 例）——原因是真机只登记了一个 7.4GB 的**外置 SAF** 模型
-   （`copied:false`，`content://…Qwen3.5-9B-…gguf`），应用私有目录里没有模型文件；另 1 例
-   `HearthLocalStopDuringLoadDeviceTest#stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`（第 4 例）为 JUnit
-   assumption **跳过**（`code=-4`）。这 4 例与本次改动无关。**顺带**：第 10 例就是 4.5 那张测速表对应的测例，
-   它在这轮复跑里 10ms 即失败，所以 4.5 **继续标「无法验证」**。
+   socket 写、非主线程未捕获 `SocketException: Broken pipe` 把进程带走（三次全量都停在第 15 例、另有一次停在第 9 例，
+   `04g` 又在第 15 例）；修它要动 `net` 的 **main** 源集（测试假服务器位于生产源码集，这本身也是 P2-2b
+   方案审已点出的问题），本轮未改。25 例结论由多次 invocation 的**并集**给出（分批跑 B + 分批跑 C + 若干次单类复跑 + 一次未跑完的全量），**不是**一次性全量（`hang-record/08`）。
+2. **4 例与真机本地模型有关**（3 例失败 + 1 例跳过；**原始异常都是「模型未登记」，不是「私有目录缺文件」**）：应用在真机上**只登记了一个 7.4GB 的
+   `copied:false` 外置 SAF 模型**（`content://…Qwen3.5-9B-…gguf`），私有目录里没有模型文件；测例要的是**指定的 Qwen3.5-4B-Q4_K_M**，而**登记列表里没有这个模型**。原始记录（`02b-remaining-classes.txt`、`04g-…-timed.txt`）：
+   - `#10 HearthPromptSpeedDeviceTest#threeRunsWithAnAbout1500TokenPrompt`（10ms）：`java.lang.IllegalStateException: Qwen3.5-4B 还没有登记`；
+   - `#22 com.xavierxia.mycelium.localmodels.LongGenerationDeviceTest#generate256Tokens`（15ms）：`java.lang.IllegalStateException: model is not registered`；
+   - `#21 com.xavierxia.mycelium.localmodels.LocalModelDeviceTest#loadStreamStopUnloadWithUserSelectedModel`（586ms）：`java.lang.IllegalStateException: Import the user's Qwen3.5-4B-Q4_K_M.gguf using the system picker first`——它在「导入」这一步就失败，**没走到**后续模型可用性检查；
+   - `#4 HearthLocalStopDuringLoadDeviceTest#stoppingWhileTheLocalModelLoadsNeverStoresAnAnswer`：JUnit assumption **跳过**（`code=-4`），原文 `org.junit.AssumptionViolatedException: 真机上还没有登记过本地模型，先导入一个再跑这一例`，即**登记列表为空**，连上面的模型名都取不到。
+
+   因此**不能**把这 3 例笼统归因成「真机只有外置 SAF 模型、所以加载不了」：**真机拿不出这几例指定的那个模型**——
+   `#10`/`#22` 是登记里找不到指定的 Qwen3.5-4B，`#21` 连导入这一步都没过；而外置 SAF（`copied:false`）本身是
+   实现支持的路径（见 `llm/AndroidModelStore` 的 SAF 打开逻辑）。「私有目录里没有模型文件」只是**登记列表里那条
+   外置 SAF 模型不在私有目录**的意思；**私有目录里到底有没有能用的模型文件，本轮没有独立核实**（未连设备）。
+   **顺带**：`04g` 里 `#1`–`#14` 中的失败只有 `#10`（`#4` 跳过、`#11` 已通过），第 10 例也就是 4.5 那张测速表对应的测例，
+   所以 4.5 **继续标「无法验证」**。这 4 例与本次改动无关。
 3. **复审第 8 条「手势协程与状态同键」那一半仍无变异实验**：2026-10-19 只证明了「首次保存 vs 导航」那一半
    （`04b`），另一半如实标**未验证**。
 4. **2026-10-18 22:35 那一轮四类九例的输出（4.4 的表）仍未归档**，4.4 的耗时只算当时转述；本节归档的是
@@ -399,6 +448,13 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 **本节更正的方法与局限**：本节（含 3.4、3.5、第八、九节与 9.1 的对应改写）是 2026-10-19 **只改文档**的一轮——
 未跑 Gradle、未联网、未连接设备、未 push、未改源码；正文里的结果、文件名、提交号均逐项对照
 `evidence/device-tests/` 的已归档文件与 `git log` 复核，evidence 目录内容一字未动。
+
+**按第四次复审（`REVIEW-r4.md`）的表述更正（本轮，同样只改文档）**：本节 4.6 此前把 25 例写成像是「一次全量跑完」
+的结果，实际是**多次 invocation 的并集**（三次全量都在 `#15` 被 `Broken pipe` 带走、另有一次全量停在第 9 例附近），
+本轮已如实改写并在结果表里补上「全量跑不完」那一行与分批跑 B/C；「4 例与真机本地模型有关」此前按真机只有外置 SAF
+模型归因，本轮改为以**原始异常**为准（**测例要的 Qwen3.5-4B 未登记**；真机上登记的那条是 `copied:false` 的外置
+SAF 模型，与测例指定的不是同一个），逐例引用了 `02b`/`04g` 的异常原文；第十节的门禁适用性、3.5 的一处结论来源也已
+改为与 `git log` 一致。本次**没有**改动 `evidence/` 下任何文件，也没有重跑任何构建或测试。
 
 ## 五、隐私与出网
 
@@ -475,8 +531,13 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 | `b9efc1d` | 复审第 9 条：证据更正与撤回过头表述（docs only） | 本报告 3.3 / 3.4 / 4.5 / 第九节与 9.1、`evidence/` |
 | `e6c1d65` | 复审报告 `REVIEW-r2.md` 入库（docs only），当时本分支 tip | `docs/reviews/2026-10-18-P2-2/REVIEW-r2.md`（13087 字节） |
 | （第二轮整改后·最终门禁） | 全新 worktree detached `c91eaaa`，`check-all.ps1` 与 `check-all.sh` 均通过 | **154 用例 0 失败**、lint 0 error / 0 warning；`p2-2-work/gate-final-ps1.txt`、`gate-final-sh.txt`（第十节） |
-| （第三次复审·已产出） | 等待任务在 2026-10-19 07:06:40（额度重置）后自动执行，审 `758bbf2`、对照 r2 基线 `cb6c2db`，全程只读 | `REVIEW-r3.md`：**结论需修改**——第 3、4 条核心缺陷已修复、第 5、6 条维持通过，第 1、2、7、8 条仍有遗漏，第 9 条表述需改（**该报告已随本次提交入库**，见 3.6） |
-| （判别力证据归档提交·本轮） | 一次性（detached）工作树里复跑第 3、4、7 条的「改坏 → 变红 → 还原」，并为第 2 条另写临时 JVM 复刻件、补上此前缺的失败原文；第 8 条如实记为没有取得证据。**本轮不连设备、不推送、未改源码** | `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`、同目录 `evidence/r3-logs/`（15 个文件）；本报告 3.5 与 9.1 第 5 项 |
+| （第三次复审·已产出） | 等待任务在 2026-10-19 07:06:40（额度重置）后自动执行，审 `758bbf2`、对照 r2 基线 `cb6c2db`，全程只读 | `REVIEW-r3.md`：**结论需修改**——第 3、4 条核心缺陷已修复、第 5、6 条维持通过，第 1、2、7、8 条仍有遗漏，第 9 条表述需改（**该报告已随 `b6dbc6c` 入库**，见 3.6） |
+| `b6dbc6c` | 第三次复审结论与判别力表述按证据分级（docs only），`REVIEW-r3.md` 入库 | `docs/reviews/2026-10-18-P2-2/REVIEW-r3.md`；本报告 3.5、3.6 |
+| （判别力证据归档提交） | 一次性（detached）工作树里复跑第 3、4、7 条的「改坏 → 变红 → 还原」，并为第 2 条另写临时 JVM 复刻件、补上此前缺的失败原文；第 8 条如实记为没有取得证据 | `docs/reviews/2026-10-18-P2-2/evidence/discriminating-experiments.md`、同目录 `evidence/r3-logs/`（15 个文件）；本报告 3.5 与 9.1 第 5 项 |
+| `bce89e8`、`204c7c1` | 设备测例有界化并在真机复跑、跟随类两例稳定化并更正归档归因；只改 `app/src/androidTest` 的 4 个测试文件，实现未改 | `docs/reviews/2026-10-18-P2-2/evidence/device-tests/`（39 个文件，含 `01`–`04g`、`hang-record/`、`scripts/`）；本报告 4.6 |
+| `5ba4376` | 交付报告补真机证据与限制（docs only），第四次复审审的就是这一提交 | 本报告 4.6；`REVIEW-r4.md`（审 `5ba4376`） |
+| （第四次复审·已产出并入库） | 审 `5ba4376`，全程只读、未重跑构建/测试 | `REVIEW-r4.md`：**结论需修改**——必修 3、5 通过；必修 2 核心防护已补但页面接线有新回归；必修 1 仍未封闭；必修 4 部分修复；原第 9 条仍需改表述（**该报告已随本次提交入库**，见 3.7） |
+| （本次更正·本轮） | 按 r4 意见更正交付报告的表述（全量结果来源、模型失败归因、门禁适用性、总括词），并把 r4 结论写入 3.7。**本轮只改文档：不跑 Gradle、不联网、不连设备、不 push、不改源码** | 本报告 3.6、3.7、4.6、第十节；`docs/reviews/2026-10-18-P2-2/REVIEW-r4.md`（入库） |
 
 ## 九、全量审提出的证据缺口与更正（2026-10-18 21:10 审后）
 
@@ -533,12 +594,21 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 ## 十、最终门禁（第二轮整改后，2026-10-19）
 
 在**全新 worktree** 里对**已提交的提交**从零跑两条门禁脚本：工作树
-`D:\Agent\Worktrees\Mycelium-Android\p2-2-final`，detached 在 **`c91eaaa`**（本分支；其后只有一笔文档提交
-`e6c1d65`，故结论对当前 tip 适用），`worktree: clean`。
+`D:\Agent\Worktrees\Mycelium-Android\p2-2-final`，detached 在 **`c91eaaa`**，`worktree: clean`。
+
+**门禁结论的适用性（本节口径）**：本节的 **154 用例 0 失败 / lint 0 error 0 warning / PS1+SH 双绿只对应跑门禁时的
+提交 `c91eaaa`**，不能外推到 `c91eaaa` 及以后。`c91eaaa` 之后本分支又进了**测试改动**（`e6c1d65` 是文档提交，
+`bce89e8` 设备测例有界化、`204c7c1` 跟随类两例稳定化——都只改 `app/src/androidTest`，实现未改），
+然后是**文档提交**（`b6dbc6c`、`5ba4376`，以及本次这一笔）。第四次复审指出：**最近的从零门禁是在 `204c7c1` 上跑
+的（PS1 + SH 双绿、163 用例 0 失败、lint 0/0；用例数由 154 增至 163 是两笔设备测例改动带来的），其后只有文档改动**；
+所以「经过门禁」的**代码/测试状态停在 `204c7c1`**，本报告在它之后只做文档改动。作为口径更正：本节此前那句
+「其后只有一笔文档提交 `e6c1d65`，故结论对当前 tip 适用」**作废**——`204c7c1` 那次的
+原始日志**没有随本报告归档**（`p2-2-work/gate-final-ps1.txt`、`gate-final-sh.txt` 是 `c91eaaa` 那一轮的），
+故其用例数与双绿结论按 **r4 的复核转述**记录，本报告未复核原文（**未归档、无法独立复核**）。
 
 | 项目 | 结果 |
 |---|---|
-| 提交 | `c91eaaafc7c1c72160b0de064e2e3dc56311e565` |
+| 提交 | `c91eaaafc7c1c72160b0de064e2e3dc56311e565`（本表的对数只到这一笔） |
 | llama.cpp | 校验到固定提交 `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f` |
 | Gradle | `--offline`；`test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest`，退出码 **0**，**253 个任务实际执行 / 20 个无需执行** |
 | `scripts/check-all.ps1` 结论行（原文） | `**PASS**: 0 failures, 0 warnings, exit code 0.` |
@@ -548,15 +618,20 @@ vs 导航」那一半改坏后也变红（`device-tests/04b`），「手势协�
 | 产物 | `app-debug.apk`、`app-debug-androidTest.apk` 已签名；`app-release-unsigned.apk` 未签名 |
 | 日志 | `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\gate-final-ps1.txt`、`gate-final-sh.txt`（`.sh` 那条跑在 `.ps1` 之后，多数任务显示 `UP-TO-DATE`，复用同一批结果与产物） |
 
-**口径更正（两条旧说法作废）**：
+**口径更正（三条旧说法作废）**：
 
 1. 此前 3.4 写的 **「JVM 单测 128/128」来自过期产物，作废**。第二轮整改后的真实数字是上表的
    **154 用例 0 失败**（`:hearth` 46、`:net` 15、`:roundtable` 28、`:app` 27、`:contract` 22、`:llm` 13、
    `:model-api` 3）。
 2. 此前「lint 0 error / 0 warning / **1 hint**」的说法**作废**：`HearthSpace.kt` 的 `AutoboxingStateCreation`
    hint 早在提交 **`5314e34`** 就已消掉，最终门禁是 **0 error / 0 warning**。
+3. 此前「`c91eaaa` 以后只有文档变化、故结论对当前 tip 适用」的说法**作废**：`c91eaaa` 之后还有两笔**测试改动**
+   （`bce89e8`、`204c7c1`）。第四次复审给的现状是「门禁跑在 `204c7c1`、PS1+SH 双绿、**163 用例 0 失败**、lint 0/0，
+   其后只有文档改动」；本报告采信该转述并已在上文标明其适用性与「原始日志未归档」。
 
-**这一节能证明什么、不能证明什么**：它证明第二轮整改后的提交**构建、154 个 JVM 用例、lint 与打包**都通过；
+**这一节能证明什么、不能证明什么**：它证明**跑门禁时的那个提交**（`c91eaaa`：154 个 JVM 用例；`204c7c1`：
+163 个 JVM 用例——后者按 r4 转述）**构建、JVM 用例、lint 与打包**通过；
 它**不包含** device/instrumented 测试（两条脚本按任务契约只跑 `assembleDebugAndroidTest`，CI runner 上没有
-设备/模拟器），也**不是复审通过**——第三次复审（`REVIEW-r3.md`）已出结论、判**仍需修改**（第 1、2、7、8 条仍有
-遗漏、第 9 条表述需改），本包仍是「待审」（见 3.6）。
+设备/模拟器），也**不是复审通过**——第三次复审（`REVIEW-r3.md`）判**仍需修改**（第 1、2、7、8 条仍有
+遗漏、第 9 条表述需改），第四次复审（`REVIEW-r4.md`）维持「需修改」并指出页面接线新回归等项，本包仍是
+「待审」（见 3.6、3.7）。
