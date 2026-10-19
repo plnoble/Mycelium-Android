@@ -475,13 +475,15 @@ class HearthNavigationDuringTurnDeviceTest {
         val question = "刷新窗口复验：这一轮先进库 $tag"
         val otherAnswer = "刷新窗口复验：另一段的回答 $tag"
         val thirdAnswer = "刷新窗口复验：第三段的回答 $tag"
+        val firstAnswer = "刷新窗口复验的回答 $tag（第 1 次）"
 
         val calls = AtomicInteger(0)
         val server = LocalHttp {
-            calls.incrementAndGet()
-            // 慢一点回来，测试才有时间在「写库之后、异步刷新期间」动手。
+            val nth = calls.incrementAndGet()
+            // 慢一点回来，测试才有时间在「写库之后、异步刷新期间」动手；每次正文带序号，重做那一轮
+            // 如果真的写回去了，库里就不再是第 1 次的回答。
             Thread.sleep(1_000)
-            HttpReply(200, """{"choices":[{"message":{"content":"刷新窗口复验的回答 $tag"}}]}""")
+            HttpReply(200, """{"choices":[{"message":{"content":"刷新窗口复验的回答 $tag（第 $nth 次）"}}]}""")
         }
         val baseUrl = "http://127.0.0.1:${server.port}"
 
@@ -530,22 +532,28 @@ class HearthNavigationDuringTurnDeviceTest {
             assertTrue("页面应该显示刚打开的那一段", model.state.value.messages.any { it.text.contains(otherAnswer) })
             assertFalse("换过页面之后不该还挂着生成中", model.state.value.busy)
 
-            // 第二轮：重新生成走的是 replaceTurn，同一条「先写库、再异步刷新」的路径。
+            // 第二轮：重新生成走的是 replaceTurn。这次把它的**写事务**停住，再在写事务等待期间导航：
+            // 数据库于是拒写，收尾只能走 NonCancellable 那条路（协程取消挡不住它），也就只有令牌能
+            // 拦住这一轮把旧回答盖到新页面上。停在读上是停不住这条路径的。
             val third = log.append(character.id, null, "刷新窗口复验：第三段 $tag", thirdAnswer, "本机 · 测试", minutesAgo(10))
             model.openConversation(stored.id)
             waitUntil(20_000) { model.state.value.openConversation == stored.id && !model.state.value.historyLoading }
+            hold = gates.hold(HearthStage.Transaction(2))
             model.regenerate()
-            waitUntil(20_000) { model.state.value.busy }
-            hold = gates.hold(HearthStage.Read(MESSAGES_READ))
             hold.await()
 
             model.openConversation(third)
             waitUntil(20_000) { model.state.value.openConversation == third && !model.state.value.historyLoading }
             hold.letGo()
             hold = null
-            Thread.sleep(1_000)
+            Thread.sleep(1_500)
             assertEquals("replaceTurn 的晚到刷新也不该改动页面", third, model.state.value.openConversation)
             assertTrue("页面应该显示第三段", model.state.value.messages.any { it.text.contains(thirdAnswer) })
+            assertEquals(
+                "被写事务拒写的这一轮不许改写库里那一段",
+                firstAnswer,
+                log.messages(stored.id).last().text,
+            )
             assertTrue("重新生成还是应该落在原来那一段里", calls.get() >= 2)
         } finally {
             hold?.letGo()

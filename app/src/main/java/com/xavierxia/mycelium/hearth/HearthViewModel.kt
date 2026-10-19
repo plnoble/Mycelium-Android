@@ -237,12 +237,21 @@ class HearthViewModel @JvmOverloads constructor(
      * send while [HearthState.historyFailed] is true. It takes the page over like any other move, so
      * a turn that was still finishing is refused rather than shown over the history it belongs to.
      */
+    /**
+     * Reads the page's history again after a failed read, and is what the page offers instead of a
+     * send while [HearthState.historyFailed] is true. It takes the page over like any other move: the
+     * new read owns the screen from its first line, the page is usable again straight away, and any
+     * turn that was still finishing is refused by the token instead of being shown over the history
+     * this read is about to put there.
+     */
     fun retryHistory() {
         val current = mutable.value
         val character = current.openCharacter ?: return
         if (current.mode != HearthMode.IMMERSIVE) return
         beginGeneration()
-        mutable.update { it.copy(historyLoading = true, historyFailed = false) }
+        mutable.update {
+            it.copy(historyLoading = true, historyFailed = false, busy = false, streaming = null, streamLabel = null)
+        }
         viewModelScope.launch { loadConversation(character) }
     }
 
@@ -1067,26 +1076,14 @@ class HearthViewModel @JvmOverloads constructor(
         }
         if (cancelled && turn.chosen.isCloud) return
         if (!turn.written.compareAndSet(false, true)) return
-        // Same as finishTurn: the id about to be rewritten must belong to this character's history,
-        // or the write would replace an answer inside somebody else's conversation.
-        val owned = belongsTo(turn.character, turn.conversationId)
-        if (!owned) {
-            healForeignTarget(turn.character, null, token)
-            return
-        }
-        val stored = turn.conversationId?.let { id ->
-            if (
-                withContext(Dispatchers.IO) {
-                    chat.redo(id, answer, turn.chosen.label, now(), turn.mode) { stillCommittable(turn, token) && owned }
-                }
-            ) {
-                id
-            } else {
-                null
-            }
-        }
-        if (stored == null) {
-            // Test mode (or an abandoned turn): replace the answer on screen only.
+        // Two different things used to end in the same "the database gave nothing back" branch: a
+        // test-mode turn, which needs no row at all, and a turn the write transaction refused because
+        // it was already void. They are told apart before anything is put on screen: a test-mode turn
+        // (or one with no conversation of its own) replaces the answer on this screen only, and only
+        // while it is still this turn; a refused write means nothing is written *and* nothing is shown.
+        val target = turn.conversationId?.takeIf { turn.mode != HearthMode.TEST }
+        if (target == null) {
+            if (token != generationToken) return
             if (turn.chosen.isCloud && turn.userStopped) return
             mutable.update { current ->
                 current.copy(
@@ -1098,9 +1095,27 @@ class HearthViewModel @JvmOverloads constructor(
             }
             return
         }
+        // Same as finishTurn: the id about to be rewritten must belong to this character's history,
+        // or the write would replace an answer inside somebody else's conversation.
+        val owned = belongsTo(turn.character, target)
+        if (!owned) {
+            healForeignTarget(turn.character, null, token)
+            return
+        }
+        val stored = withContext(Dispatchers.IO) {
+            chat.redo(target, answer, turn.chosen.label, now(), turn.mode) { stillCommittable(turn, token) && owned }
+        }
+        if (!stored) {
+            // The write transaction refused this row, so this turn is already void: the page moved on
+            // while the write waited. This code also runs under NonCancellable, where cancellation
+            // cannot stop it, so the decision cannot be left to the coroutine machinery — the token is
+            // asked here, in front of the screen. Nothing was written and nothing is shown: replacing
+            // the answer now would put the answer of the page the user left onto the page they are on.
+            return
+        }
         val conversations = withContext(Dispatchers.IO) { log.conversations(turn.character.id) }
         if (token != generationToken) return
-        val messages = withContext(Dispatchers.IO) { log.messages(stored) }
+        val messages = withContext(Dispatchers.IO) { log.messages(target) }
         // Same as finishTurn: this refresh also runs under NonCancellable, so only the token can
         // stop it from writing the old turn's history over the page the user is looking at now.
         if (token != generationToken) return

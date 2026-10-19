@@ -254,6 +254,9 @@ internal class Gate(val stage: Stage) {
 
     internal fun claim(): Boolean = claimed.compareAndSet(false, true)
 
+    /** 不阻塞地问一句：它已经停在闸门上了吗（主线程还要继续推进队列，所以不能直接 await）。 */
+    fun reached(): Boolean = entered.count == 0L
+
     fun await(timeoutMs: Long = 20_000) {
         assertTrue("等待「$stage」停下来超时（${timeoutMs}ms）", entered.await(timeoutMs, TimeUnit.MILLISECONDS))
     }
