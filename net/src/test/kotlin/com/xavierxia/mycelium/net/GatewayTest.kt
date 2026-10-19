@@ -216,8 +216,14 @@ class GatewayTest {
 
     @Test
     fun aCancelledRequestNeverOpensAConnection() {
-        // The switch outlives the connection: cancelling before the gateway is even called must stop
-        // the request there, not after a socket that would have gone out anyway.
+        // Guarantee A, the earliest case: the switch outlives the connection, so cancelling before
+        // the gateway is even called stops the request there, not after a socket that would have gone
+        // out anyway.
+        //
+        // Proves: no connection object is opened at all, and the request ends as a cancellation with
+        // the audit entry its rules require.
+        // Does not prove: anything about a connect that has already been started — no connect is
+        // reached here, so nothing here speaks to whether Android can interrupt one.
         val call = GatewayCall()
         var opened = false
         val gateway = OutboundGateway(
@@ -257,6 +263,13 @@ class GatewayTest {
         // byte has been written. A stop here must still stop the body: the switch, not the handle,
         // is what the writer checks, and `disconnect()` on a connection that never connected does
         // nothing at all.
+        //
+        // Proves: part of guarantee B — not one body byte reaches the peer, and the request ends as a
+        // cancellation. The peer is a real loopback server here, so "zero bytes" is measured, not
+        // asserted on a mock.
+        // Does not prove: that the request stopped *early*. The gateway stops it at its own next
+        // checkpoint; the connection start is never reached, so this says nothing about interrupting
+        // one that has begun.
         val insideOpen = CountDownLatch(1)
         val release = CountDownLatch(1)
         val call = GatewayCall()
@@ -327,11 +340,17 @@ class GatewayTest {
         // here must mean the connection is never started at all. The peer is asserted on the connect
         // attempts it saw, not on the bytes it received: refusing the body after a connection has
         // already been started is exactly what the review found insufficient.
+        //
+        // Proves: guarantee A at the latest point it can be won — the stop takes the same lock the
+        // start decision takes, so the platform call is never invoked. Nothing here depends on the
+        // peer being cooperative: [FrozenPeer] does not read the switch, and it is the gateway's gate
+        // that keeps [FrozenPeer.connects] at zero.
+        // Does not prove: anything about the moment *after* the gate. If the stop loses that race the
+        // connection starts, and this test says nothing about that branch.
         val pausedBeforeStart = CountDownLatch(1)
         val resumeStart = CountDownLatch(1)
         val call = GatewayCall()
         val peer = FrozenPeer(
-            call = call,
             pausedBeforeStart = pausedBeforeStart,
             resumeStart = resumeStart,
         )
@@ -378,10 +397,20 @@ class GatewayTest {
         // there the way the network holds a platform connect. Nothing in this test releases it — the
         // exit time is the worker's own, measured from `cancel()` — so the only thing that can end
         // the connect is the stop's disconnect.
+        //
+        // Proves: the gateway, on a stop, calls `disconnect()` on the connection it registered and
+        // returns promptly, and the peer receives no body byte because the write checkpoints run
+        // before every write. The held connect is released by that disconnect and by nothing else.
+        // Does not prove: that **Android** interrupts a connect in flight. [FrozenPeer] models the
+        // intent of `disconnect()` — its `connect()` returns as soon as it is called — which is an
+        // assumption about the platform, not an observation of it; the real call is ended, if at all,
+        // by the engine closing the socket behind it, and no JVM test can see that. A real device may
+        // take until the connect timeout. This is the residual documented for the review, not a fixed
+        // defect, and this test must not be read as closing it.
         val connectEntered = CountDownLatch(1)
         val exitedAt = AtomicLong(0)
         val call = GatewayCall()
-        val peer = FrozenPeer(call = call, connectEntered = connectEntered, holdConnect = true)
+        val peer = FrozenPeer(connectEntered = connectEntered, holdConnect = true)
         val gateway = OutboundGateway(
             hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
             audit = AuditLog(File(directory, "privacy/audit.json")),
@@ -423,9 +452,13 @@ class GatewayTest {
     fun aRequestThatIsNotStoppedGoesThroughTheSameGateAndDeliversTheWholeBody() {
         // Positive control for the two tests above: the same peer wiring with no stop delivers the
         // body in full, so their zeros are the stop and not a peer that swallows everything.
+        //
+        // Proves: the fixture would report a connect and a full body when nothing stops it, so the
+        // zeroes above are attributable to the stop.
+        // Does not prove: anything about cancellation itself.
         val connectEntered = CountDownLatch(1)
         val call = GatewayCall()
-        val peer = FrozenPeer(call = call, connectEntered = connectEntered)
+        val peer = FrozenPeer(connectEntered = connectEntered)
         val gateway = OutboundGateway(
             hosts = AllowedHosts("https://api.deepseek.com", allowCleartextLocalhost = false),
             audit = AuditLog(File(directory, "privacy/audit.json")),
@@ -448,6 +481,81 @@ class GatewayTest {
         assertTrue(entry.succeeded)
     }
 
+    @Test
+    fun theGatewayAlwaysSetsFiniteTimeoutsOnTheConnectionItUses() {
+        // The fallback that bounds the one window the gateway cannot close. A stop that lands while
+        // the platform call is establishing the connection waits for that call; the connect timeout
+        // is the only thing that ends the wait, and 0 there means "no limit at all" (measured on this
+        // machine: a freshly opened connection reads 0). Both values are pinned here so that going
+        // back to an unbounded connect has to be a deliberate, reviewed change rather than a slip.
+        //
+        // Proves: the values the gateway installs on the real connection, as the socket sees them.
+        // Does not prove: that a real device cancels any faster — a bound is not an interruption.
+        val seen = AtomicReference<HttpURLConnection?>(null)
+        LocalHttp { HttpReply(200, """{"choices":[{"message":{"content":"{}"}}]}""") }.use { server ->
+            val gateway = OutboundGateway(
+                hosts = AllowedHosts("http://127.0.0.1:${server.port}", allowCleartextLocalhost = true),
+                audit = AuditLog(File(directory, "privacy/audit.json")),
+                clock = { "2026-10-18T00:00:00Z" },
+                open = { uri -> openHttp(uri).also { seen.set(it) } },
+            )
+            gateway.send(
+                GatewayRequest(
+                    url = "http://127.0.0.1:${server.port}/chat/completions",
+                    purpose = GatewayPurpose.RoundtableChat,
+                    method = "POST",
+                    body = "{}",
+                ),
+            )
+        }
+        val connection = seen.get()!!
+        assertEquals(GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS, connection.connectTimeout)
+        assertEquals(GatewayRequest.DEFAULT_READ_TIMEOUT_MS, connection.readTimeout)
+        assertTrue(connection.connectTimeout in 1..GatewayRequest.MAX_CONNECT_TIMEOUT_MS, "建连超时必须有界且不超过上限")
+        assertTrue(GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS <= GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
+    }
+
+    @Test
+    fun aTimeoutThatMeansInfiniteOnThePlatformIsReplacedByADeclaredBound() {
+        // 0 and negative values mean "wait forever" to HttpURLConnection, and a forever connect is a
+        // forever wait for a stop that arrived just after the start gate. However a caller fills the
+        // request in, it cannot ask for that; the ceiling keeps the opposite mistake bounded too.
+        //
+        // Proves: what actually reaches the socket for 0, for a negative value and for an absurdly
+        // large one.
+        // Does not prove: anything about cancellation timing.
+        val opened = mutableListOf<HttpURLConnection>()
+        LocalHttp { HttpReply(200, "{}") }.use { server ->
+            val gateway = OutboundGateway(
+                hosts = AllowedHosts("http://127.0.0.1:${server.port}", allowCleartextLocalhost = true),
+                audit = AuditLog(File(directory, "privacy/audit.json")),
+                clock = { "2026-10-18T00:00:00Z" },
+                open = { uri -> openHttp(uri).also { opened += it } },
+            )
+            listOf(0 to 0, -1 to -1, 600_000 to 600_000).forEach { (connect, read) ->
+                gateway.send(
+                    GatewayRequest(
+                        url = "http://127.0.0.1:${server.port}/models",
+                        purpose = GatewayPurpose.FetchModels,
+                        connectTimeoutMs = connect,
+                        readTimeoutMs = read,
+                    ),
+                )
+            }
+        }
+        val effective = opened.map { it.connectTimeout to it.readTimeout }
+        assertEquals(3, effective.size)
+        assertTrue(effective.all { (connect, read) -> connect > 0 && read > 0 }, "无限等待漏到了 socket：$effective")
+        assertEquals(
+            listOf(
+                GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS to GatewayRequest.DEFAULT_READ_TIMEOUT_MS,
+                GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS to GatewayRequest.DEFAULT_READ_TIMEOUT_MS,
+                GatewayRequest.MAX_CONNECT_TIMEOUT_MS to 600_000,
+            ),
+            effective,
+        )
+    }
+
     private fun gateway(base: String, cleartext: Boolean = false) = OutboundGateway(
         hosts = AllowedHosts(base, cleartext),
         audit = AuditLog(File(directory, "privacy/audit.json")),
@@ -457,26 +565,34 @@ class GatewayTest {
 }
 
 /**
- * A controlled stand-in for the service a request talks to. It models the cancellation-relevant
- * behaviour of a real `HttpURLConnection`:
+ * A controlled stand-in for the service a request talks to. It models the parts of a real
+ * `HttpURLConnection` that the gateway's own guarantees rest on, and nothing else:
  *
- *  * `getOutputStream()` starts the connection at its end, exactly like the platform implementation,
- *    so `connect()` is the point at which a request really starts going out;
- *  * `connect()` can be held inside the connect ([holdConnect]) and only `disconnect()` ends it: the
- *    held `connect()` throws at once instead of waiting for a timeout, which is what a real
- *    disconnect does to a connection that is still being established;
- *  * a `connect()` after `disconnect()`, or after the request's own switch, throws at once, so a peer
- *    never reports a connection that a stop already tore down;
+ *  * `getOutputStream()` starts the connection at its end, exactly like the platform
+ *    implementation — measured on this machine for the reference implementation, and the same in
+ *    Android's — so `connect()` is the point at which a request really starts going out.
  *  * [connects] counts connect attempts while [bytes]/[body] count what was received, so a test can
  *    tell "no connection was ever started" apart from "a connection started but no byte went out".
+ *  * [pausedBeforeStart]/[resumeStart] hold the peer just before the connection starts —
+ *    `setDoOutput` runs after the gateway's last checkpoint and before the start gate — which is the
+ *    window a stop must win.
+ *  * [holdConnect] keeps an already started `connect()` inside the call, and only `disconnect()`
+ *    releases it. This is an **assumption about the platform, not a verified fact**: on Android the
+ *    in-flight call ends because `disconnect()` closes the socket behind it, which is possible once
+ *    the engine exists, but nothing in a JVM test can observe that. The fixture models the intent of
+ *    `disconnect()` at whatever moment the test chooses; a real device may arrive at the same
+ *    outcome later, or not before its timeout.
  *
- * [pausedBeforeStart]/[resumeStart] hold the peer just before the connection starts — `setDoOutput`
- * runs after the gateway's last checkpoint and before the start gate — which is the window a stop
- * must win. Nothing here releases a worker on its own: the only way out of [holdConnect] is
- * `disconnect()`.
+ * What this fixture deliberately does **not** model, because the platform does not have it, is any
+ * persistent cancellation state the connection could read. It never asks the request's
+ * [GatewayCall] whether it was cancelled, and it reproduces the platform's no-op: a `disconnect()`
+ * that arrives while nothing has been started does not stop a later `connect()`, which proceeds
+ * normally. That is exactly the residual window the gateway cannot close. So the coverage of "no
+ * connection is started" and "no body byte is written" comes from the gateway's own gate and
+ * checkpoints, not from a cooperative peer — which is why those tests say something about the
+ * gateway and nothing at all about whether Android can interrupt a connect in flight.
  */
 private class FrozenPeer(
-    private val call: GatewayCall? = null,
     private val connectEntered: CountDownLatch = CountDownLatch(0),
     private val holdConnect: Boolean = false,
     private val pausedBeforeStart: CountDownLatch? = null,
@@ -486,10 +602,15 @@ private class FrozenPeer(
     private val interrupted = CountDownLatch(1)
 
     @Volatile
-    private var disconnected = false
-
-    @Volatile
     private var established = false
+
+    /**
+     * True only while `connect()` is inside this fixture. A stop can end a connect only when one has
+     * actually been started — with no engine and no socket yet there is nothing to close, which is
+     * the platform limitation reproduced here.
+     */
+    @Volatile
+    private var connectInFlight = false
 
     @Volatile
     var connects: Int = 0
@@ -537,9 +658,10 @@ private class FrozenPeer(
 
     override fun disconnect() {
         disconnects += 1
-        disconnected = true
-        // This is what ends a connect that is still in progress, exactly as it does for a real one.
-        interrupted.countDown()
+        // Only a connect that is already in progress can be ended by this, the way closing the
+        // socket ends one. Nothing else here remembers the disconnect: the platform's disconnect()
+        // is a no-op while no engine exists, and a later connect() starts normally.
+        if (connectInFlight) interrupted.countDown()
     }
 
     override fun usingProxy(): Boolean = false
@@ -547,12 +669,17 @@ private class FrozenPeer(
     override fun connect() {
         if (established) return
         connects += 1
+        // Set before the test is told the connect was entered, so a stop that arrives the moment the
+        // latch opens still finds the connect in flight.
+        connectInFlight = true
         connectEntered.countDown()
         if (holdConnect) {
-            interrupted.await(5, TimeUnit.SECONDS)
-            throw IOException("连接在建立过程中被取消")
+            val released = interrupted.await(5, TimeUnit.SECONDS)
+            connectInFlight = false
+            if (!released) throw IOException("假对端的建连在等待上限内没有被断开")
+            throw IOException("连接在建立过程中被断开")
         }
-        if (disconnected || call?.isCancelled == true) throw IOException("连接已被取消")
+        connectInFlight = false
         established = true
     }
 }

@@ -29,8 +29,30 @@ data class GatewayRequest(
     val method: String = "GET",
     val headers: Map<String, String> = emptyMap(),
     val body: String? = null,
-    val connectTimeoutMs: Int = 15_000,
-    val readTimeoutMs: Int = 60_000,
+    /**
+     * How long the platform may spend establishing the connection, in milliseconds.
+     *
+     * This is not only a network policy. A stop cannot interrupt a `connect()` that has already
+     * started (see [OutboundGateway]), so this value is also the worst extra wait a stop can inherit
+     * before the request actually ends. [DEFAULT_CONNECT_TIMEOUT_MS] is picked from both sides:
+     * smaller values kill handshakes on slow or congested mobile links, where DNS plus TCP plus TLS
+     * on a bad link regularly exceeds ten seconds, and larger ones leave a stopped request sitting
+     * on a socket that is still being established.
+     *
+     * The platform's own default is 0, which means *no limit at all* — measured on this machine:
+     * `getConnectTimeout()` reads 0 on a freshly opened connection. A non-positive value is
+     * therefore replaced by [DEFAULT_CONNECT_TIMEOUT_MS], and a value above [MAX_CONNECT_TIMEOUT_MS]
+     * is capped there, so the wait a stop can inherit is always finite and bounded whatever a caller
+     * passes.
+     */
+    val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
+    /**
+     * How long one read may block once the connection is up, in milliseconds. 60s covers a
+     * non-streaming chat completion. It does not lengthen cancellation: a stop disconnects the
+     * connection, which is what ends a blocked read at once. A non-positive value means "no limit"
+     * on the platform as well and is replaced by [DEFAULT_READ_TIMEOUT_MS].
+     */
+    val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
     /**
      * The caller asks the audit log to keep only the size of this request, never its text. It only
      * changes what is written down: the service still receives the real body.
@@ -50,7 +72,26 @@ data class GatewayRequest(
      * asks [GatewayCall.isCancelled] at every point where it could still send something.
      */
     val onOpen: ((GatewayCall) -> Unit)? = null,
-)
+) {
+    companion object {
+        /**
+         * The connect timeout every request gets unless it asks for another one. See
+         * [GatewayRequest.connectTimeoutMs] for why it is this value.
+         */
+        const val DEFAULT_CONNECT_TIMEOUT_MS = 15_000
+
+        /**
+         * The ceiling on a caller-supplied connect timeout. A stop that lands while the connection
+         * is being started has to wait out this call, so no single request may ask for a longer
+         * window than this. It is twice the default, which leaves room for a deliberately patient
+         * caller without letting the window grow without bound.
+         */
+        const val MAX_CONNECT_TIMEOUT_MS = 30_000
+
+        /** The read timeout every request gets unless it asks for another one. */
+        const val DEFAULT_READ_TIMEOUT_MS = 60_000
+    }
+}
 
 data class GatewayResponse(
     val status: Int,
@@ -211,6 +252,38 @@ typealias GatewayAbort = GatewayCall
 /**
  * The only place HTTP leaves the app. Callers hand over the body they are willing to have stored;
  * the gateway writes that body into the audit log and never writes request headers.
+ *
+ * ## What a stop does and does not guarantee
+ *
+ * Stated precisely, because the three statements have different strengths and only the first two
+ * are covered by tests ([GatewayTest]):
+ *
+ *  * **Guaranteed: a stop that lands before the connection starts is never overtaken.** The decision
+ *    to stop and the decision to start the connection are one critical section
+ *    ([GatewayCall.startingConnection]), so a stop that gets there first means the platform call
+ *    behind `getOutputStream`, `getResponseCode` and `getInputStream()` is never invoked and no
+ *    socket is opened. Covered by `aCancelledRequestNeverOpensAConnection` and
+ *    `aStopBeforeTheConnectionStartsMeansThePeerNeverSeesAConnect`.
+ *  * **Guaranteed: a stop that lands after the connection has started disconnects it, and no body
+ *    byte is written.** The stop calls `disconnect()` on the registered connection, and every body
+ *    byte passes a checkpoint that reads the stop first: before the stream is acquired, once more
+ *    the moment it exists, and again before every write and every flush ([GatewayCall.bodyStream],
+ *    `StoppedBodyStream`). Covered by `aStopInTheRegistrationWindowNeverWritesTheBody` and
+ *    `aStopWhileTheConnectionIsBeingStartedEndsThatConnectAtOnce`.
+ *  * **Not guaranteed: a stop cannot interrupt a `connect()` that has already begun.** Once that
+ *    platform call is running, only its own return, its own failure or its timeout ends it.
+ *    `HttpURLConnection` offers no hook for it. On Android the connection implementation returns
+ *    immediately from `disconnect()` while no engine exists yet — so a stop inside that window
+ *    closes nothing, and the connection starts anyway — and a thread interrupt does not abort a
+ *    blocking socket connect. A stop that lands between the gate and the running `connect()`
+ *    therefore waits for that call, and [GatewayRequest.connectTimeoutMs] is the only bound on the
+ *    wait. No test claims this branch: a fixture must not be given a cancellation hook the platform
+ *    does not have.
+ *
+ * Holding [GatewayCall]'s lock across the blocking `connect()` was considered and rejected. It would
+ * queue the stop *behind* the very call it wants to end, leaving the socket alive with the stop
+ * already requested until that ROM's connect times out. That is strictly worse than the short wait
+ * this design costs, so the lock is held only for the decision itself.
  */
 class OutboundGateway(
     private val hosts: AllowedHosts,
@@ -273,8 +346,15 @@ class OutboundGateway(
         request.onOpen?.invoke(call)
         return try {
             connection.requestMethod = request.method
+            // Both values are bounded before they reach the platform: 0 means "wait forever" there,
+            // and an unbounded connect is an unbounded wait for a stop that lands mid-connect.
             connection.connectTimeout = request.connectTimeoutMs
+                .takeIf { it > 0 }
+                ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
+                ?: GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS
             connection.readTimeout = request.readTimeoutMs
+                .takeIf { it > 0 }
+                ?: GatewayRequest.DEFAULT_READ_TIMEOUT_MS
             connection.instanceFollowRedirects = false
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             // A stop that landed while the socket was being opened, or while the switch was being
