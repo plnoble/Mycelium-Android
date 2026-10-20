@@ -102,14 +102,32 @@ fi
 cd "$REPO_ROOT" || abort "进不去仓库根目录：$REPO_ROOT"
 info "仓库根目录：$REPO_ROOT"
 
+# 注释行不参与；同一份文件里同一项出现多处赋值就是有歧义，读数的人只能拿到空值，
+# 由调用方按「读不到」中止（失败关闭，建议修改第 1 条）。
+strip_comment_lines() {
+  grep -vE '^[[:space:]]*(//|\*|/\*)' "$1" 2>/dev/null
+}
+
 read_version_name() {
-  grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' "$1" 2>/dev/null |
+  strip_comment_lines "$1" |
+    grep -oE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"' |
     head -1 | sed -e 's/.*"\(.*\)"/\1/'
 }
 
 read_version_code() {
-  grep -oE 'versionCode[[:space:]]*=[[:space:]]*[0-9]+' "$1" 2>/dev/null |
+  strip_comment_lines "$1" |
+    grep -oE 'versionCode[[:space:]]*=[[:space:]]*[0-9]+' |
     head -1 | grep -oE '[0-9]+' | head -1
+}
+
+# 工作树里的当前版本：versionName 与 versionCode 必须**各恰好一处**赋值，否则中止。
+assert_single_version_assignment() {
+  local file="$1" nameCount codeCount
+  [ -f "$file" ] || abort "找不到 $file"
+  nameCount="$(strip_comment_lines "$file" | grep -cE 'versionName[[:space:]]*=[[:space:]]*"[^"]+"')"
+  codeCount="$(strip_comment_lines "$file" | grep -cE 'versionCode[[:space:]]*=[[:space:]]*[0-9]+')"
+  [ "$nameCount" -eq 1 ] || abort "$file 里 versionName 必须恰好一处赋值，实际 $nameCount 处：有歧义就不放行"
+  [ "$codeCount" -eq 1 ] || abort "$file 里 versionCode 必须恰好一处赋值，实际 $codeCount 处：有歧义就不放行"
 }
 
 resolve_apksigner() {
@@ -153,6 +171,7 @@ esac
 info "发布标签：$TAG"
 
 info "检查 1/4：标签与 versionName 一致"
+assert_single_version_assignment "$GRADLE_FILE"
 VERSION_NAME="$(read_version_name "$GRADLE_FILE")"
 if [ -z "$VERSION_NAME" ]; then
   abort "读不到 $GRADLE_FILE 里的 versionName"
@@ -287,15 +306,20 @@ if [ ! -f "$CERT_FILE" ]; then
 fi
 # 只接受**一条**完整合法的指纹（建议修改第 1 条）：注释行不参与比较，出现两个不同的值就中止。
 # 否则文件里留一行注释掉的旧指纹，闸门就会在没人注意的情况下拿它去比对。
-FP_VALUES="$(grep -vE '^[[:space:]]*#' "$CERT_FILE" | grep -oE '[0-9a-fA-F]{64}' | tr 'A-F' 'a-f' | sort -u)"
-FP_COUNT="$(printf '%s\n' "$FP_VALUES" | grep -c .)"
-if [ "$FP_COUNT" -eq 0 ]; then
-  abort "期望指纹文件里没有 64 位十六进制指纹：$CERT_FILE"
+# 指纹文件按「失败关闭」校验（建议修改第 1 条）：去掉注释行与空行之后必须**恰好一行**，
+# 而且**整行**就是 64 位十六进制。65 位、两行相同、多行、夹带别的字符，一律中止。
+FP_LINES="$(grep -vE '^[[:space:]]*(#|$)' "$CERT_FILE" | tr -d '\r')"
+FP_COUNT="$(printf '%s\n' "$FP_LINES" | grep -c .)"
+if [ "$FP_COUNT" -ne 1 ]; then
+  abort "期望指纹文件必须恰好一行有效内容（实际 ${FP_COUNT} 行）：$CERT_FILE"
 fi
-if [ "$FP_COUNT" -gt 1 ]; then
-  abort "期望指纹文件里有 $FP_COUNT 个不同的 64 位指纹（$CERT_FILE）：只接受一条完整合法值，请删掉多余或注释掉的旧值"
+EXPECTED_FP="$(printf '%s\n' "$FP_LINES" | tr 'A-F' 'a-f')"
+case "$EXPECTED_FP" in
+  *[!0-9a-f]*) abort "期望指纹那一行不是纯十六进制：$CERT_FILE" ;;
+esac
+if [ ${#EXPECTED_FP} -ne 64 ]; then
+  abort "期望指纹长度必须是 64 位十六进制（实际 ${#EXPECTED_FP} 位）：$CERT_FILE"
 fi
-EXPECTED_FP="$FP_VALUES"
 
 APKSIGNER_BIN="$(resolve_apksigner)" || APKSIGNER_BIN=""
 if [ -z "$APKSIGNER_BIN" ]; then
