@@ -66,13 +66,13 @@ class UpdatePreferences(context: Context) : InstallSessionState {
      * 落盘的安装会话。没有会话时返回 null；[sessionId] 用 -1 当「没有」的哨兵值
      * （系统给的会话 id 不会是负数）。
      */
-    override fun read(): InstallSessionRecord? {
+    override fun read(): InstallSessionRecord? = synchronized(installSessionLock) {
         val id = prefs.getInt(KEY_SESSION_ID, NO_SESSION)
         if (id == NO_SESSION) return null
         val phase = prefs.getString(KEY_SESSION_PHASE, null)?.let { stored ->
             InstallPhase.entries.firstOrNull { it.name == stored }
         } ?: return null
-        return InstallSessionRecord(
+        InstallSessionRecord(
             sessionId = id,
             tagName = prefs.getString(KEY_SESSION_TAG, null).orEmpty(),
             packageName = prefs.getString(KEY_SESSION_PACKAGE, null).orEmpty(),
@@ -89,7 +89,9 @@ class UpdatePreferences(context: Context) : InstallSessionState {
      * （迟到/重复的回调不作数，C5 第 3 条；阶段不可回退见 M7）。规则与 [MemoryInstallSessionState]
      * 共用 [installSessionAccepts]，整个「读—判断—写」在同一个锁里完成，两个写者不会交错。
      */
-    override fun advance(record: InstallSessionRecord): Boolean {
+    override fun advance(record: InstallSessionRecord): Boolean = synchronized(installSessionLock) {
+        // 读—判断—写必须整段持有**那一把**全进程共用的锁（见 InstallSessionState.kt），
+        // 否则两个写者可以各自读到同一个旧值、再各自写进去，阶段就退回去了。
         if (!installSessionAccepts(read(), record)) return false
         prefs.edit {
             putInt(KEY_SESSION_ID, record.sessionId)
@@ -101,11 +103,11 @@ class UpdatePreferences(context: Context) : InstallSessionState {
             putLong(KEY_SESSION_UPDATED_AT, record.updatedAtMs)
             putLong(KEY_SESSION_TARGET, record.targetVersionCode)
         }
-        return true
+        true
     }
 
     /** 只清 [sessionId] 所属的那一条：别的会话不动（C5「只清理所属会话」）。 */
-    override fun clear(sessionId: Int): Boolean {
+    override fun clear(sessionId: Int): Boolean = synchronized(installSessionLock) {
         if (prefs.getInt(KEY_SESSION_ID, NO_SESSION) != sessionId) return false
         prefs.edit {
             remove(KEY_SESSION_ID)
@@ -117,7 +119,7 @@ class UpdatePreferences(context: Context) : InstallSessionState {
             remove(KEY_SESSION_STATUS)
             remove(KEY_SESSION_UPDATED_AT)
         }
-        return true
+        true
     }
 
     private companion object {
