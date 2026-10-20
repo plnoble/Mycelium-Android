@@ -1,5 +1,7 @@
 # 工作包任务书（知衍安卓版）
 
+> **开发 agent 先看 [CURRENT.md](CURRENT.md)（统一任务书）。** 顺序、统筹的裁定、常驻规则都在那一份里，下面的表只是索引。
+
 - 总计划在 Windows 仓库：`D:\Agent\Project\OMNIX-Mycelium（知衍）\MYCELIUM-双端总计划-2026-09-29.md`
 - 对接说明：[../MYCELIUM_INTEGRATION.md](../MYCELIUM_INTEGRATION.md)
 - 通用规则、交付报告格式、任务书模板、审核指南（`REVIEW-GUIDE.md`）都与 Windows 侧相同，见 Windows 仓库 `docs/work-packages/`。
