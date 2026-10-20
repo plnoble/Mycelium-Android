@@ -43,3 +43,5 @@ Thumbs.db
 llm/vendor/
 *.apk
 
+# Kotlin 构建会话目录（构建会生成，导致 check-public 认为工作区不干净）
+.kotlin/
