@@ -1095,9 +1095,12 @@ private fun AuditCard(entry: AuditEntry) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(entry.at.take(19).replace('T', ' '))
-            // 第 1 步起记的是**每一跳的域名链**；旧记录里 hostPath 默认就是单个 host，显示效果不变。
-            val hosts = entry.hostPath.ifEmpty { listOf(entry.host) }
-            Text("${purposeLabel(entry.purpose)} · ${hosts.joinToString(" → ")} · HTTP ${entry.status ?: "无"} · ${if (entry.succeeded) "成功" else "失败"}")
+            // 第 1 步起记的是**每一跳的域名链**。旧记录只有一个 host 且 hostPath 为空——那种记录
+            // 一定是连上过才写下来的，所以「成功 + 空链」才按旧格式回填；失败且空链表示**一次都没连**，
+            // 这时不能再显示成「联系过这个域名」（M11）。
+            val hosts = if (entry.hostPath.isEmpty() && entry.succeeded) listOf(entry.host) else entry.hostPath
+            val chain = if (hosts.isEmpty()) "未联系任何域名" else hosts.joinToString(" → ")
+            Text("${purposeLabel(entry.purpose)} · $chain · HTTP ${entry.status ?: "无"} · ${if (entry.succeeded) "成功" else "失败"}")
             val usage = if (entry.promptTokens != null || entry.completionTokens != null) {
                 " · token 用量 ${entry.promptTokens ?: 0} 入 / ${entry.completionTokens ?: 0} 出"
             } else {

@@ -150,7 +150,6 @@ internal class HopWalker(
             call.check()
             val connection = gateway.open(uri)
             call.attach(connection)
-            contacted += uri.host.orEmpty()
             try {
                 connection.requestMethod = method
                 connection.connectTimeout = boundedConnectTimeout(connectTimeoutMs)
@@ -172,6 +171,9 @@ internal class HopWalker(
                 // Reaching for the status is what starts the connection on a request without a body,
                 // so it passes the same gate as [GatewayCall.bodyStream].
                 val status = call.startingConnection { connection.responseCode }
+                // 只有拿到状态码才算真的连上过（M11）：建连之前就被取消、或连接根本没建立起来的那些跳，
+                // 不能记进「实际联系」的域名链里，否则审计会把一次没发生的联系写成事实。
+                contacted += uri.host.orEmpty()
                 if (status in 300..399) {
                     // The redirect response itself is never read; only its Location matters.
                     if (followed >= MAX_REDIRECTS) {
@@ -386,6 +388,8 @@ private class MetadataRun(
                         request.call.check()
                         val read = input.read(buffer)
                         if (read < 0) break
+                        // 先记账再判上限：超限/中断时已经读到的字节也要如实记下来（M11）。
+                        received += read
                         if (bytes.size() + read > limitBytes) {
                             throw GatewayRejected("响应超过 $limitBytes 字节的上限")
                         }
@@ -397,7 +401,6 @@ private class MetadataRun(
             } finally {
                 hop.disconnect()
             }
-            received = bytes.size().toLong()
             val response = GatewayResponse(
                 status = hop.status,
                 body = bytes.toString(StandardCharsets.UTF_8),

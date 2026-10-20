@@ -78,8 +78,9 @@ class DownloadCancelGateTest {
             assertNull(entry.status, "一个状态都没取到，不该记状态")
             assertFalse(entry.succeeded)
             assertEquals(0L, entry.receivedBytes)
-            // 连接对象确实登记过（审计因此记得这个域名），但它一次都没连出去。
-            assertEquals(listOf("127.0.0.1"), entry.hostPath)
+            // M11：连接对象确实登记过，但它一次都没连出去 —— 所以审计里**不许**出现这个域名。
+            // 「建连之前就取消」与「已联系」是两件事，前者写成后者就是把没发生的事记成事实。
+            assertEquals(emptyList<String>(), entry.hostPath)
 
             // 夹具自证：连上却一声不吭的真 socket 会记进 accepts、不记进 count。有了这一条，
             // 上面的零才等于「没连」，而不是「连了但没写」被数漏了。
