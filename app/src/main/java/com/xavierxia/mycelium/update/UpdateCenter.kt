@@ -281,6 +281,15 @@ class UpdateCenter(
     fun install() {
         val ready = _state.value.download as? DownloadUiState.Ready ?: return
         if (!installReady) return
+        val release = _state.value.release ?: return
+        // 状态与版本绑定（M5）：Ready 里的文件必须是**当前这个 tag** 的文件。
+        // 候选换过而旧文件还在时，宁可丢掉重下，也不能把旧包按新 tag 交给安装器。
+        if (ready.file != files.finalFile(release.tagName)) {
+            ready.file.delete()
+            prefs.pendingApkPath = null
+            _state.value = _state.value.copy(download = DownloadUiState.Idle)
+            return
+        }
         if (!installer.canRequestPackageInstalls()) {
             _state.value = _state.value.copy(
                 download = DownloadUiState.NeedsUnknownSources(ready.file, ready.size),
@@ -406,23 +415,39 @@ class UpdateCenter(
     private fun applyResult(result: UpdateResult, auto: Boolean) {
         val release = (result as? UpdateResult.Available)?.release
         val shown = release?.takeIf { it.tagName != prefs.ignoredTag }
+        val previous = _state.value
+        val previousTag = previous.release?.tagName
+        // 检查失败**不动**候选：卡片、续传目标与 `.part` 都还属于上一个已知版本（M5）。
+        val failed = result is UpdateResult.Error
         if (shown != null) {
             // C3 第 1 条：候选发布的元数据和目标 tag 一起落盘，进程重建后卡片还能回来。
             prefs.pendingReleaseJson = ReleaseJson.encode(shown)
             prefs.pendingReleaseTag = shown.tagName
-        } else {
+        } else if (!failed) {
             prefs.clearPending()
         }
-        _state.value = _state.value.copy(
+        // 候选换了版本：旧版本的下到一半 / 已就绪状态就地结束，旧文件也不属于任何候选了（M5）。
+        // 不这么做，「已有 v0.5.0 的 Ready 文件、又查到 v0.6.0」会把旧包按新 tag 交给安装器。
+        val switchedFrom = if (shown != null && previousTag != null && shown.tagName != previousTag) previousTag else null
+        if (switchedFrom != null) {
+            downloadCall?.cancel()
+            downloadCall = null
+            downloadGeneration++
+            files.deleteForTag(switchedFrom)
+            prefs.pendingApkPath = null
+        }
+        _state.value = previous.copy(
             checking = false,
-            release = shown,
+            release = if (shown == null && failed) previous.release else shown,
             lastResult = result,
             // 失败不打扰：自动检查不填 error，只有手动检查才给人话。
             error = if (auto) null else (result as? UpdateResult.Error)?.error,
             lastAutoAttemptAtMs = prefs.lastAutoAttemptAtMs,
             lastSuccessAtMs = prefs.lastSuccessAtMs,
             ignoredTag = prefs.ignoredTag,
-            download = if (shown == null) DownloadUiState.Idle else _state.value.download,
+            // 换版本、或候选消失（且不是「检查失败」）→ 下载状态回到 Idle；
+            // 检查失败时保留原状态下（卡片与续传目标都还在）。
+            download = if (switchedFrom != null || (shown == null && !failed)) DownloadUiState.Idle else previous.download,
         )
     }
 
@@ -510,8 +535,8 @@ class UpdateCenter(
         if (sessionState.read()?.phase?.isTerminal == false) return DownloadUiState.Installing
         val path = prefs.pendingApkPath ?: return DownloadUiState.Idle
         val file = File(path)
-        // 重新核对文件存在性：文件不在了就不能再显示「可以安装」。
-        if (candidate == null || !file.isFile) {
+        // 重新核对：文件要在，而且必须**属于这个候选 tag**（M5：进程重建后也不能拿旧包当新版本）。
+        if (candidate == null || !file.isFile || file != files.finalFile(candidate.tagName)) {
             prefs.pendingApkPath = null
             return DownloadUiState.Idle
         }

@@ -253,7 +253,8 @@ class UpdateCenterTest {
 
     @Test
     fun aRestoredDownloadStaysReadyWhileTheFileIsStillThere() {
-        val apk = File(downloadDir, "restored-${System.nanoTime()}.apk")
+        // M5：恢复出来的可安装状态必须**属于候选这个 tag**，所以文件要落在 UpdateFiles 的正式名字上。
+        val apk = File(downloadDir, "mycelium-v0.5.0.apk")
         apk.parentFile?.mkdirs()
         apk.writeBytes(ByteArray(48))
         val now = 1_000L
