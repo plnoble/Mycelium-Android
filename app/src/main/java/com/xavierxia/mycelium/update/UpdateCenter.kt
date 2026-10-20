@@ -180,7 +180,6 @@ class UpdateCenter(
             // 等旧任务真的退出再删缓存（M3）：只发取消就删，可能删到它正在写的字节。
             if (stopping != null) scope.launch { stopping.join(); files.deleteForTag(tag) } else files.deleteForTag(tag)
             return
-            _state.value = current.copy(release = null, ignoredTag = tag, download = DownloadUiState.Idle)
         } else {
             _state.value = current.copy(ignoredTag = tag)
         }
