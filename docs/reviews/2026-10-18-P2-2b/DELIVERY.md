@@ -266,11 +266,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 
 统筹 2026-10-20 要求「修完后在全新 worktree 跑 `check-all.ps1`（零失败零警告）+ `check-public.ps1 -Full` 和 `-SelfTest`」。实况如下。
 
-* **跑在哪一个提交**：全新 worktree `D:\Agent\Worktrees\Mycelium-Android\p2-2b-final`，`git worktree add --detach` 定格在 **`d3fa186`**。之后的提交只有 `docs/reviews/2026-10-18-P2-2b/DELIVERY.md`（`git diff --stat d3fa186..HEAD` 实测：1 file changed, 1 insertion, 1 deletion），**代码树与尖端完全一致**，所以下面这份门禁就是尖端的门禁。
+* **跑在哪一个提交**：全新 worktree `D:\Agent\Worktrees\Mycelium-Android\p2-2b-final`，`git worktree add --detach` 定格在 **`d3fa186`**。之后的提交只有 `docs/reviews/2026-10-18-P2-2b/DELIVERY.md`（`git diff --stat d3fa186..HEAD` 实测：只动 `docs/reviews/2026-10-18-P2-2b/DELIVERY.md`，15 insertions / 3 deletions），**代码树与尖端完全一致**，所以下面这份门禁就是尖端的门禁。
 * **llama.cpp 准备**：全新 worktree 里 `llm/vendor/llama.cpp` 是不入库的第三方源码，`prepare-llama.ps1` 在本机离线会去 clone 而失败；这次把主工作区里已备好的那棵（`git rev-parse HEAD` = `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`，与 `CMakeLists.txt` 里钉的提交一致）整棵拷进去，再用 `check-all.ps1 -SkipLlamaPrepare` 跑。
 * **门禁结果：PASS**。`check-all exit=0`；单测 **391 例 / 0 失败 / 0 错误 / 0 跳过**（`:app` 217、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、`:net` 62、`:roundtable` 28）；lint **0 错误 / 0 警告 / 0 hints**（debug 与 release 都 0）；Kotlin 编译错误行 0；warnings to fix 0；三个 APK 都产出（`app-debug.apk` 59.9 MiB signed、`app-debug-androidTest.apk` 2.8 MiB signed、`app-release-unsigned.apk` 38.9 MiB unsigned）。日志：仓库外 `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\final-gate2\check-all.txt`（`.exitcode` 同目录）。
   这条门禁是**冷构建**（新 worktree、原生 CMake 从零配），本机跑了约 1 小时 50 分；期间还并行跑过别的 Gradle 构建抢守护进程，所以比正常慢。
 * **`check-public.ps1 -Full`：退出码 0（PASS）**。读数：被跟踪文件 406（405 扫描、1 个二进制跳过）；基线 `origin/main 3c7074c2b62b2a1f045434673414e6476b5ce977`；已接受清单 **18** 个提交、18 个都在范围内；本地词表未配置；**阻断项 0**（`user-path` 0、`local-denylist` 0）；`findings by scope: HEAD 117, history 185`；`accepted-history hits: 100`（`user-path 24、local-path 76`）；范围外 85 条全部是只列不拦的类别；**302 条只列不拦，交统筹逐条看**。日志：同目录 `check-public-full.txt`。
+* **尖端（`ee46627`）又跑了一遍公共扫描**：`check-public.ps1 -Full` 退出码 0、无阻断项；`findings by scope: HEAD 119, history 187`，`accepted-history hits: 100`、范围外 87 条，**306 条只列不拦**；`-SelfTest` 37/37。日志：`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\public-tip-full.txt` 与 `public-tip-selftest.txt`。
 * **`check-public.ps1 -SelfTest`：37 项全过**（`check-public: self test: 37 checks, 37 passed, 0 failed`），含第三轮新加的 `utf16-mixed-endianness-fails`。日志：同目录 `check-public-selftest.txt`。
 * **与第五节的关系**：第五节的读数（被跟踪 390、范围 178 个提交、2 条 `user-path` 阻断）取自 `0bb81f9` 那次；按当前尖端重跑，同一脚本**退出码 0、无阻断项**——差别来自两点：清单从 13 个补到 18 个（用户 2026-10-20 裁定），以及 M9 之后 16 位文本按 LE/BE 都解码、多扫出内容。**以第十一节这份为准**。
 
