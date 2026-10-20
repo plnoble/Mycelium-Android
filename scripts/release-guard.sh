@@ -228,6 +228,12 @@ consider_tag() {
   fi
 }
 
+# 浅克隆一律先拒绝（M8）：历史不完整时「没找到更高的标签」并不等于「没有更高的版本」，
+# 拿它当通过就是失败开放。必须在计算上界**之前**拒绝，而不是等发现上界为空才警告。
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  abort "当前是浅克隆（历史不完整），无法确认已发布的 versionCode 上界，因此不能放行；CI 要 actions/checkout 的 fetch-depth: 0 并 git fetch --tags --force，本地先 git fetch --unshallow"
+fi
+
 if [ -n "$PREV_TAG" ]; then
   # --previous-tag is an explicit local-demo override (CI rejects the override switches), so the
   # comparison follows it directly.
@@ -243,12 +249,14 @@ else
   for candidate in $CANDIDATE_TAGS; do
     consider_tag "$candidate"
   done
+  # 任何一个正式标签的 versionCode 读不出都要中止（M8）：只把它记进 UNREADABLE_TAGS 再继续，
+  # 等于把「有一个更高的发布版本我读不出来」当成「没有更高的版本」。
+  if [ -n "${UNREADABLE_TAGS# }" ]; then
+    abort "这些正式标签的 versionCode 读不到（${UNREADABLE_TAGS# }）：已发布的上界无法确认，不能放行（补齐标签历史后重试）"
+  fi
 fi
 
 if [ -z "$PREV_CODE" ]; then
-  if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
-    warn "当前是浅克隆：CI 需要 actions/checkout 的 fetch-depth: 0，并且 git fetch --tags --force"
-  fi
   if [ -z "${CANDIDATE_TAGS:-}" ]; then
     abort "找不到任何前序版本标签，无法确认 versionCode 增长；本仓已知基线 $BASELINE_TAG 的 versionCode=$BASELINE_VERSION_CODE，本仓不适用「首个发布」例外，因此不跳过检查（补标签历史，或本地用 --previous-tag 指定）"
   fi
