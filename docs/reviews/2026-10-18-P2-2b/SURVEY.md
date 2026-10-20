@@ -1,3 +1,10 @@
+# 说明（2026-10-20 统筹裁定）
+
+> 本文是开工前的方案稿，部分内容已被否决或改动，**以 docs/UPDATE_ARCHITECTURE.md 与 docs/reviews/2026-10-18-P2-2b/DELIVERY.md 为准**。
+> 文中已否决的接口与退路用删除线标出，读到 ~~…~~ 请不要照它施工。
+
+---
+
 # P2-2b 第 1/3/4/5 步实施勘察（SURVEY）
 
 - 任务书：`docs/work-packages/P2-2b-release-ready.md`（第 1、3、4、5 步）

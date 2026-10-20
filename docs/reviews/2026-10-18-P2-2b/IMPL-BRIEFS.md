@@ -1,3 +1,10 @@
+# 说明（2026-10-20 统筹裁定）
+
+> 本文是开工前的方案稿，部分内容已被否决或改动，**以 docs/UPDATE_ARCHITECTURE.md 与 docs/reviews/2026-10-18-P2-2b/DELIVERY.md 为准**。
+> 文中已否决的接口与退路用删除线标出，读到 ~~…~~ 请不要照它施工。
+
+---
+
 # P2-2b 第 1 / 3 / 4 / 5 步实施简报（IMPL-BRIEFS）
 
 - **用途**：把既定方案细化成「照着做」的施工单。Codex 方案审通过后，实施者按本文件逐节施工，
@@ -806,7 +813,7 @@ Robolectric 层面还可加（SURVEY 已核到影子）：`ShadowPackageInstalle
   「显式 PendingIntent + 动态注册接收器」，三处说法不一致，方案审要一次定死）。理由：显式 Intent 不会撞
   `MutableImplicitPendingIntent`；`FLAG_IMMUTABLE` 在部分版本上拿不到系统填的 extras；清单接收器在进程被回收后
   仍能把结果带回来（动态接收器不能），`exported=false` 不增加攻击面。若真机发现 `FLAG_MUTABLE` 收不到结果，
-  退路是动态接收器 + `FLAG_IMMUTABLE`，而 `onResume` 读 versionCode 仍是权威判定，不会静默失败。
+  ~~退路是动态接收器 + `FLAG_IMMUTABLE`~~（**已否决**：targetSdk ≥ 35 时 immutable 会抛 `IllegalArgumentException`，见 `PackageInstaller.java:2336`）；`onResume` 读 versionCode 仍是权威判定，不会静默失败。
 - **Q9 `commit` 之后用户一直不点安装（会话悬挂）要不要超时清理？**
   建议：**要兜底**。回到前台（`onResume`）读 `longVersionCode`；若还是旧版本且离 `commit` 超过阈值
   （建议 10 分钟）或用户明确放弃，则 `abandonSession()`（或下次进入时先 `getAllSessions()` 清掉自己的会话）
