@@ -215,9 +215,6 @@ esac
 # previous tag exists only on another branch, or after a tag was deleted, that ancestry set is empty
 # while releases did happen -- and a regressed versionCode would slip through. So compare every
 # formal release tag in this repository (the tag being released excluded) and take the highest code.
-BASELINE_TAG="v0.1.1"
-BASELINE_VERSION_CODE=2
-
 version_code_of_tag() {
   local code
   code="$(git show "$1:$GRADLE_FILE" 2>/dev/null | read_version_code -)"
@@ -232,12 +229,9 @@ version_code_of_tag() {
 # is collected into the unreadable list and reported (the gate aborts afterwards).
 consider_tag() {
   local tag="$1" code
-  if code="$(version_code_of_tag "$tag")"; then
-    :
-  elif [ "$tag" = "$BASELINE_TAG" ]; then
-    code="$BASELINE_VERSION_CODE"
-    warn "读不到 $tag 里的 $GRADLE_FILE，改用内置基线 versionCode=$BASELINE_VERSION_CODE（$tag 是已知的正式发布）"
-  else
+  if ! code="$(version_code_of_tag "$tag")"; then
+    # 读不出基线标签也是失败关闭（M8）：没有「退回写死版本号」这条路，
+    # 否则删掉标签或改坏历史就能把版本号回退放过去。
     UNREADABLE_TAGS="$UNREADABLE_TAGS $tag"
     return 0
   fi
@@ -277,7 +271,7 @@ fi
 
 if [ -z "$PREV_CODE" ]; then
   if [ -z "${CANDIDATE_TAGS:-}" ]; then
-    abort "找不到任何前序版本标签，无法确认 versionCode 增长；本仓已知基线 $BASELINE_TAG 的 versionCode=$BASELINE_VERSION_CODE，本仓不适用「首个发布」例外，因此不跳过检查（补标签历史，或本地用 --previous-tag 指定）"
+    abort "找不到任何前序版本标签，无法确认 versionCode 增长；本仓不适用「首个发布」例外，因此不跳过检查（补标签历史，或本地用 --previous-tag 指定）"
   fi
   abort "前序标签的 versionCode 都读不到（${UNREADABLE_TAGS# }），无法确认版本号增长（历史不完整？）"
 fi
