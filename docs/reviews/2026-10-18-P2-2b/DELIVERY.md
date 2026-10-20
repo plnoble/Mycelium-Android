@@ -193,3 +193,4 @@ lint 原文表与警告原文行：
 |---|---|---|---|
 | M9．扫描器漏报 UTF-16、HEAD 里有真实账户名 | **已修** | `0f9d680` | 扫描器先判编码（UTF-8、UTF-16 LE/BE，含无 BOM 的奇偶判定）再判二进制；历史里被 git 当二进制显示的文本改读 blob。`docs/reviews/2026-10-19-P2-2b-wording/check-all.txt` 由 UTF-16 转 UTF-8 并把账户名替换为 `<user>`。自测 30 项全过（新增 UTF-16 LE / BE / 无 BOM / 干净 UTF-16 / 含模式文本的二进制共 5 项）。**修复后 HEAD 0 条阻断**；历史里多出原先被跳过的 3 条命中（`3dc17e1`、`2076456`、`0f9d680` 的删除行），正是那几行 UTF-16 文本。 |
 | M9．已接受清单补充 | **已办** | 随本行 | 按用户 2026-10-20 裁定（理由「用户接受公开，不改写历史」）补入 5 个提交：`3dc17e1`、`2076456`、`0f9d680`、`9763503`、`9e5b830`。前三个是含账户名的证据文件版本与脱敏提交，后两个是 `PLAN-REVIEW.md:185` 那两条历史阻断。 |
+| M1．下载与校验跑在主线程 | **已修** | `c944e0d` | `GatewayApkDownloader`、`LocalApkVerifier` 各加可注入的 `io`（真机 `Dispatchers.IO`），把阻塞的取 `.sha256`、下载、空间检查、改名、读边车、算哈希、读 APK 全部放进 IO 边界；界面状态仍在原线程语义里更新。新增 `UpdateThreadBoundaryTest`：**用真实下载器/校验器** + 记录线程的 transport，断言三处都落在 IO 线程；另有一例在下载卡住期间证明主线程仍能立即干活（不切线程即超时）。`UpdateCenterDownloadTest` 那组测状态机，IO 边界显式换回 `Dispatchers.Unconfined`。151 个 update 单测全过。 |

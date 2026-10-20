@@ -2,6 +2,7 @@ package com.xavierxia.mycelium.update
 
 import android.content.Context
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import com.xavierxia.mycelium.net.GatewayCancelled
 import com.xavierxia.mycelium.net.GatewayHttpError
@@ -53,7 +54,9 @@ class UpdateCenterDownloadTest {
         prefs = prefs,
         clock = clock,
         files = files,
-        downloader = GatewayApkDownloader(files, transport),
+        // 这一组测的是状态机，不是线程边界：IO 边界换回 Unconfined，让 startDownload() 同步跑完。
+        // 「真的在 IO 线程上」由 UpdateThreadBoundaryTest 用真实 dispatcher 记录线程来钉。
+        downloader = GatewayApkDownloader(files, transport, io = Dispatchers.Unconfined),
         verifier = verifier,
         installer = installer,
     )
