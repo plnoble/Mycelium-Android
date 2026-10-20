@@ -151,7 +151,19 @@ lint 原文表与警告原文行：
 
 ## 六、真机环节
 
-**未做，等白天用户在。** 本夜全程没有碰手机：没跑设备测试、没装包、没卸载、没改手机设置；正式版 `com.xavierxia.mycelium` 一次也没有接触。以下全部是留给白天、且**需要先得到用户同意**的事项。
+**2026-10-20 白天做了 A 组，B/C 组仍然没做。** 下面是实况。
+
+**已办（2026-10-20 白天，用户在）**
+
+* **前后核对正式版**：开工前只读核对——正式版 `com.xavierxia.mycelium` = `0.1.1` / versionCode `2`，`lastUpdateTime 2026-10-10 05:23:04`。**收尾那次核对还没做**：手机现在与电脑断开（`adb devices` 为空），等手机接回来再核一次。
+* **A.2 升级保数据（按统筹 2026-10-20 的要求如实写）**：卸掉旧调试包（`0.3.0`/4，用户已同意）→ 装仓库外的 `v011-baseline-debug.apk`（`0.1.1`/2，截图 `dev1.png`）→ **覆盖安装** P2-2b 调试包（`0.4.0`/5）→ 能打开，`files/profileInstalled` 仍在。**但 v0.1.1 是阶段 0 外壳、没有业务数据，所以这条只能证明「数据目录不被清空」，真正的业务数据保留要等 0.4.0 → 0.4.1 升级时再验。**
+* **A.3 模型登记与测例**：用户登记了 `Qwen3.5-4B-Q4_K_M.gguf`。第一次全量 28 例有 5 例失败（3 例「模型没登记」+ 2 例 Compose 20 秒超时）；登记后重跑那 5 个类 → **OK（18 例）**。
+* **全量 28 例一次跑完并归档：还没做到。** `gradlew :app:connectedDebugAndroidTest --offline` 因 `com.android.tools.utp:android-test-plugin-host-additional-test-output:32.3.0` 不在离线缓存而解析失败；改用 `:app:assembleDebugAndroidTest --offline` + `adb install -r` + `am instrument -w`（`instrument.txt` 28 例/5 失败、`instrument2.txt` OK 18 例），但最后那份 `instrument-full.txt` 只有 1901 字节，**是被截断的、不作为证据**，需要重跑并可靠归档。
+* **B 组（四步走查、系统确认、未知来源往返、校验失败截图、v2-only 签名、哈希耗时、cacheDir 回收、跳转链域名）全部未做**，原因见下条；C 组（P2-1c 测速与温度 0 的对比）同样未做。
+* **为什么 B 组现在做不了**：手机上装的是**调试包**，而 `MyceliumApp.kt:140` 用 `BuildConfig.APPLICATION_ID.endsWith(".debug")` 判定 `isDebugPackage`，`UpdateCenter.kt:147` 对调试包直接 `return` —— 调试包**根本没有更新入口**（这正是 M1 的 `debugPackageHasNoInstallEntry` 测例断言的设计）。所以真机更新流程只能用「applicationId 不以 `.debug` 结尾」的包走，即 release 变体，而它的 applicationId 与手机上的正式版 `com.xavierxia.mycelium` 冲突（红线：不碰真机正式版）。**走法需要用户/统筹先定**：(A) 临时建一个走查变体（applicationId 如 `…upcheck`、`versionName` 临时设 `0.1.0` 让线上真实 `0.1.1` 变成「有更新」、用本机调试签名，只在本机改、不提交，走完还原）；(B) 用 release 变体覆盖正式版（会替换正式版数据）；(C) 由统筹在发布侧自己验。我按无人在场的保守做法选 **(A) 的推迟**：不动正式版、不改 build 配置，等用户定。
+
+**以下三组仍是留给真机、且需要用户在场的事项（编号沿用原清单）**
+
 
 **A. 前置与共同项**
 
