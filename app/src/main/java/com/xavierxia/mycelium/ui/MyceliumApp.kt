@@ -668,7 +668,7 @@ private fun UpdateCard(
                 } else if (download is DownloadUiState.Ready) {
                     // 下载并校验通过之后才出现的安装入口（第 5 步）。
                     Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
-                } else if (installReady && installable && download !is DownloadUiState.Installing) {
+                } else if (installReady && installable && download !is DownloadUiState.Installing && download !is DownloadUiState.Verifying) {
                     Button(onClick = onDownload) { Text(stringResource(R.string.update_download_install)) }
                 }
                 TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version)) }

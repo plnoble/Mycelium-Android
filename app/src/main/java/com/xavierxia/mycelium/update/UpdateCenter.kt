@@ -119,6 +119,8 @@ class UpdateCenter(
     private val stateLock = Any()
     /** 正在跑的那次下载；取消/重开要等它真正退出再删文件或开始新的（M3）。 */
     private var downloadJob: Job? = null
+    /** 已被取消、可能还在写盘的那个任务：后续的删除与重试必须先等它退出（M3）。 */
+    private var pendingStop: Job? = null
     /** 自动检查的在途闸门：同一时刻只允许一次自动检查（M6）。 */
     private val checkGate = Mutex()
     /** 这次要装的版本号（校验时从包里读出来的，M7）：落盘后供进程重建与「已经装上了」判定使用。 */
@@ -168,13 +170,9 @@ class UpdateCenter(
         if (current.release?.tagName == tag) {
             // 取消在跑的那次任务，并清掉它留下的缓存。cancel() 由网关在下一个分片前看到，
             // 所以这里删文件不会删到正在写的字节；万一删失败，下次下载会重新下完整包。
-            val stopping = downloadJob
-            downloadJob = null
+            val stopping = stopCurrent()
             synchronized(stateLock) {
-                downloadCall?.cancel()
-                downloadCall = null
-                downloadGeneration++
-                _state.value = current.copy(release = null, ignoredTag = tag, download = DownloadUiState.Idle)
+                _state.value = _state.value.copy(release = null, ignoredTag = tag, download = DownloadUiState.Idle)
             }
             prefs.clearPending()
             // 等旧任务真的退出再删缓存（M3）：只发取消就删，可能删到它正在写的字节。
@@ -242,7 +240,13 @@ class UpdateCenter(
         // 缺 .apk 或缺 .sha256 的发布不提供应用内安装（工作包第 2 步）。
         if (release.apkUrl == null || release.sha256Url == null) return
         val call = GatewayCall()
-        val previous = downloadJob
+        // 下载中、校验中不许再次进入（M3）：取消之后状态才回到 Idle，届时才允许重试。
+        val busy = _state.value.download
+        if (busy is DownloadUiState.Running || busy is DownloadUiState.Verifying) return
+        val previous = pendingStop ?: downloadJob
+        if (previous != null) {
+            scope.launch { previous.join() }
+        }
         val generation = synchronized(stateLock) {
             downloadGeneration++
             downloadCall = call
@@ -294,20 +298,31 @@ class UpdateCenter(
 
     /** 点「取消」：立刻停（下载器按 C4 保留 `.part` 以便续传），界面马上回到「没在下」。 */
     fun cancelDownload() {
+        stopCurrent()
+        pendingStop?.let { stopped ->
+            // 等旧任务真正退出，再让「重试/忽略」看到干净的状态（M3）。
+            scope.launch { stopped.join() }
+        }
+    }
+
+    /**
+     * 取消当前任务并**保留它的句柄**：删除文件与重新下载都要先 `join` 这个句柄，
+     * 只发取消就动手会撞上还在写盘的旧任务（M3）。
+     */
+    private fun stopCurrent(): Job? {
         synchronized(stateLock) {
+            val running = downloadJob
             downloadCall?.cancel()
             downloadCall = null
-            // 取消后立刻重下时，上一轮的进度与终态不能再落到界面上（M3）。
             downloadGeneration++
+            downloadJob = null
+            if (running != null) pendingStop = running
             val current = _state.value.download
             if (current is DownloadUiState.Running || current is DownloadUiState.Verifying) {
                 _state.value = _state.value.copy(download = DownloadUiState.Idle)
             }
+            return pendingStop
         }
-        // 旧任务可能还在写：清掉自己的引用，等它真正退出（需要删除/重开的一方再去 join）。
-        val job = downloadJob
-        downloadJob = null
-        if (job != null) scope.launch { job.join() }
     }
 
     /**
@@ -495,11 +510,14 @@ class UpdateCenter(
         // 不这么做，「已有 v0.5.0 的 Ready 文件、又查到 v0.6.0」会把旧包按新 tag 交给安装器。
         val switchedFrom = if (shown != null && previousTag != null && shown.tagName != previousTag) previousTag else null
         if (switchedFrom != null) {
-            downloadCall?.cancel()
-            downloadCall = null
-            downloadGeneration++
-            files.deleteForTag(switchedFrom)
+            // 换 tag 也要先停旧任务、等它退出再删旧包（M3）。
+            val stopping = stopCurrent()
             prefs.pendingApkPath = null
+            if (stopping != null) {
+                scope.launch { stopping.join(); files.deleteForTag(switchedFrom) }
+            } else {
+                files.deleteForTag(switchedFrom)
+            }
         }
         _state.value = previous.copy(
             checking = false,
