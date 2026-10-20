@@ -285,10 +285,17 @@ fi
 if [ ! -f "$CERT_FILE" ]; then
   abort "期望指纹文件不存在：$CERT_FILE"
 fi
-EXPECTED_FP="$(grep -oE '[0-9a-fA-F]{64}' "$CERT_FILE" | head -1 | tr 'A-F' 'a-f')"
-if [ -z "$EXPECTED_FP" ]; then
+# 只接受**一条**完整合法的指纹（建议修改第 1 条）：注释行不参与比较，出现两个不同的值就中止。
+# 否则文件里留一行注释掉的旧指纹，闸门就会在没人注意的情况下拿它去比对。
+FP_VALUES="$(grep -vE '^[[:space:]]*#' "$CERT_FILE" | grep -oE '[0-9a-fA-F]{64}' | tr 'A-F' 'a-f' | sort -u)"
+FP_COUNT="$(printf '%s\n' "$FP_VALUES" | grep -c .)"
+if [ "$FP_COUNT" -eq 0 ]; then
   abort "期望指纹文件里没有 64 位十六进制指纹：$CERT_FILE"
 fi
+if [ "$FP_COUNT" -gt 1 ]; then
+  abort "期望指纹文件里有 $FP_COUNT 个不同的 64 位指纹（$CERT_FILE）：只接受一条完整合法值，请删掉多余或注释掉的旧值"
+fi
+EXPECTED_FP="$FP_VALUES"
 
 APKSIGNER_BIN="$(resolve_apksigner)" || APKSIGNER_BIN=""
 if [ -z "$APKSIGNER_BIN" ]; then

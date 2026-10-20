@@ -27,8 +27,9 @@ import kotlin.concurrent.thread
  *
  * `f74e63e` 把下载的跳转走查（[HopWalker]）换成 [GatewayCall.bodyStream] 与
  * [GatewayCall.startingConnection]，并把超时归一化。这几条测例专门为「改回裸调用」而写：
- * 把其中任一处改回原来的裸 `connection.outputStream` / 裸 `connection.responseCode`，
- * 至少有一条必须变红（实证记录见交付说明）。
+ * 把正文流或状态码这两处**一起**改回裸 `connection.outputStream` / 裸 `connection.responseCode`，
+ * 至少有测例会变红；**只把 `responseCode` 改回裸调用时它们仍然全绿** —— 这一处目前没有独立判别力，
+ * 交付说明里如实记着，不要把它读成「整个下载链的取消都被证明了」。
  *
  * 证到：
  *  * 状态还没取之前就取消 → 假对端**一次连接都没接受**（`LocalHttp.accepts`，不是字节数：
