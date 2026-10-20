@@ -207,3 +207,25 @@ lint 原文表与警告原文行：
 | M13．补有判别力的测试与设备验收 | **部分已办** | 随各项提交 | 已补：`UpdateThreadBoundaryTest`（真实下载器/校验器 + 记录线程，含「主线程不被卡住」）、`UpdateCenterCancelTest`（取消/忽略/同一取消句柄）、`UpdateCenterAutoInstallTest`（自动续装/未授权先说明/空间被吃/校验取消）、`UpdateCenterCandidateBindingTest`（换 tag 清旧包/断网保候选/异 tag 文件不恢复）、`UpdateCenterCheckThrottleTest`（并发只发一次/取消也算试过/手动不受限）、`InstallSessionRecoveryTest`（会话放弃、安装前复查、状态单调）、`CancellablePauseTest`、`UpdateFilesTest` 的空间边界、扫描器自测 36 项（含五类历史形态）。**另补**：`downloadFollowsExactlyFiveRedirects` —— 恰好五跳必须成功（否则「拒绝多于五跳」可以被实现成「拒绝五跳」），并把「六地址」的断言从引用 `MAX_REDIRECTS` 改成字面量 6，限额被改动时不会跟着一起变。**未做（等白天用户在/另行授权）**：真机自动提示→下载→校验→系统确认全链、未知来源返回、成功/取消/校验失败截图、新旧包证书与包名对照、真实数据保留清单。 |
 | 全量门禁（13 项修完之后） | **PASS** | 最终尖端 `06a79b1` 的全新工作树 | `check-all.ps1` 原文：`**PASS**: 0 failures, 0 warnings, exit code 0 (lint hints: 0, informational, not a failure).`；347 个用例 0 失败（app 205 / contract 22 / hearth 46 / llm 13 / model-api 3 / net 58）；3 个 APK 全部产出（release 未签名 38.9 MiB）；warnings to fix 0。日志在仓库外 `p2-2-work\gate-final.txt` + `.exitcode`（0）。`06a79b1` 之后只允许 `DELIVERY.md` 与复审要求的记账提交。 |
 | 第二轮复审（最多三轮） | **未完成：Codex 额度用尽** | — | 三次尝试（09:56、10:01、10:06）都以 `You've hit your usage limit … try again at 11:58 AM` 结束，第三次跑满 539 秒、消耗 162,869 tokens 后仍 0 字节报告；前两次的 `workspace routing discovery timed out` 是同一额度限制下的表象。提示词与启动脚本本身没问题（第一轮同一套跑通过）。**额度 11:58 恢复后重跑**：`run-review-p2-2b-r2.ps1` + `codex-prompt-review-r2.md` 已就位，工作树 `p2-2b-review-r2` 在 `c6fc08c` 且干净。 |
+## 九、第二轮复审（REVIEW-R2.md）处置记录
+
+| 项 | 状态 | 提交 | 说明 |
+|---|---|---|---|
+| 复审报告入库 | 已办 | `8232d96` | `docs/reviews/2026-10-18-P2-2b/REVIEW-R2.md`（原文，账户名/本机路径命中 0） |
+| M3 缺口 | **已修** | `4ee348b`、`3bef3f7`、`60cd24a` | ①`stateLock` + `writeIfCurrent(generation)`：判代次与写状态在同一把锁里，进度、Ready、失败、取消全部走它；②`startDownload` 先 `previous?.join()` 再开始；③`ignore` 与换 tag 的**删除**改成 join 之后执行（旧任务还在写时不许删）；④`UpdateCenterCancelTest` 改成先断言「旧任务还在写时缓存还在」，放行后才断言已删——正好复现「取消刚发出、旧任务还在写」这个时刻。`:app` 205 例全过。 |
+| M1 缺口 | **已修** | `ce41f4c` | 新增 `UpdateRealTransportTest`：真实 `UpdateCenter` + `GatewayApkDownloader` + `LocalApkVerifier` + 本机回环慢服务 + **真实 SHA-256**（无固定返回值）。三例：①网络、读盘、哈希的线程名都不等于主线程；②慢下载中 `cancelDownload()` 在 2 秒内返回、状态回 Idle 且 500ms 内不被迟到的进度写回；③取消后回环服务的请求计数不再增长。另有一例直接比对哈希与服务端字节。 |
+| 指纹/版本解析失败关闭 | **已修** | `384dccb` | 指纹：去注释与空行后**必须恰好一行**，整行必须是 64 位十六进制（65 位、两行相同、多行、夹带别的字符一律中止）；版本：`versionName`/`versionCode` 在去注释后**各恰好一处**赋值，零处或多处中止。四条正反例已用真实 `release-guard.sh` 实测（两行相同→中止；65 位→中止；一行有效+注释→放行到 apk 检查；版本两处→中止；注释掉的一处→忽略）。 |
+| C0 文档 | **已办** | `1b80399` | `PLAN.md`、`SURVEY.md`、`IMPL-BRIEFS.md` 各加前言「本文是开工前的方案稿，部分内容已被否决或改动，以 `docs/UPDATE_ARCHITECTURE.md` 与 `DELIVERY.md` 为准」；`IMPL-BRIEFS.md` 的「动态接收器 + FLAG_IMMUTABLE」退路加删除线并注明否决理由；`UPDATE_ARCHITECTURE.md` 修正 416 语义（盘上字节就是整份内容，直接进哈希）与空间公式（剩余量 + 会话副本 + 余量，不再重复算已占用）。 |
+| 作者邮箱 | **已裁定，不处理** | — | 用户的提交邮箱从 0.1.1 起就已公开，统筹 2026-10-20 裁定这一项不再算问题。 |
+
+### 五类历史自测怎么跑（统筹验收用）
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -SelfTest
+```
+
+期望最后一行 `check-public: self test: 36 checks, 36 passed, 0 failed`。其中与历史形态有关的六例：
+`multi-hunk-history-hit-fails`、`renamed-file-history-hit-fails`、`utf16-binary-history-hit-fails`、
+`merge-history-hit-fails`、`empty-range-does-not-block`，以及接受清单相关的
+`history-hit-outside-list-fails` / `head-hit-fails-even-if-listed`。
+自测会在临时目录里建一次性 git 仓库（多 hunk、重命名、UTF-16、合并、空范围），跑完自动清掉，不动本仓库。
