@@ -398,10 +398,13 @@ class UpdateCenterTest {
         assertEquals("a".repeat(64), downloader.lastExpected)
         assertEquals(1, verifier.verifications)
 
-        val ready = center.state.value.download as? DownloadUiState.Ready
-        assertNotNull(ready)
-        assertEquals(target.path, prefs.pendingApkPath)
+        // M2：校验一过就自动接着装，不再停在 Ready 等第二次点击。
+        // 这个 fake 同步返回 Installed，所以整条链会一路走到「已安装」并清掉候选与文件。
+        assertEquals("校验通过就该自动建会话", 1, installer.installs)
+        assertEquals(target, installer.lastApk)
+        assertNull("装完就清掉待安装路径", prefs.pendingApkPath)
 
+        // 再点一次「安装」也不会重复建会话。
         center.install()
 
         assertEquals(1, installer.installs)

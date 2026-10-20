@@ -154,17 +154,20 @@ class UpdateCenterDownloadTest {
     }
 
     @Test
-    fun aSuccessfulPipelineEndsReadyAndClearsThePartFile() {
+    fun aSuccessfulPipelinePromotesTheFileAndGoesStraightToInstall() {
         val apk = apkWithSidecar(tmp.root, "v0.5.0", "real-apk")
         transport.checksumText = sha256Of(apk)
         transport.payload = "real-apk".toByteArray()
         val files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
-        val center = center(free = Long.MAX_VALUE / 4, files = files)
+        // 真机是「commit 后交给系统确认」，所以用 Committed：文件与待安装路径都要留着等确认。
+        val installer = RecordingInstaller(InstallOutcome.Committed(1))
+        val center = center(free = Long.MAX_VALUE / 4, files = files, installer = installer)
 
         start(center)
 
-        val ready = center.state.value.download as DownloadUiState.Ready
-        assertEquals(files.finalFile("v0.5.0"), ready.file)
+        // M2 之后这里不再停在 Ready：四项校验一过就自己接着装，用户不用再点第二次。
+        assertEquals(1, installer.installs)
+        assertEquals(files.finalFile("v0.5.0"), installer.lastApk)
         assertTrue(files.finalFile("v0.5.0").isFile)
         assertFalse(files.partFile("v0.5.0").exists())
         assertEquals(prefs.pendingApkPath, files.finalFile("v0.5.0").path)

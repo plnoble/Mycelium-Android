@@ -447,6 +447,9 @@ class UpdateCenter(
                 prefs.pendingApkPath = target.path
                 downloadCall = null
                 _state.value = _state.value.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize))
+                // 「下载并安装」是一次点击到底：四项校验一过就接着装，不再要求用户点第二个按钮（M2）。
+                // 没授权「安装未知应用」时 install() 只落到说明页，回前台会接着装；系统确认仍由用户完成。
+                install()
             }
             is VerifyOutcome.Failed -> {
                 // 校验器已经删过一遍；这里再删一次是为了「校验失败绝不留文件」这条口径不依赖调用顺序。
