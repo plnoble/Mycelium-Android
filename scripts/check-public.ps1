@@ -298,10 +298,18 @@ function ConvertFrom-ScanText {
         }
     }
     if ($nul -eq 0) { return [System.Text.Encoding]::UTF8.GetString($Bytes) }
-    # BOM-less UTF-16: every other byte is NUL, and always on the same side.
-    if ($nul -ge [Math]::Max(2, [int]($probe / 8)) -and ($nulAtEven -eq 0 -or $nulAtEven -eq $nul)) {
-        if ($nulAtEven -eq 0) { return [System.Text.Encoding]::Unicode.GetString($Bytes) }
-        return [System.Text.Encoding]::BigEndianUnicode.GetString($Bytes)
+    # No BOM, but plenty of NULs: it is 16-bit text. Do not require every NUL to sit on the same
+    # parity -- Chinese/English mixed text does not guarantee that -- so when the NULs are lopsided
+    # decode the winning endianness alone, and when NULs appear on both sides decode LE and BE and
+    # scan both. Over-reporting is the safe direction for a blocker; missing a leak is not.
+    $floor = [Math]::Max(2, [int]($probe / 8))
+    if ($nul -ge $floor) {
+        # Always decode both endiannesses: parity alone is not a reliable tell (a log whose first
+        # part is UTF-8 shifts every later 16-bit NUL to the other side), and scanning both can only
+        # over-report, never miss.
+        $le = [System.Text.Encoding]::Unicode.GetString($Bytes)
+        $be = [System.Text.Encoding]::BigEndianUnicode.GetString($Bytes)
+        return ($le + "`n" + $be)
     }
     return $null
 }
@@ -523,8 +531,13 @@ function Invoke-SelfTest {
         $utf16Text = $userPathForbid + "\" + "project" + "`n" + $slash + "home" + $slash + $sampleUser + "/work/app.log" + "`n"
         New-SampleBytes "dirty-utf16le/note.txt" ([byte[]](@(0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes($utf16Text)))
         New-SampleBytes "dirty-utf16be/note.txt" ([byte[]](@(0xFE, 0xFF) + [System.Text.Encoding]::BigEndianUnicode.GetBytes($utf16Text)))
-        # The same text without a BOM: recognised by the NUL parity, not by a marker.
+        # The same text without a BOM: recognised by the NUL bytes, not by a marker.
         New-SampleBytes "dirty-utf16le-nobom/note.txt" ([System.Text.Encoding]::Unicode.GetBytes($utf16Text))
+        # Mixed Chinese/English log: a UTF-8 head (odd length) followed by BOM-less UTF-16LE, so the
+        # 16-bit NULs land on the *other* parity than a pure UTF-16 file would put them on (M9).
+        $mixedHead = [System.Text.Encoding]::UTF8.GetBytes([char]0x62A5 + [char]0x9519 + " err" + "`n")
+        $mixedTail = [System.Text.Encoding]::Unicode.GetBytes($utf16Text)
+        New-SampleBytes "dirty-utf16-mixed/note.txt" ([byte[]]($mixedHead + $mixedTail))
         New-SampleBytes "clean-utf16/notes.txt" ([System.Text.Encoding]::Unicode.GetBytes("UTF-16 sample line: clean" + "`n"))
         # A genuinely binary file that happens to contain the pattern text. Its NUL bytes are neither
         # absent nor all on one side of the byte pairs, so it must stay skipped instead of producing
@@ -570,6 +583,7 @@ function Invoke-SelfTest {
             @{ Name = "utf16le-user-name-path-fails"; Dir = "dirty-utf16le"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
             @{ Name = "utf16be-user-name-path-fails"; Dir = "dirty-utf16be"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
             @{ Name = "utf16le-without-bom-fails"; Dir = "dirty-utf16le-nobom"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
+        @{ Name = "utf16-mixed-endianness-fails"; Dir = "dirty-utf16-mixed"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
             @{ Name = "clean-utf16-passes"; Dir = "clean-utf16"; Deny = $false; Expect = 0; Category = ""; Forbid = "" },
             @{ Name = "binary-with-pattern-text-is-skipped"; Dir = "clean-binary"; Deny = $false; Expect = 0; Category = ""; Forbid = "" },
             @{ Name = "tracked-keystore-fails"; Dir = "dirty-name-keystore"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
