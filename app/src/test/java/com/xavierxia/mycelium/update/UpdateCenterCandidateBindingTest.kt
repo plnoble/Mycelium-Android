@@ -119,4 +119,72 @@ class UpdateCenterCandidateBindingTest {
         )
         assertNull("对不上的待安装路径要清掉", prefs.pendingApkPath)
     }
+    /** M5：候选消失（检查成功但不再有更新）也算候选变了。 */
+    @Test
+    fun aCandidateThatDisappearsAlsoDropsTheOldPackageAndItsCache() {
+        val installer = RecordingInstaller(canInstall = false)
+        val store = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
+        val source = SwitchableSource()
+        val center = testCenter(
+            source = source,
+            prefs = prefs,
+            clock = { 100 * 3_600_000L },
+            files = store,
+            downloader = RecordingDownloader(),
+            verifier = RecordingVerifier(),
+            installer = installer,
+        )
+        runBlocking { center.checkIfDue() }
+        center.startDownload()
+        runBlocking { kotlinx.coroutines.delay(300) }
+        val tag = center.state.value.release!!.tagName
+        assertTrue("先得有一个下好的包", store.apkFile(tag).exists())
+
+        source.next = { null } // 上游不再有更新：候选消失
+        runBlocking { center.checkNow() }
+        runBlocking { kotlinx.coroutines.delay(300) }
+
+        assertNull("候选消失后卡片要清掉", center.state.value.release)
+        assertTrue(center.state.value.download is DownloadUiState.Idle)
+        assertFalse("候选消失后旧包也要删掉", store.apkFile(tag).exists())
+    }
+
+    /** M5：上个候选的迟到安装回执不许改这一轮的状态。 */
+    @Test
+    fun aTerminalRecordForAnOlderCandidateIsIgnoredInsteadOfApplied() {
+        val installer = RecordingInstaller(canInstall = false)
+        val state = MemoryInstallSessionState()
+        val store = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
+        val source = SwitchableSource()
+        val center = testCenter(
+            source = source,
+            prefs = prefs,
+            clock = { 100 * 3_600_000L },
+            files = store,
+            downloader = RecordingDownloader(),
+            verifier = RecordingVerifier(),
+            installer = installer,
+            sessionState = state,
+        )
+        runBlocking { center.checkIfDue() } // 当前候选 v0.5.0
+        state.advance(oldRecord(InstallPhase.Created))
+        state.advance(oldRecord(InstallPhase.Succeeded, InstallStatusCode.SUCCESS))
+
+        center.onResume()
+
+        assertEquals("旧候选的回执不许改状态", "v0.5.0", center.state.value.release?.tagName)
+        assertTrue("旧候选的记录要被清掉", state.read() == null)
+    }
+
+    /** 一个**不是**当前候选的旧记录。 */
+    private fun oldRecord(phase: InstallPhase, status: Int = 0) = InstallSessionRecord(
+        sessionId = 7,
+        tagName = "v0.4.9",
+        packageName = "com.xavierxia.mycelium",
+        baselineVersionCode = 4L,
+        phase = phase,
+        statusCode = status,
+        updatedAtMs = 1L,
+        targetVersionCode = 5L,
+    )
 }
