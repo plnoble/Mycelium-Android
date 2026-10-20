@@ -140,9 +140,32 @@ class DownloadGatewayTest {
             }
             assertTrue(rejected.message!!.contains("跳转"), rejected.message!!)
             // Start address plus five hops is six addresses; the sixth redirect response must not
-            // turn into a seventh request.
-            assertEquals(MAX_REDIRECTS + 1, server.count.get())
+            // turn into a seventh request. The number is written out on purpose (M13): comparing
+            // against MAX_REDIRECTS itself would pass even if the limit were silently changed.
+            assertEquals(6, server.count.get())
+            assertEquals(6, MAX_REDIRECTS + 1)
             assertFalse(file.exists())
+        }
+    }
+
+    @Test
+    fun downloadFollowsExactlyFiveRedirects() {
+        // The positive edge next to the negative one: five hops must still succeed, and the file must
+        // be the final body. Without this, "reject more than five" could be implemented as "reject five".
+        val bytes = bodyBytes(2048)
+        LocalHttp { call ->
+            val hop = call.path.removePrefix("/r").toIntOrNull()
+            when {
+                hop == null -> HttpReply(200, bytes)
+                hop < 5 -> HttpReply(302, ByteArray(0), mapOf("Location" to "/r${hop + 1}"))
+                else -> HttpReply(200, bytes)
+            }
+        }.use { server ->
+            val file = target()
+            val result = gateway(policyFor(server)).download(DownloadRequest("http://127.0.0.1:${server.port}/r0", update, file))
+            assertEquals(200, result.status)
+            assertEquals(6, server.count.get(), "首址加五跳一共六个地址")
+            assertArrayEquals(bytes, file.readBytes())
         }
     }
 
