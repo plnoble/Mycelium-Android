@@ -28,7 +28,7 @@ class RedirectCredentialsTest {
     )
 
     private fun gateway() = OutboundGateway(
-        hosts = HostPolicy { uri, _ -> uri.host == "127.0.0.1" || uri.host == "localhost" },
+        hosts = HostPolicy { uri, _ -> uri.host?.lowercase() in setOf("127.0.0.1", "localhost") },
         audit = AuditLog(File(directory, "privacy/audit.json")),
         clock = { "2026-10-21T00:00:00Z" },
         open = ::openHttp,
@@ -45,12 +45,12 @@ class RedirectCredentialsTest {
                 HttpReply(200, "final")
             }
         }
-        return server to { host -> target = "http://$host:${server.port}/final" }
+        return server to { url -> target = url }
     }
 
-    private fun run(gateway: OutboundGateway, port: Int) = gateway.readFollowingRedirects(
+    private fun run(gateway: OutboundGateway, port: Int, host: String = "127.0.0.1") = gateway.readFollowingRedirects(
         GatewayRequest(
-            url = "http://127.0.0.1:$port/start",
+            url = "http://$host:$port/start",
             purpose = GatewayPurpose.Update,
             headers = credentials,
         ),
@@ -61,7 +61,7 @@ class RedirectCredentialsTest {
     fun aRedirectWithinTheSameHostKeepsCredentialHeaders() {
         val (server, aimAt) = redirectServer()
         server.use {
-            aimAt("127.0.0.1")
+            aimAt("http://127.0.0.1:${server.port}/final")
             assertEquals(200, run(gateway(), server.port).status)
 
             val calls = server.calls()
@@ -79,7 +79,7 @@ class RedirectCredentialsTest {
     fun aRedirectToAnotherHostDropsCredentialHeaders() {
         val (server, aimAt) = redirectServer()
         server.use {
-            aimAt("localhost") // 同一台机器、另一个域名
+            aimAt("http://localhost:${server.port}/final") // 同一台机器、另一个域名
             assertEquals(200, run(gateway(), server.port).status)
 
             val calls = server.calls()
@@ -89,6 +89,42 @@ class RedirectCredentialsTest {
             assertNull(calls[1].headers["cookie"], "跨域跳转不许再带 Cookie")
             assertNull(calls[1].headers["proxy-authorization"], "跨域跳转不许再带 Proxy-Authorization")
             assertEquals("keep-me", calls[1].headers["x-trace"], "非凭据的普通头不受影响")
+        }
+    }
+    @Test
+    @Timeout(30)
+    fun aRedirectToTheSameHostOnAnotherPortDropsCredentialHeaders() {
+        // 同一台主机、另一个端口：那是同一主机上的**另一个服务**，凭据不能跟过去（复审要求）。
+        val second = LocalHttp { HttpReply(200, "final") }
+        second.use {
+            val (server, aimAt) = redirectServer()
+            server.use {
+                aimAt("http://127.0.0.1:${second.port}/final")
+                assertEquals(200, run(gateway(), server.port).status)
+
+                assertEquals("Bearer hf_secret_token", server.calls()[0].headers["authorization"])
+                val hopTwo = second.calls().single()
+                assertNull(hopTwo.headers["authorization"], "同主机另一个端口也不许带 Authorization")
+                assertNull(hopTwo.headers["cookie"], "同主机另一个端口也不许带 Cookie")
+                assertEquals("keep-me", hopTwo.headers["x-trace"])
+            }
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    fun aRedirectThatOnlyChangesTheCaseOfTheHostKeepsCredentialHeaders() {
+        val (server, aimAt) = redirectServer()
+        server.use {
+            aimAt("http://LOCALHOST:${server.port}/final")
+            // 起点就叫 localhost，跳转只是把大小写换了一下：同一个域名，凭据要保留。
+            assertEquals(200, run(gateway(), server.port, host = "localhost").status)
+            // JUnit5 的参数顺序：期望值、实际值、说明（说明放最后）。
+            assertEquals(
+                "Bearer hf_secret_token",
+                server.calls()[1].headers["authorization"],
+                "主机名大小写不算换域",
+            )
         }
     }
 }

@@ -131,9 +131,25 @@ internal class HopWalker(
 ) {
     private val contacted = mutableListOf<String>()
 
-    /** 是否为最初请求的那个域名（大小写不敏感）。 */
-    private fun sameHostAsStart(here: URI, start: URI): Boolean =
-        here.host?.equals(start.host, ignoreCase = true) == true
+    /**
+     * 是否与最初那个地址**同源**（复审要求）：协议、主机名（大小写不敏感）与**生效端口**三者都相同。
+     * 只比主机名不够：`https://a:443 -> https://a:8443` 会把凭据发给同一主机上的另一个服务。
+     */
+    private fun sameOriginAsStart(here: URI, start: URI): Boolean =
+        here.scheme.equals(start.scheme, ignoreCase = true) &&
+            here.host?.equals(start.host, ignoreCase = true) == true &&
+            effectivePort(here) == effectivePort(start)
+
+    /** 显式端口优先；没写端口时按协议取默认端口。 */
+    private fun effectivePort(uri: URI): Int = if (uri.port != -1) {
+        uri.port
+    } else {
+        when (uri.scheme?.lowercase()) {
+            "https" -> 443
+            "http" -> 80
+            else -> -1
+        }
+    }
 
     private companion object {
         /** 只该发给最初那个域名的凭据类请求头。 */
@@ -168,7 +184,7 @@ internal class HopWalker(
                 headers.forEach { (name, value) ->
                     // 跨域跳转不带凭据（工作包 1.2 第 3 条）：Authorization / Cookie /
                     // Proxy-Authorization 只发给最初那个域名；跳到别的域名（CDN）就摘掉。
-                    if (sameHostAsStart(uri, start) || name.lowercase() !in CREDENTIAL_HEADERS) {
+                    if (sameOriginAsStart(uri, start) || name.lowercase() !in CREDENTIAL_HEADERS) {
                         connection.setRequestProperty(name, value)
                     }
                 }
