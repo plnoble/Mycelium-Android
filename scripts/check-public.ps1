@@ -753,6 +753,43 @@ function Invoke-SelfTest {
         $headSha = Add-SampleCommit -RepoPath $headRepo -RelativePath "notes/head-only.txt" `
             -Content ($headForbid + "`n") -Message "add head sample"
 
+        # Repository C: four shapes the diff parser used to miss (M10). Each one puts the same bad
+        # shape in a place a naive line-based scan loses: far-apart hunks, a rename, a UTF-16 file that
+        # git calls binary, and a side branch brought in by a merge.
+        $shapeRepo = New-SampleRepo -Name "shape-repo"
+        $shapeForbid = $sampleDrive + ":" + "\" + "Users" + "\" + $sampleUser
+        $bulk = @()
+        for ($i = 0; $i -lt 40; $i++) { $bulk += ("clean line " + $i) }
+        $bulkWithBad = @($bulk[0..9]) + ($shapeForbid + "\" + "hunk.txt") + @($bulk[10..39])
+        Add-SampleCommit -RepoPath $shapeRepo -RelativePath "docs/bulk.txt" `
+            -Content (($bulkWithBad -join "`n") + "`n") -Message "multi-hunk sample" | Out-Null
+        Add-SampleCommit -RepoPath $shapeRepo -RelativePath "docs/old-name.txt" `
+            -Content ("clean rename source" + "`n") -Message "rename source" | Out-Null
+        $renamed = Invoke-GitInRepo -RepoPath $shapeRepo -Arguments @("mv", "docs/old-name.txt", "docs/new-name.txt")
+        if ($renamed.ExitCode -ne 0) { throw "self test: git mv failed" }
+        Save-SampleCommit -RepoPath $shapeRepo -Message "rename only" | Out-Null
+        Add-SampleCommit -RepoPath $shapeRepo -RelativePath "docs/new-name.txt" `
+            -Content ($shapeForbid + "\" + "renamed.txt" + "`n") -Message "rename then edit" | Out-Null
+        $utf16Target = Join-Path $shapeRepo "docs/utf16-log.txt"
+        $utf16Parent = Split-Path -Parent $utf16Target
+        if (!(Test-Path -LiteralPath $utf16Parent)) { New-Item -ItemType Directory -Force -Path $utf16Parent | Out-Null }
+        [System.IO.File]::WriteAllBytes($utf16Target, [byte[]](@(0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes($shapeForbid + "\" + "utf16.txt" + "`n")))
+        Save-SampleCommit -RepoPath $shapeRepo -Message "utf16 sample" | Out-Null
+        $branch = Invoke-GitInRepo -RepoPath $shapeRepo -Arguments @("checkout", "-q", "-b", "side")
+        if ($branch.ExitCode -ne 0) { throw "self test: git checkout -b side failed" }
+        Add-SampleCommit -RepoPath $shapeRepo -RelativePath "docs/merged.txt" `
+            -Content ($shapeForbid + "\" + "merged.txt" + "`n") -Message "side branch adds the bad line" | Out-Null
+        $back = Invoke-GitInRepo -RepoPath $shapeRepo -Arguments @("checkout", "-q", "main")
+        if ($back.ExitCode -ne 0) { throw "self test: git checkout main failed" }
+        $merged = Invoke-GitInRepo -RepoPath $shapeRepo -Arguments @("merge", "--no-ff", "-q", "-m", "merge side", "side")
+        if ($merged.ExitCode -ne 0) { throw "self test: git merge failed" }
+
+        # Repository D: nothing between the baseline and HEAD, so the range is empty and the scan must
+        # say so instead of quietly reporting clean history.
+        $emptyRangeRepo = New-SampleRepo -Name "empty-range-repo"
+        Add-SampleCommit -RepoPath $emptyRangeRepo -RelativePath "notes/clean.txt" `
+            -Content ("nothing sensitive here" + "`n") -Message "clean commit" | Out-Null
+
         $baseSha = (@((Invoke-GitInRepo -RepoPath $historyRepo -Arguments @("rev-parse", "main")).Output) | Select-Object -First 1).Trim()
         $manifestAccepted = New-Manifest -Name "manifest-accepted.txt" -Lines @(
             ($addedSha + "  # 2026-10-19 accepted: the reason lives in this comment"),
@@ -763,6 +800,12 @@ function Invoke-SelfTest {
         $manifestEmpty = New-Manifest -Name "manifest-empty.txt" -Lines @()
         $manifestUnknown = New-Manifest -Name "manifest-unknown.txt" -Lines @("f" * 40)
         $manifestAbsent = Join-Path $selfTestRoot "manifest-absent.txt"
+        # The list is per-repository: a commit id from another repo is refused before the scan runs,
+        # so these two repos need manifests that actually resolve in them.
+        $shapeBase = (@((Invoke-GitInRepo -RepoPath $shapeRepo -Arguments @("rev-list", "--max-parents=0", "HEAD")).Output) | Select-Object -First 1).Trim()
+        $manifestShape = New-Manifest -Name "manifest-shape.txt" -Lines @($shapeBase)
+        $emptyBase = (@((Invoke-GitInRepo -RepoPath $emptyRangeRepo -Arguments @("rev-parse", "main")).Output) | Select-Object -First 1).Trim()
+        $manifestEmptyRange = New-Manifest -Name "manifest-empty-range.txt" -Lines @($emptyBase)
 
         $repoCases = @(
             @{ Name = "accepted-history-hit-is-listed"; Repo = $historyRepo; Manifest = $manifestAccepted; Expect = 0
@@ -778,7 +821,20 @@ function Invoke-SelfTest {
             @{ Name = "empty-accepted-list-fails"; Repo = $historyRepo; Manifest = $manifestEmpty; Expect = 1
                 MustHave = @("holds no commit id"); Forbid = @() },
             @{ Name = "unknown-commit-in-list-fails"; Repo = $historyRepo; Manifest = $manifestUnknown; Expect = 1
-                MustHave = @("is not a commit of this repository"); Forbid = @() }
+                MustHave = @("is not a commit of this repository"); Forbid = @() },
+            @{ Name = "multi-hunk-history-hit-fails"; Repo = $shapeRepo; Manifest = $manifestShape; Expect = 1
+                MustHave = @("[user-path]"); Forbid = @($shapeForbid) },
+            @{ Name = "renamed-file-history-hit-fails"; Repo = $shapeRepo; Manifest = $manifestShape; Expect = 1
+                MustHave = @("new-name.txt"); Forbid = @($shapeForbid) },
+            @{ Name = "utf16-binary-history-hit-fails"; Repo = $shapeRepo; Manifest = $manifestShape; Expect = 1
+                MustHave = @("utf16-log.txt"); Forbid = @($shapeForbid) },
+            @{ Name = "merge-history-hit-fails"; Repo = $shapeRepo; Manifest = $manifestShape; Expect = 1
+                MustHave = @("merged.txt"); Forbid = @($shapeForbid) },
+            # Empty range: the baseline is HEAD, so there is no history to judge and the run must not
+            # block. Only the exit code is asserted here (the note line is printed by the main flow
+            # and is not part of the child log this harness captures).
+            @{ Name = "empty-range-does-not-block"; Repo = $emptyRangeRepo; Manifest = $manifestEmptyRange; Expect = 0
+                MustHave = @(); Forbid = @() }
         )
 
         foreach ($case in $repoCases) {
