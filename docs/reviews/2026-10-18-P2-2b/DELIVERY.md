@@ -287,4 +287,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 * **尖端（`ee46627`）又跑了一遍公共扫描**：`check-public.ps1 -Full` 退出码 0、无阻断项；`findings by scope: HEAD 119, history 187`，`accepted-history hits: 100`、范围外 87 条，**306 条只列不拦**；`-SelfTest` 37/37。日志：`D:\Agent\Worktrees\Mycelium-Android\p2-2-work\public-tip-full.txt` 与 `public-tip-selftest.txt`。
 * **`check-public.ps1 -SelfTest`：37 项全过**（`check-public: self test: 37 checks, 37 passed, 0 failed`），含第三轮新加的 `utf16-mixed-endianness-fails`。日志：同目录 `check-public-selftest.txt`。
 * **与第五节的关系**：第五节的读数（被跟踪 390、范围 178 个提交、2 条 `user-path` 阻断）取自 `0bb81f9` 那次；按当前尖端重跑，同一脚本**退出码 0、无阻断项**——差别来自两点：清单从 13 个补到 18 个（用户 2026-10-20 裁定），以及 M9 之后 16 位文本按 LE/BE 都解码、多扫出内容。**以第十一节这份为准**。
+## 十二、统一任务书 §1.2 / §1.3 处置（2026-10-21）
+
+### §1.2 四处小问题（每处单独提交）
+
+| 项 | 提交 | 做法与判别 |
+|---|---|---|
+| 1. `ignore()` 里 `return` 之后永远执行不到的赋值 | `159ea43` | 删掉那一行（纯死代码，行为不变）。 |
+| 2. `startDownload()` 里多余的 `scope.launch { previous.join() }` | `f0c3a67` | 删掉那一行；`previous` 仍保留给下载任务内部的 `previous?.join()` 用，任务书说的正是「那一条多余的协程」。 |
+| 3. 跨域跳转不带凭据类请求头 | `cb60d33` | `HopWalker` 里按「是否仍是最初那个域名」过滤 `Authorization` / `Cookie` / `Proxy-Authorization`；新增 `RedirectCredentialsTest` 两条（同域保留、跨域去掉）。**把过滤条件改成恒真，跨域那条立刻变红**，判别有据。 |
+| 4. `.gitignore` 加 `.kotlin/` | `3bb765f` | 构建会生成 `.kotlin/`，此前会让 `check-public.ps1` 认为工作区不干净而拒绝运行。 |
+
+### §1.3 装置（已入库，等真机执行）
+
+* `23f7c6e`：`UpdateFlowDeviceTest`——在 androidTest 里注入本机假发布源（`127.0.0.1` 上的假服务，`releases/latest` JSON + 流式 APK + `.sha256`）与「按正式包对待」的检查策略（`isDebugPackage = false`）。三条场景：校验失败、下载中取消、整条装成功（装完断言 versionCode = 6 且数据目录还在），并在四个节点截图。APK 由测试准备脚本生成，**不入库**。
+* `23f7c6e`：`UpdateRealNetworkDeviceTest`——真网关、真网络，下 v0.1.1 的 APK 与 `.sha256`，只下不装；量逐跳域名与耗时、下载耗时、哈希耗时，并读这个 v2-only 包在本机的签名；结果写设备上的 `update-flow/real-network.txt`。
+* `23f7c6e`：`scripts/device/run-device-tests.ps1`（一次 invocation 跑完全部设备测例，原始输出落文件并核对行数与 `OK (n tests)` 结尾）与 `scripts/device/update-flow-prepare.ps1`（编出 versionCode = 6 的走查包并推进应用私有目录）。两个脚本都**不写死本机账户名**（用运行时的 `LOCALAPPDATA`）——第一版写死了，`check-public.ps1` 当场拦下 4 条 `user-path` 阻断项，已重写这两个未推送的提交，账户名没有进入历史。
+
+### 门禁（全新 worktree，已提交的版本）
+
+* 跑在 **`23f7c6e`**；worktree `D:\Agent\Worktrees\Mycelium-Android\p2-2b-gate-3`，脚本先断言它确实是 git 检出（`.git` 存在）再开跑——上一版脚本在第二次运行时 `worktree add` 失败、对着一个**陈旧目录**跑，已被这次修正并弃用那次读数。
+* `check-all.ps1 -SkipLlamaPrepare`：**PASS**，393 例 / 0 失败 / 0 错误 / 0 跳过（`:app` 217、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、`:net` 64、`:roundtable` 28）；lint 0 错误 / 0 警告 / 0 hints；warnings to fix 0。日志：仓库外 `p2-2-work\final-gate4\check-all.txt`。
+* `check-public.ps1 -Full`：**退出码 0（PASS）**，阻断项 0（`user-path` 0）；被跟踪文件 411（410 扫描、1 二进制跳过）；321 条只列不拦。日志同目录 `check-public-full.txt`。
+* `check-public.ps1 -SelfTest`：**退出码 0**（37 项全过）。日志同目录 `check-public-selftest.txt`。
+
+### §1.3 真机结果（待填，手机接上后补）
+
+* §1.3.1 28 例一次跑完的归档：**待跑**。
+* §1.3.2 三条场景与四张截图：**待跑**（「安装」由用户点）。
+* §1.3.3 真实网络读数与签名读取结果：**待跑**。
+* §1.3.4 升级保数据的如实写法已在本文件第六节（v0.1.1 是阶段 0 外壳，只证明数据目录不被清空）。
 
