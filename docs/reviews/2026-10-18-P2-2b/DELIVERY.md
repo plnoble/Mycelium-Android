@@ -224,8 +224,29 @@ lint 原文表与警告原文行：
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -SelfTest
 ```
 
-期望最后一行 `check-public: self test: 36 checks, 36 passed, 0 failed`。其中与历史形态有关的六例：
+期望最后一行 `check-public: self test: 37 checks, 37 passed, 0 failed`（第三轮加了中英混排的 `utf16-mixed-endianness-fails`，已重跑确认）。其中与历史形态有关的六例：
 `multi-hunk-history-hit-fails`、`renamed-file-history-hit-fails`、`utf16-binary-history-hit-fails`、
 `merge-history-hit-fails`、`empty-range-does-not-block`，以及接受清单相关的
 `history-hit-outside-list-fails` / `head-hit-fails-even-if-listed`。
 自测会在临时目录里建一次性 git 仓库（多 hunk、重命名、UTF-16、合并、空范围），跑完自动清掉，不动本仓库。
+## 十、第三轮复审（REVIEW-R3.md）逐条处置记录
+
+统筹 2026-10-20 15:18 裁定：复审到此为止，不再跑第四轮 Codex，余下由统筹代审。下表每条都给出「修复提交 → 证明它的测例 → 真机证据」。
+
+| 复审条目（第三轮） | 修复提交 | 证明它的测例 | 真机证据 |
+|---|---|---|---|
+| M3 等待链：取消后旧任务的句柄要留住；换 tag 也不能立即删旧文件 | `c60c8e9`（`pendingStop`）、`4ee348b`/`3bef3f7`/`60cd24a`（第二轮） | `UpdateCenterWaitChainTest.cancellingAndRetryingImmediatelyWaitsForTheOldTaskToLeave`、`.cancellingAndIgnoringImmediatelyDeletesOnlyAfterTheOldTaskLeaves`、`.aSecondStartWhileVerifyingIsRefused`（事件序列断言 `enter#1,exit#1,enter#2,exit#2`） | 取消→立即重试、取消→立即忽略 各一张（待真机） |
+| M4/M7 从「安装未知应用」授权回来也要走安装前复查（文件长度、目标版本） | `11c09ab` | `PackageInstallFlowTest.startsTheSessionAfterTheUserGrantsUnknownSources`、`.pendingUserActionWithoutTheConfirmIntentIsStillRecorded` | 未知来源往返截图（待真机） |
+| M7 进程重建后恢复的 Ready 不许拿当前文件长度当「已验证」 | `3fbcb58`（`restoredNeedsVerify` → 重算哈希后再装） | `PackageInstallFlowTest.aSessionThatDisappearedWithoutAVersionChangeIsNotCancelled`、`.processDeathAfterSuccessIsRecognisedFromTheStoredCandidate` | 恢复后重校验截图（待真机） |
+| M7 系统的确认界面没拉起来时：处理返回值，前台给「继续安装」入口 | `3fbcb58` | 同上（记录清掉、回到「可以安装」，卡片按钮按 `installReady && installable && 非 Installing/Verifying` 判定） | 「继续安装」入口截图（待真机） |
+| M7 状态锁全进程唯一、安装端与接收端共用；空记录只允许从初始阶段写 | `3fbcb58`（`installSessionLock`）、`dafc249`（空记录规则 + 正反例） | `InstallSessionRecoveryTest.anEmptyStoreOnlyAcceptsTheInitialPhase`（Pending/Succeeded 被拒、Created 通过）、`.aLateCommittedCannotRollBackAPendingRecord`、`.aRepeatedPendingIsRejected`、`.aTerminalRecordIsAbsorbing` | — |
+| M5 候选版本消失也算候选变了；安装结果回来要核对是否当前候选 | `4a004a2`（两条逻辑）、`8071b42`（两例） | `UpdateCenterCandidateBindingTest.aCandidateThatDisappearsAlsoDropsTheOldPackageAndItsCache`、`.aTerminalRecordForAnOlderCandidateIsIgnoredInsteadOfApplied` | — |
+| M8 读不出基线标签就中止，删掉「退回写死版本号」那条路 | `3ef146a` | 无 JVM 测例：用临时仓库跑真实 `release-guard.sh`，反例（基线 tag 里没有 `versionCode`）→ 中止「这些正式标签的 versionCode 读不到」；正例（基线 `versionCode = 2`）→ 检查 3 通过 | — |
+| M9 无 BOM 的 UTF-16 不要求 NUL 同奇偶位置；NUL 比例高时按 LE/BE 都解码再扫 | `dd0d9a3` | `check-public.ps1 -SelfTest`：新增 `utf16-mixed-endianness-fails`（UTF-8 头 + 无 BOM UTF-16LE 尾，中英混排），连同 `utf16le-without-bom-fails`、`utf16be-user-name-path-fails`、`clean-utf16-passes` | — |
+| M11 元数据读到一半失败按已读字节记账；没建立连接的记录落盘后保持空链 | `60b9853` | `AuditByteAccountingTest.aHalfReadMetadataBodyIsRecordedWithTheBytesThatActuallyArrived`（声明 4096、实发 100 → 台账记 100）、`.aRequestThatNeverConnectedKeepsAnEmptyHostChainAfterItIsPersisted` | 台账界面「未联系任何域名」截图（待真机） |
+
+### 按已知问题接受、本包不改
+
+* **M10 历史自测夹具不完全等于五类真实历史形态**：自测里的五个仓库是一次性建出来的近似形态，能挡住「多 hunk / 重命名 / UTF-16 / 合并 / 空范围」这几类漏扫，但不等于真实历史的完整形态。推送前由统筹自己再扫一遍真实历史（`check-public.ps1 -Full`）。
+* **复审建议第 2～4 条**（历史扫描器的进一步加固）留到 0.4.0 之后再做。
+* **作者邮箱**：统筹已裁定不处理。
