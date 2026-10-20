@@ -96,7 +96,12 @@ class AndroidInstallSessionGateway(
     internal fun receiptPendingIntent(sessionId: Int): PendingIntent =
         PendingIntent.getBroadcast(context, sessionId, receiptIntent(sessionId), RECEIPT_FLAGS)
 
-    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome =
+    override suspend fun install(
+        apk: File,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+    ): InstallOutcome =
         withContext(Dispatchers.IO) {
             if (!apk.isFile) return@withContext InstallOutcome.Failed("安装包不见了，请重新下载。")
             val installer = context.packageManager.packageInstaller
@@ -122,14 +127,14 @@ class AndroidInstallSessionGateway(
                 )
             }
             openSession = session
-            record(sessionId, tagName, baselineVersionCode, InstallPhase.Created)
+            record(sessionId, tagName, baselineVersionCode, targetVersionCode, InstallPhase.Created)
 
             try {
                 val handle = SessionHandle(session, receiptPendingIntent(sessionId))
                 copyApkIntoSession(handle, apk)
-                record(sessionId, tagName, baselineVersionCode, InstallPhase.Written)
+                record(sessionId, tagName, baselineVersionCode, targetVersionCode, InstallPhase.Written)
                 handle.commit()
-                record(sessionId, tagName, baselineVersionCode, InstallPhase.Committed)
+                record(sessionId, tagName, baselineVersionCode, targetVersionCode, InstallPhase.Committed)
                 InstallOutcome.Committed(sessionId)
             } catch (error: Exception) {
                 // commit 之前的任何异常：放弃会话、清掉这条记录，给人话（别留半个会话占着磁盘）。
@@ -144,12 +149,27 @@ class AndroidInstallSessionGateway(
         }
 
     override fun cancel() {
-        runCatching { openSession?.abandon() }
-        openSession = null
-        if (currentSessionId != NO_SESSION) {
-            sessionState.clear(currentSessionId)
-            currentSessionId = NO_SESSION
+        // 新进程里没有内存会话对象：按**落盘的 id** 也撤一次，别让一个悬挂的会话继续占着磁盘（M7）。
+        val id = if (currentSessionId != NO_SESSION) {
+            currentSessionId
+        } else {
+            sessionState.read()?.sessionId ?: NO_SESSION
         }
+        runCatching { openSession?.abandon() }
+        if (id != NO_SESSION) {
+            runCatching { context.packageManager.packageInstaller.abandonSession(id) }
+            sessionState.clear(id)
+        }
+        openSession = null
+        currentSessionId = NO_SESSION
+    }
+
+    override fun abandon(sessionId: Int) {
+        // 进程重建后内存里的会话对象已经不存在了，只能凭落盘的 id 让系统撤掉它（M7）。
+        runCatching { context.packageManager.packageInstaller.abandonSession(sessionId) }
+        if (currentSessionId == sessionId) currentSessionId = NO_SESSION
+        runCatching { openSession?.close() }
+        openSession = null
     }
 
     override fun sessionAlive(sessionId: Int): Boolean = runCatching {
@@ -157,7 +177,13 @@ class AndroidInstallSessionGateway(
     }.getOrDefault(false)
 
     /** 每个阶段都落盘：进程随时可能被回收（成功安装必然终结旧进程）。 */
-    private fun record(sessionId: Int, tagName: String, baselineVersionCode: Long, phase: InstallPhase) {
+    private fun record(
+        sessionId: Int,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+        phase: InstallPhase,
+    ) {
         sessionState.advance(
             InstallSessionRecord(
                 sessionId = sessionId,
@@ -166,6 +192,7 @@ class AndroidInstallSessionGateway(
                 baselineVersionCode = baselineVersionCode,
                 phase = phase,
                 updatedAtMs = clock(),
+                targetVersionCode = targetVersionCode,
             ),
         )
     }

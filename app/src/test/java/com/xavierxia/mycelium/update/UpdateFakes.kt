@@ -92,7 +92,7 @@ internal class RecordingDownloader(private val expected: String? = "a".repeat(64
     }
 }
 
-internal class RecordingVerifier(private val outcome: VerifyOutcome = VerifyOutcome.Verified) : ApkVerifier {
+internal class RecordingVerifier(private val outcome: VerifyOutcome = VerifyOutcome.Verified(0L)) : ApkVerifier {
     override val isAvailable: Boolean = true
     var verifications = 0
         private set
@@ -127,21 +127,35 @@ internal class RecordingInstaller(
         private set
     var lastBaseline: Long = 0L
         private set
+    var lastTargetVersionCode: Long = 0L
+        private set
+    var abandons = 0
+        private set
 
     override fun canRequestPackageInstalls(): Boolean = canInstall
 
     override fun unknownSourcesIntent(): Intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
 
-    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome {
+    override suspend fun install(
+        apk: File,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+    ): InstallOutcome {
         installs += 1
         lastApk = apk
         lastTag = tagName
         lastBaseline = baselineVersionCode
+        lastTargetVersionCode = targetVersionCode
         return outcome
     }
 
     override fun cancel() {
         cancels += 1
+    }
+
+    override fun abandon(sessionId: Int) {
+        abandons += 1
     }
 
     override fun sessionAlive(sessionId: Int): Boolean = alive

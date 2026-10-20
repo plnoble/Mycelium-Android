@@ -90,7 +90,8 @@ class ApkVerifierTest {
 
         val outcome = runBlocking { verifier(factsOf(versionCode = 5L)).verify(apk, release) }
 
-        assertEquals(VerifyOutcome.Verified, outcome)
+        // M7 起 Verified 带包里读出来的版本号：它要随会话落盘，安装前用来复查。
+        assertEquals(VerifyOutcome.Verified(5L), outcome)
         assertTrue(apk.isFile)
     }
 

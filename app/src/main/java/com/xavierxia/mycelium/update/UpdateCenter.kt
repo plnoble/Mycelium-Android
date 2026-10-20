@@ -116,6 +116,8 @@ class UpdateCenter(
     private var downloadGeneration = 0L
     /** 自动检查的在途闸门：同一时刻只允许一次自动检查（M6）。 */
     private val checkGate = Mutex()
+    /** 这次要装的版本号（校验时从包里读出来的，M7）：落盘后供进程重建与「已经装上了」判定使用。 */
+    private var targetVersionCode = 0L
 
     init {
         restore()
@@ -303,6 +305,16 @@ class UpdateCenter(
             _state.value = _state.value.copy(download = DownloadUiState.Idle)
             return
         }
+        // 安装前复查（M7）：文件还在、长度与校验时一致；这一版要是已经装上了，就不必再建会话。
+        if (!ready.file.isFile || ready.file.length() != ready.size) {
+            prefs.pendingApkPath = null
+            failInstall("安装包不见了或已经损坏，请重新下载。")
+            return
+        }
+        if (targetVersionCode > 0 && installedVersionCode() >= targetVersionCode) {
+            finishInstalled(release.tagName)
+            return
+        }
         if (!installer.canRequestPackageInstalls()) {
             _state.value = _state.value.copy(
                 download = DownloadUiState.NeedsUnknownSources(ready.file, ready.size),
@@ -342,7 +354,7 @@ class UpdateCenter(
         _state.value = _state.value.copy(download = DownloadUiState.Installing, installNotice = null)
         val baseline = installedVersionCode()
         scope.launch {
-            when (val outcome = installer.install(ready.file, release.tagName, baseline)) {
+            when (val outcome = installer.install(ready.file, release.tagName, baseline, targetVersionCode)) {
                 // 同步就确认成功（测例的显式 fake；真机的成功回执走落盘那条路）。
                 is InstallOutcome.Installed -> finishInstalled(release.tagName)
                 is InstallOutcome.Cancelled -> finishCancelledInstall(release.tagName)
@@ -483,6 +495,8 @@ class UpdateCenter(
             is VerifyOutcome.Verified -> {
                 prefs.pendingApkPath = target.path
                 downloadCall = null
+                // 包里读出来的版本号随会话一起落盘：进程重建后靠它判断「这一版是不是已经装了」（M7）。
+                targetVersionCode = verdict.versionCode
                 _state.value = _state.value.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize))
                 // 「下载并安装」是一次点击到底：四项校验一过就接着装，不再要求用户点第二个按钮（M2）。
                 // 没授权「安装未知应用」时 install() 只落到说明页，回前台会接着装；系统确认仍由用户完成。
@@ -515,6 +529,15 @@ class UpdateCenter(
      * 所以这条路径就是「新进程认回成功」。按成功收尾，人话与清理一个不少。
      */
     private fun restore() {
+        // 进程重建：上一个进程留下的会话不可能再被本进程的系统确认界面接上（M7 的简化口径：
+        // 不做跨进程恢复安装）。凭落盘的 sessionId 撤掉它并清记录；文件还在就回到「已下载、待安装」，
+        // 用户从卡片上的「继续安装」重新来一次。
+        val lingering = sessionState.read()
+        if (lingering != null && !lingering.phase.isTerminal) {
+            runCatching { installer.abandon(lingering.sessionId) }
+            sessionState.clear(lingering.sessionId)
+            targetVersionCode = lingering.targetVersionCode
+        }
         // 启动时清一次过期文件（>7 天的 .apk / .part / .sha256）；当前 tag 的 .part 留着续传。
         files.purge(clock(), prefs.pendingReleaseTag)
         val tag = prefs.pendingReleaseTag

@@ -261,7 +261,8 @@ private class WiredDownloader : ApkDownloader {
 private class WiredVerifier : ApkVerifier {
     override val isAvailable: Boolean = true
 
-    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome = VerifyOutcome.Verified
+    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome =
+        VerifyOutcome.Verified(0L)
 }
 
 private class WiredInstaller : InstallSessionGateway {
@@ -271,8 +272,14 @@ private class WiredInstaller : InstallSessionGateway {
 
     override fun unknownSourcesIntent(): Intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES")
 
-    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome =
-        InstallOutcome.Cancelled
+    override suspend fun install(
+        apk: File,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+    ): InstallOutcome = InstallOutcome.Cancelled
 
     override fun cancel() = Unit
+
+    override fun abandon(sessionId: Int) = Unit
 }

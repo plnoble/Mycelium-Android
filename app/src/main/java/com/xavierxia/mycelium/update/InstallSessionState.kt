@@ -36,6 +36,8 @@ data class InstallSessionRecord(
     val phase: InstallPhase,
     val statusCode: Int = 0,
     val updatedAtMs: Long = 0L,
+    /** 这个包里读出来的版本号：进程重建后用它确认「这一版还没装上」（M7）。 */
+    val targetVersionCode: Long = 0L,
 )
 
 /**
@@ -54,22 +56,45 @@ interface InstallSessionState {
     fun clear(sessionId: Int): Boolean
 }
 
-/** 幂等规则只有这一份：内存实现与偏好实现必须一致。 */
-internal fun installSessionAccepts(current: InstallSessionRecord?, next: InstallSessionRecord): Boolean =
-    current == null || (current.sessionId == next.sessionId && !current.phase.isTerminal)
+/**
+ * 幂等**且单调**：会话 id 对不上、当前已经是终态、或新阶段并不比当前更靠后，就拒绝写入。
+ *
+ * 「单调」是 M7 补的：迟到的 `Committed` 不能把已经落盘的 `Pending` 盖回去，终态也永远盖不回
+ * `Pending` —— 否则界面会在「等用户确认」和「正在安装」之间来回跳。
+ */
+internal fun installSessionAccepts(current: InstallSessionRecord?, next: InstallSessionRecord): Boolean {
+    if (current == null) return true
+    if (current.sessionId != next.sessionId) return false
+    if (current.phase.isTerminal) return false
+    return installPhaseRank(next.phase) > installPhaseRank(current.phase)
+}
+
+/** 阶段只能往前走：Created → Written → Committed → Pending → 终态。 */
+internal fun installPhaseRank(phase: InstallPhase): Int = when (phase) {
+    InstallPhase.Created -> 0
+    InstallPhase.Written -> 1
+    InstallPhase.Committed -> 2
+    InstallPhase.Pending -> 3
+    InstallPhase.Succeeded -> 4
+    InstallPhase.Failed -> 5
+    InstallPhase.Cancelled -> 6
+}
 
 /** 进程内实现：测例默认用它，也是「装配时忘了注入偏好存储」时的安全默认。 */
 class MemoryInstallSessionState : InstallSessionState {
     private var record: InstallSessionRecord? = null
 
+    @Synchronized
     override fun read(): InstallSessionRecord? = record
 
+    @Synchronized
     override fun advance(record: InstallSessionRecord): Boolean {
         if (!installSessionAccepts(this.record, record)) return false
         this.record = record
         return true
     }
 
+    @Synchronized
     override fun clear(sessionId: Int): Boolean {
         if (record?.sessionId != sessionId) return false
         record = null

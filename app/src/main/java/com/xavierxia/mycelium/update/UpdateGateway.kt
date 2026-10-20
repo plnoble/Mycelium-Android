@@ -43,7 +43,10 @@ interface ApkDownloader {
 
 /** 四项校验（sha256 → 包名 → 签名 → versionCode，顺序按任务书）的结果。 */
 sealed interface VerifyOutcome {
-    data object Verified : VerifyOutcome
+    /**
+     * 四项都过。[versionCode] 是包里的版本号：它连同会话一起落盘，安装前用来复查「这一版是不是还没装上」（M7）。
+     */
+    data class Verified(val versionCode: Long) : VerifyOutcome
 
     /** 哪一项不对、人话怎么说，由第 4 步的实现给出；界面只认这个类型。 */
     data class Failed(val message: String) : VerifyOutcome
@@ -100,13 +103,24 @@ interface InstallSessionGateway {
     /**
      * 开会话 → 按流写入 → `commit`。只报「有没有把包交给系统」，终态由回执与前台复查认。
      *
-     * [tagName] 与 [baselineVersionCode] 会连同 sessionId 一起落盘：前者用来在结果出来后清那
-     * 一版的文件，后者是「装上了没有」的权威判定基线（C5 第 3 条）。
+     * [tagName]、[baselineVersionCode]、[targetVersionCode] 会连同 sessionId 一起落盘：第一个用来在
+     * 结果出来后清那一版的文件，第二个是「装上了没有」的权威判定基线，第三个用来确认「这一版还没装上」。
      */
-    suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome
+    suspend fun install(
+        apk: File,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+    ): InstallOutcome
 
     /** 用户在界面上放弃：放弃悬挂的会话（`abandon`）并清掉本应用这一条记录。 */
     fun cancel()
+
+    /**
+     * 按**落盘的 sessionId** 放弃一个悬挂的会话。进程重建之后内存里的 `openSession` 早就没了，
+     * 只能凭 id 让系统把会话撤掉（M7）。实现不得依赖内存里的会话对象。
+     */
+    fun abandon(sessionId: Int)
 
     /**
      * 这个会话在系统里还活着吗。会话没了而版本又没变，只能判「待核实」，
@@ -147,10 +161,16 @@ object UnwiredInstallSessionGateway : InstallSessionGateway {
 
     override fun unknownSourcesIntent(): Intent = Intent()
 
-    override suspend fun install(apk: File, tagName: String, baselineVersionCode: Long): InstallOutcome =
-        InstallOutcome.Failed(NOT_WIRED)
+    override suspend fun install(
+        apk: File,
+        tagName: String,
+        baselineVersionCode: Long,
+        targetVersionCode: Long,
+    ): InstallOutcome = InstallOutcome.Failed(NOT_WIRED)
 
     override fun cancel() = Unit
+
+    override fun abandon(sessionId: Int) = Unit
 }
 
 private const val NOT_WIRED = "应用内下载还没接线"

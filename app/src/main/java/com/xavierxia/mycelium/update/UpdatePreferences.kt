@@ -66,6 +66,7 @@ class UpdatePreferences(context: Context) : InstallSessionState {
      * 落盘的安装会话。没有会话时返回 null；[sessionId] 用 -1 当「没有」的哨兵值
      * （系统给的会话 id 不会是负数）。
      */
+    @Synchronized
     override fun read(): InstallSessionRecord? {
         val id = prefs.getInt(KEY_SESSION_ID, NO_SESSION)
         if (id == NO_SESSION) return null
@@ -80,13 +81,16 @@ class UpdatePreferences(context: Context) : InstallSessionState {
             phase = phase,
             statusCode = prefs.getInt(KEY_SESSION_STATUS, 0),
             updatedAtMs = prefs.getLong(KEY_SESSION_UPDATED_AT, 0L),
+            targetVersionCode = prefs.getLong(KEY_SESSION_TARGET, 0L),
         )
     }
 
     /**
-     * 幂等落盘：会话 id 对不上、或当前已经是终态，就不写（迟到/重复的回调不作数，C5 第 3 条）。
-     * 规则与 [MemoryInstallSessionState] 共用 [installSessionAccepts]。
+     * 幂等且单调的落盘：会话 id 对不上、当前已是终态、或新阶段不比当前更靠后，就不写
+     * （迟到/重复的回调不作数，C5 第 3 条；阶段不可回退见 M7）。规则与 [MemoryInstallSessionState]
+     * 共用 [installSessionAccepts]，整个「读—判断—写」在同一个锁里完成，两个写者不会交错。
      */
+    @Synchronized
     override fun advance(record: InstallSessionRecord): Boolean {
         if (!installSessionAccepts(read(), record)) return false
         prefs.edit {
@@ -97,11 +101,13 @@ class UpdatePreferences(context: Context) : InstallSessionState {
             putString(KEY_SESSION_PHASE, record.phase.name)
             putInt(KEY_SESSION_STATUS, record.statusCode)
             putLong(KEY_SESSION_UPDATED_AT, record.updatedAtMs)
+            putLong(KEY_SESSION_TARGET, record.targetVersionCode)
         }
         return true
     }
 
     /** 只清 [sessionId] 所属的那一条：别的会话不动（C5「只清理所属会话」）。 */
+    @Synchronized
     override fun clear(sessionId: Int): Boolean {
         if (prefs.getInt(KEY_SESSION_ID, NO_SESSION) != sessionId) return false
         prefs.edit {
@@ -109,6 +115,7 @@ class UpdatePreferences(context: Context) : InstallSessionState {
             remove(KEY_SESSION_TAG)
             remove(KEY_SESSION_PACKAGE)
             remove(KEY_SESSION_BASELINE)
+            remove(KEY_SESSION_TARGET)
             remove(KEY_SESSION_PHASE)
             remove(KEY_SESSION_STATUS)
             remove(KEY_SESSION_UPDATED_AT)
@@ -130,6 +137,9 @@ class UpdatePreferences(context: Context) : InstallSessionState {
         const val KEY_SESSION_TAG = "installSessionTag"
         const val KEY_SESSION_PACKAGE = "installSessionPackage"
         const val KEY_SESSION_BASELINE = "installSessionBaselineVersionCode"
+
+        /** 目标包里读出来的版本号（M7）：进程重建后确认「这一版还没装上」。 */
+        const val KEY_SESSION_TARGET = "installSessionTargetVersionCode"
         const val KEY_SESSION_PHASE = "installSessionPhase"
         const val KEY_SESSION_STATUS = "installSessionStatusCode"
         const val KEY_SESSION_UPDATED_AT = "installSessionUpdatedAtMs"

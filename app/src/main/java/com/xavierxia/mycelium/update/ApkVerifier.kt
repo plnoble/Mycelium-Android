@@ -110,7 +110,7 @@ class LocalApkVerifier(
         if (facts.versionCode <= current.versionCode) {
             return@withContext fail(apk, "版本号没涨：新包是 ${facts.versionCode}，当前是 ${current.versionCode}。已删除。")
         }
-        VerifyOutcome.Verified
+        VerifyOutcome.Verified(facts.versionCode)
     }
 
     private fun sidecar(apk: File): File = File(apk.parentFile, apk.name + ".sha256")

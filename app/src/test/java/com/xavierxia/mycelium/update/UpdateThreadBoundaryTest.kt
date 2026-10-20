@@ -134,7 +134,7 @@ class UpdateThreadBoundaryTest {
         )
         try {
             val verdict = withContext(main) { verifier.verify(apk, testRelease("0.5.0")) }
-            assertEquals(VerifyOutcome.Verified, verdict)
+            assertTrue("校验应当通过", verdict is VerifyOutcome.Verified)
             assertEquals("算哈希必须在 IO 线程上", "m1-io", transport.hashThread)
             assertEquals("读 APK 必须在 IO 线程上", "m1-io", archiveThread)
             assertEquals("读已装版本也必须在 IO 线程上", "m1-io", installedThread)
