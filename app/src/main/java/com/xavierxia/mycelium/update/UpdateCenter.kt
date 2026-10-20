@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 /** 下载/校验/安装的界面状态。第 3 步先把形状定下来，第 4/5 步往里填。 */
 sealed interface DownloadUiState {
@@ -113,6 +114,8 @@ class UpdateCenter(
     private var downloadCall: GatewayCall? = null
     /** 任务身份：每次发起、取消、忽略都加一；旧任务回来的进度与终态一律作废（M3）。 */
     private var downloadGeneration = 0L
+    /** 自动检查的在途闸门：同一时刻只允许一次自动检查（M6）。 */
+    private val checkGate = Mutex()
 
     init {
         restore()
@@ -133,7 +136,17 @@ class UpdateCenter(
         if (isDebugPackage) return
         if (!prefs.autoCheck) return
         if (!UpdateCheckPolicy.isDue(clock(), prefs.lastAutoAttemptAtMs)) return
-        performCheck(auto = true)
+        // 在途互斥：两个自动入口同时进来（比如两处界面初始化）只发一次请求（M6）。
+        if (!checkGate.tryLock()) return
+        try {
+            // 时间记在**请求发出之前**：请求还没回来就退出、重建或被取消，这 24 小时也已经占住，
+            // 下次启动不会立刻重发（M6）。
+            prefs.lastAutoAttemptAtMs = clock()
+            _state.value = _state.value.copy(lastAutoAttemptAtMs = prefs.lastAutoAttemptAtMs)
+            performCheck(auto = true)
+        } finally {
+            checkGate.unlock()
+        }
     }
 
     /** 手动「检查更新」：不受 24 小时限制，也不改自动尝试时间。 */
@@ -405,8 +418,7 @@ class UpdateCenter(
             throw cancelled
         }
         val now = clock()
-        // 自动尝试：成功和失败都写，这就是「一天最多一次」。
-        if (auto) prefs.lastAutoAttemptAtMs = now
+        // 自动尝试时间已经在 checkIfDue 里、请求发出之前记过了；这里只管「上次检查成功」的显示时间。
         // 只有真正跑完（不是 Error）才更新「上次检查」的显示时间。
         if (result !is UpdateResult.Error) prefs.lastSuccessAtMs = now
         applyResult(result, auto)
