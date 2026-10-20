@@ -181,15 +181,31 @@ $script:findingAccepted = $false
 
 function Add-Finding {
     param([string]$Category, [string]$Location)
-    $key = $Category + "|" + $Location
+    # Mask before recording or printing (M10): the location itself can carry the sensitive text
+    # (a denylist word inside a file name, or a file name that is a token). The report may say
+    # which file and line, but it must not copy the sensitive text into the report.
+    $safeLocation = Hide-SensitiveText -Text $Location
+    $key = $Category + "|" + $safeLocation
     if ($script:seenFindings.ContainsKey($key)) { return }
     $script:seenFindings[$key] = $true
     $script:findings += [pscustomobject]@{
         Category = $Category
-        Location = $Location
+        Location = $safeLocation
         Scope    = $script:findingScope
         Accepted = $script:findingAccepted
     }
+}
+
+# Replaces the sensitive text with '*': used for the matched text and for the file name itself (M10).
+function Hide-SensitiveText {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $hidden = [regex]::Replace($Text, $scanPattern, "*")
+    foreach ($word in @($denyWords)) {
+        if ([string]::IsNullOrEmpty($word)) { continue }
+        $hidden = [regex]::Replace($hidden, [regex]::Escape($word), "*", "IgnoreCase")
+    }
+    return $hidden
 }
 
 # A finding is reported under its own category, except an accepted historical hit: that one is
@@ -241,6 +257,18 @@ function Test-SensitiveName {
     if ($lower -eq ".env" -or $lower.StartsWith(".env.")) { return $true }
     foreach ($sensitiveName in $sensitiveNames) {
         if ($lower -eq $sensitiveName) { return $true }
+    }
+    return $false
+}
+
+# A file NAME can carry the sensitive text too (a token pasted into a name, or a denylist word).
+# The extension check above only says what kind of file it is; this one says what the name says.
+function Test-SensitiveNameWord {
+    param([string]$Path, [string[]]$Words)
+    if ($null -eq $Words -or $Words.Count -eq 0) { return $false }
+    foreach ($word in $Words) {
+        if ([string]::IsNullOrEmpty($word)) { continue }
+        if ($Path.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
     }
     return $false
 }
@@ -480,6 +508,7 @@ function Invoke-SelfTest {
         New-Sample "dirty-name-gguf/model.gguf" ""
         New-Sample "dirty-name-apk/app.apk" ""
         New-Sample "deny-hit/note.txt" ("a line with " + $sampleDenyWord + " inside" + "`n")
+        New-Sample ("deny-name/" + $sampleDenyWord + ".txt") ("clean contents" + "`n")
         New-Sample "deny-clean/note.txt" ("a clean line" + "`n")
 
         # Files in encodings other than UTF-8. A gate log saved as UTF-16 carries the same text but
@@ -548,6 +577,9 @@ function Invoke-SelfTest {
             @{ Name = "tracked-gguf-fails"; Dir = "dirty-name-gguf"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "tracked-apk-fails"; Dir = "dirty-name-apk"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "denylist-word-fails"; Dir = "deny-hit"; Deny = $true; Expect = 1; Category = "local-denylist"; Forbid = $sampleDenyWord },
+            # M10: a denylist word inside the file name must hit too, and the printed location must
+            # not contain the original text (the masking in Add-Finding is the proof).
+            @{ Name = "denylist-word-in-file-name-fails"; Dir = "deny-name"; Deny = $true; Expect = 1; Category = "local-denylist"; Forbid = $sampleDenyWord },
             @{ Name = "denylist-miss-passes"; Dir = "deny-clean"; Deny = $true; Expect = 0; Category = ""; Forbid = $sampleDenyWord }
         )
 
@@ -841,6 +873,7 @@ if ($directoryMode) {
     foreach ($file in $files) {
         $display = $file.Substring($root.Length).TrimStart([char[]]@("/", "\"))
         if (Test-SensitiveName -Path $display) { Add-Finding "sensitive-file" $display }
+        if (Test-SensitiveNameWord -Path $display -Words $denyWords) { Add-Finding "local-denylist" $display }
         $units = @(Read-ScanUnits -FullPath $file -DisplayPath $display -SkippedBinary ([ref]$skippedBinary))
         if ($units.Count -gt 0) { $scannedFiles = $scannedFiles + 1 }
         Test-ScanUnits -Units $units -DenyWords $denyWords
@@ -872,6 +905,7 @@ if ($directoryMode) {
     $trackedFiles = @($listed.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     foreach ($relative in $trackedFiles) {
         if (Test-SensitiveName -Path $relative) { Add-Finding "sensitive-file" $relative }
+        if (Test-SensitiveNameWord -Path $relative -Words $denyWords) { Add-Finding "local-denylist" $relative }
         # Not named $full: PowerShell variable names are case-insensitive, so $full would be the
         # [switch]$Full parameter of this script and assigning a string to it would fail.
         $fullPath = Join-Path $repoRoot $relative
@@ -909,6 +943,7 @@ if ($directoryMode) {
             if ($line -match '^diff --git a/(.+) b/(.+)$') {
                 $currentPath = $Matches[2]
                 if (Test-SensitiveName -Path $currentPath) { Add-Finding "sensitive-file" "$shortSha $currentPath" }
+                if (Test-SensitiveNameWord -Path $currentPath -Words $denyWords) { Add-Finding "local-denylist" "$shortSha $currentPath" }
                 $newLine = 0
                 $oldLine = 0
                 continue
@@ -916,6 +951,7 @@ if ($directoryMode) {
             if ($line -match '^diff --cc (.+)$') {
                 $currentPath = $Matches[1]
                 if (Test-SensitiveName -Path $currentPath) { Add-Finding "sensitive-file" "$shortSha $currentPath" }
+                if (Test-SensitiveNameWord -Path $currentPath -Words $denyWords) { Add-Finding "local-denylist" "$shortSha $currentPath" }
                 $newLine = 0
                 $oldLine = 0
                 continue
