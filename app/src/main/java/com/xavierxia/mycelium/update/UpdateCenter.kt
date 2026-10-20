@@ -168,11 +168,18 @@ class UpdateCenter(
         if (current.release?.tagName == tag) {
             // 取消在跑的那次任务，并清掉它留下的缓存。cancel() 由网关在下一个分片前看到，
             // 所以这里删文件不会删到正在写的字节；万一删失败，下次下载会重新下完整包。
-            downloadCall?.cancel()
-            downloadCall = null
-            downloadGeneration++
+            val stopping = downloadJob
+            downloadJob = null
+            synchronized(stateLock) {
+                downloadCall?.cancel()
+                downloadCall = null
+                downloadGeneration++
+                _state.value = current.copy(release = null, ignoredTag = tag, download = DownloadUiState.Idle)
+            }
             prefs.clearPending()
-            files.deleteForTag(tag)
+            // 等旧任务真的退出再删缓存（M3）：只发取消就删，可能删到它正在写的字节。
+            if (stopping != null) scope.launch { stopping.join(); files.deleteForTag(tag) } else files.deleteForTag(tag)
+            return
             _state.value = current.copy(release = null, ignoredTag = tag, download = DownloadUiState.Idle)
         } else {
             _state.value = current.copy(ignoredTag = tag)
@@ -251,12 +258,12 @@ class UpdateCenter(
                 downloader.fetchExpectedSha256(release, call)
             } catch (_: GatewayCancelled) {
                 // 取消不是失败：不显示错误，`.part` 留给下次续传。
-                if (current()) finishCancelled()
+                finishCancelled(generation)
                 return@launch
             }
             if (!current()) return@launch
             if (expected == null) {
-                finishFailed(DownloadFailureReason.Network)
+                finishFailed(DownloadFailureReason.Network, generation = generation)
                 return@launch
             }
             val target = files.apkFile(release.tagName)
@@ -268,19 +275,19 @@ class UpdateCenter(
             } catch (shortage: SpaceShortage) {
                 // 下载器在下任何字节之前就查了空间（未知大小时拿到真实长度后再查一次）；
                 // C4 第 3 条要求文案里有差值，这里原样带给界面。
-                if (current()) finishFailed(DownloadFailureReason.Storage, shortage.message)
+                finishFailed(DownloadFailureReason.Storage, shortage.message, generation)
                 return@launch
             } catch (_: GatewayCancelled) {
-                if (current()) finishCancelled()
+                finishCancelled(generation)
                 return@launch
             }
             if (!current()) return@launch
             when (outcome) {
                 is DownloadOutcome.Completed -> verifyDownloaded(release, target, outcome, call, generation)
-                is DownloadOutcome.Cancelled -> finishCancelled()
-                is DownloadOutcome.ChecksumMismatch -> finishFailed(DownloadFailureReason.ChecksumMismatch)
-                is DownloadOutcome.Rejected -> finishFailed(DownloadFailureReason.NotAllowed)
-                is DownloadOutcome.Failed -> finishFailed(DownloadFailureReason.Network)
+                is DownloadOutcome.Cancelled -> finishCancelled(generation)
+                is DownloadOutcome.ChecksumMismatch -> finishFailed(DownloadFailureReason.ChecksumMismatch, generation = generation)
+                is DownloadOutcome.Rejected -> finishFailed(DownloadFailureReason.NotAllowed, generation = generation)
+                is DownloadOutcome.Failed -> finishFailed(DownloadFailureReason.Network, generation = generation)
             }
         }
     }
@@ -521,7 +528,7 @@ class UpdateCenter(
             verifier.verify(target, release, call)
         } catch (_: GatewayCancelled) {
             // 取消落在校验阶段：与下载中取消同一口径——不报错、不删已下好的文件。
-            if (generation == downloadGeneration) finishCancelled()
+            finishCancelled(generation)
             return
         }
         if (generation != downloadGeneration) return
@@ -531,7 +538,7 @@ class UpdateCenter(
                 downloadCall = null
                 // 包里读出来的版本号随会话一起落盘：进程重建后靠它判断「这一版是不是已经装了」（M7）。
                 targetVersionCode = verdict.versionCode
-                _state.value = _state.value.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize))
+                if (!writeIfCurrent(generation) { it.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize)) }) return
                 // 「下载并安装」是一次点击到底：四项校验一过就接着装，不再要求用户点第二个按钮（M2）。
                 // 没授权「安装未知应用」时 install() 只落到说明页，回前台会接着装；系统确认仍由用户完成。
                 install()
@@ -539,17 +546,28 @@ class UpdateCenter(
             is VerifyOutcome.Failed -> {
                 // 校验器已经删过一遍；这里再删一次是为了「校验失败绝不留文件」这条口径不依赖调用顺序。
                 target.delete()
-                finishFailed(DownloadFailureReason.Verification, verdict.message)
+                finishFailed(DownloadFailureReason.Verification, verdict.message, generation)
             }
         }
     }
 
-    private fun finishCancelled() {
+    private fun finishCancelled(generation: Long? = null) {
+        if (generation != null) {
+            // 代次已经在锁里核过：迟到的取消结果不会盖掉新一轮的状态（M3）。
+            if (!writeIfCurrent(generation) { it.copy(download = DownloadUiState.Idle) }) return
+            downloadCall = null
+            return
+        }
         downloadCall = null
         _state.value = _state.value.copy(download = DownloadUiState.Idle)
     }
 
-    private fun finishFailed(reason: DownloadFailureReason, message: String? = null) {
+    private fun finishFailed(reason: DownloadFailureReason, message: String? = null, generation: Long? = null) {
+        if (generation != null) {
+            if (!writeIfCurrent(generation) { it.copy(download = DownloadUiState.Failed(reason, message)) }) return
+            downloadCall = null
+            return
+        }
         downloadCall = null
         _state.value = _state.value.copy(download = DownloadUiState.Failed(reason, message))
     }

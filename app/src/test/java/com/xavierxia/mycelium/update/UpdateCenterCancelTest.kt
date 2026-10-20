@@ -139,10 +139,12 @@ class UpdateCenterCancelTest {
         assertEquals(DownloadUiState.Idle, center.state.value.download)
         assertEquals(null, center.state.value.release)
         assertTrue("忽略也要取消任务", downloader.callRef.get()!!.isCancelled)
-        assertFalse("忽略要把缓存删掉", part.exists())
-        assertFalse("忽略要把边车删掉", checksum.exists())
+        // M3：此刻旧任务还在写，缓存**不能**已经删掉（删了就是删到它正在写的字节）。
+        assertTrue("旧任务还在写时不许删缓存", part.exists())
 
         downloader.gate.complete(Unit)
+        assertFalse("旧任务退出之后才删缓存", part.exists())
+        assertFalse("边车一并删掉", checksum.exists())
         assertEquals("被忽略的版本不许再变 Ready", DownloadUiState.Idle, center.state.value.download)
     }
 
