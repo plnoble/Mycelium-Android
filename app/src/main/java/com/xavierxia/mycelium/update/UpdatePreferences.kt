@@ -66,7 +66,6 @@ class UpdatePreferences(context: Context) : InstallSessionState {
      * 落盘的安装会话。没有会话时返回 null；[sessionId] 用 -1 当「没有」的哨兵值
      * （系统给的会话 id 不会是负数）。
      */
-    @Synchronized
     override fun read(): InstallSessionRecord? {
         val id = prefs.getInt(KEY_SESSION_ID, NO_SESSION)
         if (id == NO_SESSION) return null
@@ -90,7 +89,6 @@ class UpdatePreferences(context: Context) : InstallSessionState {
      * （迟到/重复的回调不作数，C5 第 3 条；阶段不可回退见 M7）。规则与 [MemoryInstallSessionState]
      * 共用 [installSessionAccepts]，整个「读—判断—写」在同一个锁里完成，两个写者不会交错。
      */
-    @Synchronized
     override fun advance(record: InstallSessionRecord): Boolean {
         if (!installSessionAccepts(read(), record)) return false
         prefs.edit {
@@ -107,7 +105,6 @@ class UpdatePreferences(context: Context) : InstallSessionState {
     }
 
     /** 只清 [sessionId] 所属的那一条：别的会话不动（C5「只清理所属会话」）。 */
-    @Synchronized
     override fun clear(sessionId: Int): Boolean {
         if (prefs.getInt(KEY_SESSION_ID, NO_SESSION) != sessionId) return false
         prefs.edit {

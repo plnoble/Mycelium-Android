@@ -125,6 +125,8 @@ class UpdateCenter(
     private val checkGate = Mutex()
     /** 这次要装的版本号（校验时从包里读出来的，M7）：落盘后供进程重建与「已经装上了」判定使用。 */
     private var targetVersionCode = 0L
+    /** 从落盘恢复出来的 Ready 没经过本次进程的校验：装之前必须重算一次（M4/M7）。 */
+    private var restoredNeedsVerify = false
 
     init {
         restore()
@@ -211,6 +213,20 @@ class UpdateCenter(
             // 非终态：会话已经不在系统里，或者已经超过窗口期 → 待核实（C5 第 4 条）。
             val stale = clock() - record.updatedAtMs >= INSTALL_VERIFICATION_WINDOW_MS
             if (stale || !installer.sessionAlive(record.sessionId)) {
+                // 已经 commit 给系统、但系统的确认界面根本没拉起来（会话已经不在）：清掉记录，
+                // 回到「可以安装」让用户再点一次，前台因此总有「继续安装」入口（M7）。
+                if (record.phase == InstallPhase.Committed && !installer.sessionAlive(record.sessionId)) {
+                    sessionState.clear(record.sessionId)
+                    val file = files.finalFile(record.tagName)
+                    if (file.isFile) {
+                        restoredNeedsVerify = true
+                        _state.value = _state.value.copy(
+                            download = DownloadUiState.Ready(file, file.length()),
+                            installNotice = "系统的确认界面没有打开。可以点「安装」再试一次。",
+                        )
+                        return
+                    }
+                }
                 _state.value = _state.value.copy(
                     download = DownloadUiState.NeedsVerification,
                     installNotice = VERIFY_NOTICE,
@@ -348,6 +364,11 @@ class UpdateCenter(
         val ready = _state.value.download as? DownloadUiState.Ready ?: return
         if (!installReady) return
         val release = _state.value.release ?: return
+        if (restoredNeedsVerify) {
+            // 恢复出来的 Ready 只是「文件还在」，不是「这次校验过」：先重算哈希再装（M4/M7）。
+            scope.launch { reverifyThenInstall(ready, release) }
+            return
+        }
         // 状态与版本绑定（M5）：Ready 里的文件必须是**当前这个 tag** 的文件。
         // 候选换过而旧文件还在时，宁可丢掉重下，也不能把旧包按新 tag 交给安装器。
         if (ready.file != files.finalFile(release.tagName)) {
@@ -471,6 +492,30 @@ class UpdateCenter(
     }
 
     /** 失败：文件留着（还能重试），提示按类型各不相同。 */
+    /** 恢复出来的包在装之前重算一次校验；通过了才走 install()，不通过就删掉（M4/M7）。 */
+    private suspend fun reverifyThenInstall(ready: DownloadUiState.Ready, release: ReleaseInfo) {
+        _state.value = _state.value.copy(download = DownloadUiState.Verifying)
+        val verdict = try {
+            verifier.verify(ready.file, release, GatewayCall())
+        } catch (_: GatewayCancelled) {
+            _state.value = _state.value.copy(download = DownloadUiState.Ready(ready.file, ready.size))
+            return
+        }
+        when (verdict) {
+            is VerifyOutcome.Verified -> {
+                restoredNeedsVerify = false
+                targetVersionCode = verdict.versionCode
+                _state.value = _state.value.copy(download = DownloadUiState.Ready(ready.file, ready.size))
+                install()
+            }
+            is VerifyOutcome.Failed -> {
+                restoredNeedsVerify = false
+                prefs.pendingApkPath = null
+                failInstall(verdict.message)
+            }
+        }
+    }
+
     private fun failInstall(message: String) {
         sessionState.read()?.let { sessionState.clear(it.sessionId) }
         _state.value = _state.value.copy(
@@ -647,6 +692,7 @@ class UpdateCenter(
             prefs.pendingApkPath = null
             return DownloadUiState.Idle
         }
+        restoredNeedsVerify = true
         return DownloadUiState.Ready(file, file.length())
     }
 }

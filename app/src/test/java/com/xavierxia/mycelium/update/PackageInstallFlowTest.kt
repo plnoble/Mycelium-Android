@@ -301,9 +301,10 @@ class PackageInstallFlowTest {
 
         center.onResume()
 
-        assertEquals(DownloadUiState.NeedsVerification, center.state.value.download)
+        // M7：确认界面根本没拉起来（会话已不在）→ 清记录、回「可以安装」，用户可再点一次安装。
+        assertTrue(center.state.value.download is DownloadUiState.Ready)
         assertTrue(files.apkFile(tag).exists())
-        assertNotNull(state.read())
+        assertTrue(state.read() == null)
     }
 
     // 测例 9：调试包没有安装入口，也不做未知来源引导。

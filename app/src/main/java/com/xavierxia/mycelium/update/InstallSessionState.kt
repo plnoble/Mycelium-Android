@@ -62,6 +62,9 @@ interface InstallSessionState {
  * 「单调」是 M7 补的：迟到的 `Committed` 不能把已经落盘的 `Pending` 盖回去，终态也永远盖不回
  * `Pending` —— 否则界面会在「等用户确认」和「正在安装」之间来回跳。
  */
+/** 全进程唯一的状态锁：安装端（写会话阶段）与接收端（写回执结果）必须共用这一把（M7）。 */
+internal val installSessionLock = Any()
+
 internal fun installSessionAccepts(current: InstallSessionRecord?, next: InstallSessionRecord): Boolean {
     if (current == null) return true
     if (current.sessionId != next.sessionId) return false
@@ -84,21 +87,18 @@ internal fun installPhaseRank(phase: InstallPhase): Int = when (phase) {
 class MemoryInstallSessionState : InstallSessionState {
     private var record: InstallSessionRecord? = null
 
-    @Synchronized
-    override fun read(): InstallSessionRecord? = record
+    override fun read(): InstallSessionRecord? = synchronized(installSessionLock) { record }
 
-    @Synchronized
-    override fun advance(record: InstallSessionRecord): Boolean {
+    override fun advance(record: InstallSessionRecord): Boolean = synchronized(installSessionLock) {
         if (!installSessionAccepts(this.record, record)) return false
         this.record = record
-        return true
+        true
     }
 
-    @Synchronized
-    override fun clear(sessionId: Int): Boolean {
+    override fun clear(sessionId: Int): Boolean = synchronized(installSessionLock) {
         if (record?.sessionId != sessionId) return false
         record = null
-        return true
+        true
     }
 }
 

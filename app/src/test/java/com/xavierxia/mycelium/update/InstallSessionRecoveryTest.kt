@@ -56,6 +56,8 @@ class InstallSessionRecoveryTest {
         prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0"))
         prefs.pendingApkPath = apk.path
         val state = MemoryInstallSessionState()
+        // 真实实现总是先写 Created：空记录只接受初始阶段（M7）。
+        state.advance(record(InstallPhase.Created))
         state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION))
         return Triple(store, apk, state)
     }
@@ -131,6 +133,7 @@ class InstallSessionRecoveryTest {
     @Test
     fun aLateCommittedCannotRollBackAPendingRecord() {
         val state = MemoryInstallSessionState()
+        assertTrue(state.advance(record(InstallPhase.Created)))
         assertTrue(state.advance(record(InstallPhase.Committed)))
         assertTrue(state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
 
