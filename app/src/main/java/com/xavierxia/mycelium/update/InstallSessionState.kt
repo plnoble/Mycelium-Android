@@ -66,7 +66,9 @@ interface InstallSessionState {
 internal val installSessionLock = Any()
 
 internal fun installSessionAccepts(current: InstallSessionRecord?, next: InstallSessionRecord): Boolean {
-    if (current == null) return true
+    // 空记录只允许从初始阶段开始写（M7）：不能让一条 Pending/Succeeded 凭空建出记录，
+    // 否则一条迟到或伪造的回执可以跳过 Created 直接落成终态。
+    if (current == null) return next.phase == InstallPhase.Created
     if (current.sessionId != next.sessionId) return false
     if (current.phase.isTerminal) return false
     return installPhaseRank(next.phase) > installPhaseRank(current.phase)
@@ -88,6 +90,11 @@ class MemoryInstallSessionState : InstallSessionState {
     private var record: InstallSessionRecord? = null
 
     override fun read(): InstallSessionRecord? = synchronized(installSessionLock) { record }
+
+    /** 只给测试用：直接放一条记录，绕开「空记录只能从初始阶段写」。规则本身另有专门测例。 */
+    internal fun forceSeed(seed: InstallSessionRecord) {
+        synchronized(installSessionLock) { record = seed }
+    }
 
     override fun advance(record: InstallSessionRecord): Boolean = synchronized(installSessionLock) {
         if (!installSessionAccepts(this.record, record)) return false

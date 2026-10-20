@@ -33,6 +33,12 @@ class InstallSessionRecoveryTest {
         prefs = UpdatePreferences(RuntimeEnvironment.getApplication())
     }
 
+    /** 测试专用：空记录只允许从初始阶段写（M7），先放一条 Created 再按规则推进到目标记录。 */
+    private fun MemoryInstallSessionState.seededTo(target: InstallSessionRecord): Boolean {
+        forceSeed(record(InstallPhase.Created))
+        return advance(target)
+    }
+
     private fun record(phase: InstallPhase, status: Int = 0) = InstallSessionRecord(
         sessionId = 42,
         tagName = "v0.5.0",
@@ -57,8 +63,8 @@ class InstallSessionRecoveryTest {
         prefs.pendingApkPath = apk.path
         val state = MemoryInstallSessionState()
         // 真实实现总是先写 Created：空记录只接受初始阶段（M7）。
-        state.advance(record(InstallPhase.Created))
-        state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Created))
+        state.seededTo(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION))
         return Triple(store, apk, state)
     }
 
@@ -135,7 +141,7 @@ class InstallSessionRecoveryTest {
         val state = MemoryInstallSessionState()
         assertTrue(state.advance(record(InstallPhase.Created)))
         assertTrue(state.advance(record(InstallPhase.Committed)))
-        assertTrue(state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
+        assertTrue(state.seededTo(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
 
         assertFalse("迟到的 Committed 不许把 Pending 盖回去", state.advance(record(InstallPhase.Committed)))
         assertEquals(InstallPhase.Pending, state.read()?.phase)
@@ -144,7 +150,7 @@ class InstallSessionRecoveryTest {
     @Test
     fun aRepeatedPendingIsRejected() {
         val state = MemoryInstallSessionState()
-        assertTrue(state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
+        assertTrue(state.seededTo(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
 
         assertFalse("重复的 Pending 不该再落一次盘", state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
     }
@@ -152,11 +158,29 @@ class InstallSessionRecoveryTest {
     @Test
     fun aTerminalRecordIsAbsorbing() {
         val state = MemoryInstallSessionState()
-        assertTrue(state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
+        assertTrue(state.seededTo(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
         assertTrue(state.advance(record(InstallPhase.Cancelled, status = InstallStatusCode.FAILURE_ABORTED)))
 
         assertFalse("终态之后成功也不作数", state.advance(record(InstallPhase.Succeeded, status = InstallStatusCode.SUCCESS)))
         assertFalse("终态之后不许回到 Pending", state.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)))
         assertEquals(InstallPhase.Cancelled, state.read()?.phase)
+    }
+    /** M7：空记录只允许从初始阶段写——凭空一条 Pending/Succeeded 不许落盘。 */
+    @Test
+    fun anEmptyStoreOnlyAcceptsTheInitialPhase() {
+        val fresh = MemoryInstallSessionState()
+        assertFalse(
+            "空记录不许直接写成 Pending",
+            fresh.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)),
+        )
+        assertFalse(
+            "空记录不许直接写成 Succeeded",
+            fresh.advance(record(InstallPhase.Succeeded, status = InstallStatusCode.SUCCESS)),
+        )
+        assertTrue("初始阶段可以写", fresh.advance(record(InstallPhase.Created)))
+        assertTrue(
+            "写成 Created 之后就能按规则往前推",
+            fresh.advance(record(InstallPhase.Pending, status = InstallStatusCode.PENDING_USER_ACTION)),
+        )
     }
 }

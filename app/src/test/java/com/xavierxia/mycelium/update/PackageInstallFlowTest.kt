@@ -78,6 +78,12 @@ class PackageInstallFlowTest {
         )
     }
 
+    /** 测试专用：空记录只允许从初始阶段写（M7），先放一条 Created 再按规则推进到目标记录。 */
+    private fun MemoryInstallSessionState.seededTo(target: InstallSessionRecord): Boolean {
+        forceSeed(record(InstallPhase.Created, InstallStatusCode.PENDING_USER_ACTION))
+        return advance(target)
+    }
+
     private fun record(
         phase: InstallPhase,
         statusCode: Int,
@@ -146,7 +152,7 @@ class PackageInstallFlowTest {
     @Test
     fun pendingUserActionLaunchesTheSystemConfirm() {
         val state = MemoryInstallSessionState()
-        state.advance(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
         val confirm = Intent("android.content.pm.action.CONFIRM_INSTALL")
         var launched: Intent? = null
         val handler = InstallResultHandler(state, launchConfirm = { launched = it; true }, clock = { start })
@@ -162,7 +168,7 @@ class PackageInstallFlowTest {
     @Test
     fun pendingUserActionWithoutTheConfirmIntentIsStillRecorded() {
         val state = MemoryInstallSessionState()
-        state.advance(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
         var launches = 0
         val handler = InstallResultHandler(state, launchConfirm = { launches += 1; true })
 
@@ -199,7 +205,7 @@ class PackageInstallFlowTest {
     fun insufficientStorageShowsItsOwnMessage() {
         val state = MemoryInstallSessionState()
         val center = readyCenter(sessionState = state)
-        state.advance(record(InstallPhase.Failed, InstallStatusCode.FAILURE_STORAGE))
+        state.seededTo(record(InstallPhase.Failed, InstallStatusCode.FAILURE_STORAGE))
 
         center.onResume()
 
@@ -216,7 +222,7 @@ class PackageInstallFlowTest {
     fun userCancellationShowsCancelledAndCleansUp() {
         val state = MemoryInstallSessionState()
         val center = readyCenter(sessionState = state)
-        state.advance(record(InstallPhase.Cancelled, InstallStatusCode.FAILURE_ABORTED))
+        state.seededTo(record(InstallPhase.Cancelled, InstallStatusCode.FAILURE_ABORTED))
 
         center.onResume()
 
@@ -239,7 +245,7 @@ class PackageInstallFlowTest {
         val messages = codes.map { code ->
             val state = MemoryInstallSessionState()
             val center = readyCenter(sessionState = state)
-            state.advance(record(InstallPhase.Failed, code))
+            state.seededTo(record(InstallPhase.Failed, code))
             center.onResume()
             val failed = center.state.value.download as DownloadUiState.Failed
             assertEquals(DownloadFailureReason.Installation, failed.reason)
@@ -260,7 +266,7 @@ class PackageInstallFlowTest {
         var installed = BASELINE_VERSION_CODE
         val state = MemoryInstallSessionState()
         val center = readyCenter(sessionState = state, installedVersionCode = { installed })
-        state.advance(record(InstallPhase.Pending, InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Pending, InstallStatusCode.PENDING_USER_ACTION))
 
         installed = BASELINE_VERSION_CODE + 1
         center.onResume()
@@ -280,7 +286,7 @@ class PackageInstallFlowTest {
             sessionState = state,
             clock = { start + INSTALL_VERIFICATION_WINDOW_MS + 1 },
         )
-        state.advance(record(InstallPhase.Pending, InstallStatusCode.PENDING_USER_ACTION, updatedAtMs = start))
+        state.seededTo(record(InstallPhase.Pending, InstallStatusCode.PENDING_USER_ACTION, updatedAtMs = start))
 
         center.onResume()
 
@@ -297,7 +303,7 @@ class PackageInstallFlowTest {
         val state = MemoryInstallSessionState()
         val installer = RecordingInstaller(alive = false)
         val center = readyCenter(installer = installer, sessionState = state)
-        state.advance(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION, updatedAtMs = start))
+        state.seededTo(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION, updatedAtMs = start))
 
         center.onResume()
 
@@ -338,7 +344,7 @@ class PackageInstallFlowTest {
     @Test
     fun lateAndDuplicateCallbacksAreIgnoredAfterATerminalResult() {
         val state = MemoryInstallSessionState()
-        state.advance(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
         val handler = InstallResultHandler(state, clock = { start })
 
         assertNotNull(handler.onStatus(sessionId, InstallStatusCode.SUCCESS, null))
@@ -351,7 +357,7 @@ class PackageInstallFlowTest {
     @Test
     fun onlyOurOwnSessionIsRecordedAndCleared() {
         val state = MemoryInstallSessionState()
-        state.advance(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
+        state.seededTo(record(InstallPhase.Committed, InstallStatusCode.PENDING_USER_ACTION))
         val handler = InstallResultHandler(state, clock = { start })
 
         assertNull(handler.onStatus(sessionId + 1, InstallStatusCode.SUCCESS, null))
