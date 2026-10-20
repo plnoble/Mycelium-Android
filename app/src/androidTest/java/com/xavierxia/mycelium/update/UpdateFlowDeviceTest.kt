@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.xavierxia.mycelium.net.AuditLog
+import com.xavierxia.mycelium.net.HttpText
 import com.xavierxia.mycelium.net.GatewayPurpose
 import com.xavierxia.mycelium.net.OutboundGateway
 import com.xavierxia.mycelium.net.openHttp
@@ -16,16 +17,20 @@ import com.xavierxia.mycelium.ui.MyceliumApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.OutputStream
+import java.net.HttpURLConnection
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -52,6 +57,18 @@ class UpdateFlowDeviceTest {
     private val evidenceDir: File
         get() = File(context.getExternalFilesDir(null), "update-flow").apply { mkdirs() }
 
+    /** 每条用例都从干净状态开始：清掉自动检查时间戳、忽略项、候选与下载目录。 */
+    @Before
+    fun resetUpdateState() {
+        val prefs = UpdatePreferences(context)
+        prefs.autoCheck = true
+        prefs.lastAutoAttemptAtMs = 0L
+        prefs.lastSuccessAtMs = 0L
+        prefs.ignoredTag = null
+        prefs.clearPending()
+        File(context.cacheDir, "updates").deleteRecursively()
+    }
+
     private fun snap(name: String) {
         val bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         File(evidenceDir, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -61,12 +78,16 @@ class UpdateFlowDeviceTest {
     private class FakeReleaseService(
         private val apk: File,
         private val wrongChecksum: Boolean = false,
+        private val declaredSizeDelta: Long = 0L,
         private val slowBytesPerSecond: Int = 0,
     ) : AutoCloseable {
         private val server = ServerSocket(0)
         private val accepted = AtomicInteger()
         val port: Int = server.localPort
         val sha256: String = digest(apk)
+
+        /** 假服务上的 `releases/latest`：测试把它当发布源地址用。 */
+        val releaseUrl: String get() = "http://127.0.0.1:$port/repos/fake/fake/releases/latest"
 
         private val releaseJson: String
             get() = """
@@ -78,7 +99,7 @@ class UpdateFlowDeviceTest {
                   "assets": [
                     {"name": "mycelium-v0.9.9.apk",
                      "browser_download_url": "http://127.0.0.1:$port/apk",
-                     "size": ${apk.length()}},
+                     "size": ${apk.length() + declaredSizeDelta}},
                     {"name": "mycelium-v0.9.9.apk.sha256",
                      "browser_download_url": "http://127.0.0.1:$port/apk.sha256",
                      "size": 65}
@@ -95,12 +116,15 @@ class UpdateFlowDeviceTest {
                         break
                     }
                     accepted.incrementAndGet()
-                    Thread { serve(socket) }.apply { isDaemon = true }.start()
+                    // 服务线程的顶层必须接住一切：客户端取消会写坏 socket，异常外逸会杀掉整个
+                    // instrumentation 进程（真机上就是「跑不完」）。
+                    Thread { runCatching { serve(socket) } }.apply { isDaemon = true }.start()
                 }
             }.apply { isDaemon = true }.start()
         }
 
-        fun requests(): Int = accepted.get()
+        /** 已经接受的连接数：取消之后这个数不许再涨。 */
+        fun connections(): Int = accepted.get()
 
         private fun serve(socket: Socket) {
             socket.use { client ->
@@ -176,7 +200,7 @@ class UpdateFlowDeviceTest {
     }
 
     /** 让白名单放行本机 http 的假服务：这是测试专用的策略，应用里的 AllowedHosts 不放行它。 */
-    private fun center(port: Int): UpdateCenter {
+    private fun center(service: FakeReleaseService): UpdateCenter {
         val transport = GatewayUpdateTransport(
             OutboundGateway(
                 hosts = com.xavierxia.mycelium.net.HostPolicy { uri, purpose ->
@@ -189,15 +213,8 @@ class UpdateFlowDeviceTest {
         )
         val prefs = UpdatePreferences(context)
         val files = UpdateFiles(File(context.cacheDir, "updates"), availableBytes = { Long.MAX_VALUE / 4 })
-        val source = GitHubReleaseClient { url, _, _ ->
-            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            connection.connectTimeout = 5_000
-            connection.readTimeout = 5_000
-            val status = connection.responseCode
-            val text = (if (status in 200..299) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            com.xavierxia.mycelium.net.HttpText(status, text)
-        }
+        // 发布源地址指向假服务：JSON 解析仍走 GitHubReleaseClient 的真路径（复审指出的漏接线）。
+        val source = GitHubReleaseClient { _, _, _ -> httpGet(service.releaseUrl) }
         return UpdateCenter(
             updates = UpdateManager(source),
             prefs = prefs,
@@ -217,6 +234,20 @@ class UpdateFlowDeviceTest {
         )
     }
 
+    private fun httpGet(url: String): HttpText {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 5_000
+        connection.readTimeout = 5_000
+        return try {
+            val status = connection.responseCode
+            val text = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            HttpText(status, text)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun versionCodeOf(packageName: String): Long {
         val info = context.packageManager.getPackageInfo(packageName, 0)
         @Suppress("DEPRECATION")
@@ -232,73 +263,122 @@ class UpdateFlowDeviceTest {
         return file
     }
 
+    /** 渲染真界面、切到「我的」、手动查一次（不依赖 24 小时的自动检查节流）。 */
     private fun renderAndCheck(center: UpdateCenter) {
         rule.setContent { MyceliumApp(center) }
         rule.onNodeWithText("我的").performClick()
+        runBlocking { center.checkNow() }
         rule.waitUntil(timeoutMillis = 60_000) { center.state.value.release != null }
         rule.onNodeWithTag("update_badge").assertExists()
     }
-
     @Test
     fun aWrongChecksumIsRefusedAndNothingIsInstalled() {
         val apk = apkUnderTest()
-        FakeReleaseService(apk, wrongChecksum = true).use { server ->
-            val center = center(server.port)
+        FakeReleaseService(apk, wrongChecksum = true).use { service ->
+            val center = center(service)
             renderAndCheck(center)
             snap("2-卡片")
 
             rule.onNodeWithText("下载并安装").performClick()
-            rule.waitUntil(timeoutMillis = 120_000) { center.state.value.download is DownloadUiState.Failed }
-            snap("6-校验失败")
-            assertFalse("校验没过就不许出现「可以安装」", center.state.value.download is DownloadUiState.Ready)
-            assertTrue(
-                "校验失败要给人话",
-                (center.state.value.download as DownloadUiState.Failed).message?.isNotBlank() == true,
+            rule.waitUntil(timeoutMillis = 180_000) { center.state.value.download is DownloadUiState.Failed }
+
+            val failed = center.state.value.download as DownloadUiState.Failed
+            // 误区：错哈希这条路的 message 是 null（界面按 reason 生成文案），断言文案会必败。
+            assertEquals(
+                "错哈希要走「哈希不符」这条，不是别的失败",
+                DownloadFailureReason.ChecksumMismatch,
+                failed.reason,
             )
+            snap("6-校验失败")
+            assertFalse(center.state.value.download is DownloadUiState.Ready)
         }
     }
 
     @Test
-    fun cancellingMidDownloadLeavesNoRunningTask() {
+    fun aDeclaredLengthThatDoesNotMatchTheFileIsRefused() {
         val apk = apkUnderTest()
-        // 每秒只发 ~1 MiB，够点「取消」。
-        FakeReleaseService(apk, slowBytesPerSecond = 1 shl 20).use { server ->
-            val center = center(server.port)
+        FakeReleaseService(apk, declaredSizeDelta = 4096L).use { service ->
+            val center = center(service)
+            renderAndCheck(center)
+
+            rule.onNodeWithText("下载并安装").performClick()
+            rule.waitUntil(timeoutMillis = 180_000) { center.state.value.download is DownloadUiState.Failed }
+
+            val failed = center.state.value.download as DownloadUiState.Failed
+            assertEquals(
+                "声明长度与文件不符要走「校验不过」，不是「哈希不符」",
+                DownloadFailureReason.Verification,
+                failed.reason,
+            )
+            assertTrue("校验失败要给人话", failed.message?.isNotBlank() == true)
+            snap("6b-长度不符")
+        }
+    }
+
+    @Test
+    fun cancellingMidDownloadStopsTheTransferAndLeavesNoRunningTask() {
+        val apk = apkUnderTest()
+        FakeReleaseService(apk, slowBytesPerSecond = 1 shl 20).use { service ->
+            val center = center(service)
             renderAndCheck(center)
 
             rule.onNodeWithText("下载并安装").performClick()
             rule.waitUntil(timeoutMillis = 60_000) { center.state.value.download is DownloadUiState.Running }
+            rule.waitUntil(timeoutMillis = 60_000) {
+                ((center.state.value.download as? DownloadUiState.Running)?.written ?: 0L) > 0L
+            }
             snap("3-下载中")
+
             rule.onNodeWithText("取消").performClick()
-            rule.waitUntil(timeoutMillis = 60_000) { center.state.value.download is DownloadUiState.Idle }
+            rule.waitUntil(timeoutMillis = 30_000) { center.state.value.download is DownloadUiState.Idle }
+
+            // 只写 Idle 不代表任务真的退出：再看连接数停住、缓存文件也不再长大。
+            val connections = service.connections()
+            val sizeNow = newestCacheFileSize()
+            Thread.sleep(2_000)
+            assertEquals("取消后假服务不该再收到新连接", connections, service.connections())
+            assertEquals("取消后缓存文件不该再长大", sizeNow, newestCacheFileSize())
             snap("7-取消后")
         }
     }
 
-    @Test
-    fun theWholeFlowInstallsTheNewerPackageAndKeepsTheDataDirectory() {
-        val apk = apkUnderTest()
-        val marker = File(context.filesDir, "profileInstalled")
-        marker.writeText("walkthrough")
-        val before = versionCodeOf(context.packageName)
-        assertTrue("起始调试包应该比走查包旧（当前 $before）", before < 6L)
+    private fun newestCacheFileSize(): Long =
+        File(context.cacheDir, "updates").listFiles()?.maxOfOrNull { it.length() } ?: 0L
 
-        FakeReleaseService(apk).use { server ->
-            val center = center(server.port)
+    /**
+     * 整条走一遍。「下载并安装」是一键到底：校验一过就接着装，所以这里**不等稳定的 Ready**，
+     * 而是等它落到「要先允许安装未知应用」或「正在安装」。用户点完系统界面的「安装」以后，
+     * 系统会替换掉这个应用的进程 —— 本测试到此为止（后续核对由宿主机脚本做）。
+     */
+    @Test
+    fun theWholeFlowReachesTheSystemInstaller() {
+        val apk = apkUnderTest()
+        assertTrue("起始调试包应该比走查包旧", versionCodeOf(context.packageName) < 6L)
+
+        FakeReleaseService(apk).use { service ->
+            val center = center(service)
             renderAndCheck(center)
             snap("1-红点与卡片")
 
             rule.onNodeWithText("下载并安装").performClick()
             rule.waitUntil(timeoutMillis = 60_000) { center.state.value.download is DownloadUiState.Running }
             snap("3-下载中-进度")
-            rule.waitUntil(timeoutMillis = 300_000) { center.state.value.download is DownloadUiState.Ready }
-            snap("4-校验通过")
-            rule.onNodeWithText("安装").performClick()
+
+            rule.waitUntil(timeoutMillis = 300_000) {
+                val state = center.state.value.download
+                state is DownloadUiState.Installing || state is DownloadUiState.NeedsUnknownSources
+            }
+            if (center.state.value.download is DownloadUiState.NeedsUnknownSources) {
+                snap("4a-未知来源说明")
+                // 第一次要由用户在系统设置里允许；点「去设置」打开系统页，允许后回前台会接着装。
+                rule.onNodeWithText("去设置").performClick()
+                rule.waitUntil(timeoutMillis = 300_000) { center.state.value.download is DownloadUiState.Installing }
+            }
             snap("5-系统确认")
-            // 系统确认界面只能由用户点；这里等它真的装完。
-            rule.waitUntil(timeoutMillis = 300_000) { versionCodeOf(context.packageName) > 5L }
+            assertTrue(
+                "应当停在「正在安装」等用户点系统界面的安装",
+                center.state.value.download is DownloadUiState.Installing,
+            )
         }
-        assertEquals(6L, versionCodeOf(context.packageName))
-        assertTrue("升级不该清掉数据目录", File(context.filesDir, "profileInstalled").isFile)
     }
 }

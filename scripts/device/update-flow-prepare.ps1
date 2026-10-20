@@ -1,17 +1,20 @@
 # Prepares the walkthrough APK for work package 1.3.2: the same debug package
 # (com.xavierxia.mycelium.debug) but with versionCode 6, so the app can install it over the
-# versionCode 5 debug build. The APK is never committed; it goes to p2-2-work and
+# versionCode 5 debug build. The APK is never committed; it goes outside the repo and
 # then into the app's own files dir on the phone (via run-as, no storage permission needed).
 #
 # ASCII only: PowerShell 5.1 reads .ps1 as ANSI and Chinese comments break the parser.
 $ErrorActionPreference = 'Stop'
-$repo = 'D:\Agent\Project\Nivra'
-$work = 'D:\Agent\Worktrees\Mycelium-Android\p2-2-work'
+# The repository is the one this script lives in (scripts/device/..): the prepared APK then
+# belongs to the checkout under review, not to some other clone.
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$work = if ($env:MYCELIUM_DEVICE_EVIDENCE) { $env:MYCELIUM_DEVICE_EVIDENCE } else { Join-Path $env:TEMP 'mycelium-device-evidence' }
+New-Item -ItemType Directory -Force -Path $work | Out-Null
 $apkOut = Join-Path $work 'update-flow-v6-debug.apk'
 $gradle = Join-Path $repo 'app\build.gradle.kts'
 $backup = Join-Path $work 'app-build-gradle.kts.before-v6'
 
-$env:JAVA_HOME = 'D:\Development\Android-studio\jbr'
+if (-not $env:JAVA_HOME) { throw 'set JAVA_HOME to the JDK Gradle should use' }
 if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
 $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 $env:PATH = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"

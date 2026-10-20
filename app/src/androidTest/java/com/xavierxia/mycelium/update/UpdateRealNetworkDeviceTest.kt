@@ -78,6 +78,11 @@ class UpdateRealNetworkDeviceTest {
         val factsStarted = System.currentTimeMillis()
         val facts = PackageManagerApkFactsReader(context).read(target.absolutePath)
         val factsMs = System.currentTimeMillis() - factsStarted
+        // 复审要求：只打印不断言等于没验。这台手机必须能读出来，且只报一个签名者——
+        // 校验器接受的正是这一条；读不出签名就等于应用内安装在这台机器上走不通。
+        assertNotNull("getPackageArchiveInfo(GET_SIGNING_CERTIFICATES) 读不出这个正式包", facts)
+        assertEquals("签名者个数", 1, facts!!.signerCount)
+        assertNotNull("读到了包信息但没有签名者", facts.signerSha256)
 
         val entries = audit.read().filter { it.purpose == com.xavierxia.mycelium.net.GatewayPurpose.Update }
         val hops = entries.joinToString(" -> ") { entry -> entry.hostPath.joinToString(" | ").ifBlank { entry.host } }
@@ -94,12 +99,8 @@ class UpdateRealNetworkDeviceTest {
             appendLine("hop chains (one audit entry per request): $hops")
             appendLine("distinct hosts contacted: ${entries.flatMap { it.hostPath }.distinct()}")
             appendLine(
-                "archive facts readable: " + if (facts == null) {
-                    "NO (getPackageArchiveInfo returned null)"
-                } else {
-                    "yes package=${facts.packageName} versionCode=${facts.versionCode} " +
-                        "signerCount=${facts.signerCount} signerSha256=${facts.signerSha256?.take(16)}..."
-                },
+                "archive facts readable: yes package=${facts.packageName} versionCode=${facts.versionCode} " +
+                    "signerCount=${facts.signerCount} signerSha256=${facts.signerSha256?.take(16)}...",
             )
         }
         InstrumentationRegistry.getInstrumentation().sendStatus(1, android.os.Bundle().apply {
