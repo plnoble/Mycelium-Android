@@ -222,7 +222,9 @@ class UpdateCenter(
         // 从「安装未知应用」设置页回来且已经允许了：立刻接着装（工作包第 5 步）。
         val blocked = current.download
         if (blocked is DownloadUiState.NeedsUnknownSources && installer.canRequestPackageInstalls()) {
-            startSession(DownloadUiState.Ready(blocked.file, blocked.size))
+            // 授权回来也要走 install() 的安装前复查（文件长度、目标版本、是否已装），不能直接建会话（M4/M7）。
+            _state.value = _state.value.copy(download = DownloadUiState.Ready(blocked.file, blocked.size))
+            install()
             return
         }
         // 文件被系统清掉就不能再显示「可以安装」。
