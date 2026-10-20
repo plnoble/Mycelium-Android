@@ -245,8 +245,54 @@ function Test-SensitiveName {
     return $false
 }
 
-# Reads one file as scan units (one unit per line). A file with a NUL byte in its first 8 KiB is
-# counted as binary and skipped; such a file is reported through its name, not through its bytes.
+# Decides how a byte array should be read as text, or returns $null when it is not text we can read.
+# A BOM is authoritative. Without one, a file whose NUL bytes all sit on one side of the byte pairs
+# is UTF-16 (that is what "ASCII text saved as UTF-16" looks like); anything else with a NUL is
+# binary. This is what keeps a gate log saved as UTF-16 from being skipped as a binary file.
+function ConvertFrom-ScanText {
+    param([byte[]]$Bytes)
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) {
+        return [System.Text.Encoding]::UTF8.GetString($Bytes, 3, $Bytes.Length - 3)
+    }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) {
+        return [System.Text.Encoding]::Unicode.GetString($Bytes, 2, $Bytes.Length - 2)
+    }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) {
+        return [System.Text.Encoding]::BigEndianUnicode.GetString($Bytes, 2, $Bytes.Length - 2)
+    }
+    $probe = [Math]::Min($Bytes.Length, 8000)
+    $nul = 0
+    $nulAtEven = 0
+    for ($i = 0; $i -lt $probe; $i++) {
+        if ($Bytes[$i] -eq 0) {
+            $nul = $nul + 1
+            if (($i % 2) -eq 0) { $nulAtEven = $nulAtEven + 1 }
+        }
+    }
+    if ($nul -eq 0) { return [System.Text.Encoding]::UTF8.GetString($Bytes) }
+    # BOM-less UTF-16: every other byte is NUL, and always on the same side.
+    if ($nul -ge [Math]::Max(2, [int]($probe / 8)) -and ($nulAtEven -eq 0 -or $nulAtEven -eq $nul)) {
+        if ($nulAtEven -eq 0) { return [System.Text.Encoding]::Unicode.GetString($Bytes) }
+        return [System.Text.Encoding]::BigEndianUnicode.GetString($Bytes)
+    }
+    return $null
+}
+
+# One unit per line, 1-based line numbers. Shared by files, git blobs and the self-test.
+function ConvertTo-ScanUnits {
+    param([string]$Text, [string]$Location)
+    $lines = @($Text -split "`r?`n")
+    $units = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $units.Add([pscustomobject]@{ Location = $Location; Number = ($i + 1); Text = $lines[$i] })
+    }
+    return $units.ToArray()
+}
+
+# Reads one file as scan units (one unit per line). The encoding is settled before the file is
+# called binary: UTF-8 and UTF-16 (either endianness, with or without a BOM) are text even when they
+# contain NUL bytes, so such a file is scanned instead of skipped. Only a file that is neither is
+# counted as binary, and such a file is reported through its name, not through its bytes.
 function Read-ScanUnits {
     param([string]$FullPath, [string]$DisplayPath, [ref]$SkippedBinary)
     try {
@@ -255,20 +301,31 @@ function Read-ScanUnits {
         Add-Finding "unreadable" $DisplayPath
         return @()
     }
-    $probe = [Math]::Min($bytes.Length, 8000)
-    for ($i = 0; $i -lt $probe; $i++) {
-        if ($bytes[$i] -eq 0) {
-            $SkippedBinary.Value = $SkippedBinary.Value + 1
-            return @()
-        }
+    $text = ConvertFrom-ScanText -Bytes $bytes
+    if ($null -eq $text) {
+        $SkippedBinary.Value = $SkippedBinary.Value + 1
+        return @()
     }
-    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-    $lines = @($text -split "`r?`n")
-    $units = New-Object System.Collections.Generic.List[object]
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $units.Add([pscustomobject]@{ Location = $DisplayPath; Number = ($i + 1); Text = $lines[$i] })
+    return (ConvertTo-ScanUnits -Text $text -Location $DisplayPath)
+}
+
+# Reads a git blob straight out of git as bytes and scans it. The history side needs this because a
+# text file saved as UTF-16 is shown by git as "Binary files ... differ": its lines never reach the
+# diff, so without this the account name inside such a log would stay invisible to the history scan.
+function Read-GitBlobUnits {
+    param([string]$RepoRoot, [string]$Spec, [string]$Location)
+    $temp = [System.IO.Path]::GetTempFileName()
+    try {
+        $null = cmd /c "git -C `"$RepoRoot`" cat-file -p `"$Spec`" > `"$temp`" 2>NUL"
+        if ($LASTEXITCODE -ne 0) { return @() }
+        $bytes = [System.IO.File]::ReadAllBytes($temp)
+        if ($bytes.Length -eq 0) { return @() }
+        $text = ConvertFrom-ScanText -Bytes $bytes
+        if ($null -eq $text) { return @() }
+        return (ConvertTo-ScanUnits -Text $text -Location $Location)
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
     }
-    return $units.ToArray()
 }
 
 # Scans a batch of units. Every unit knows where it came from, so a finding is reported as
@@ -425,6 +482,27 @@ function Invoke-SelfTest {
         New-Sample "deny-hit/note.txt" ("a line with " + $sampleDenyWord + " inside" + "`n")
         New-Sample "deny-clean/note.txt" ("a clean line" + "`n")
 
+        # Files in encodings other than UTF-8. A gate log saved as UTF-16 carries the same text but
+        # every other byte is NUL, which is exactly what used to get it skipped as "binary".
+        function New-SampleBytes {
+            param([string]$RelativePath, [byte[]]$Bytes)
+            $samplePath = Join-Path $selfTestRoot $RelativePath
+            $parent = Split-Path -Parent $samplePath
+            if (!(Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+            [System.IO.File]::WriteAllBytes($samplePath, $Bytes)
+        }
+        $utf16Text = $userPathForbid + "\" + "project" + "`n" + $slash + "home" + $slash + $sampleUser + "/work/app.log" + "`n"
+        New-SampleBytes "dirty-utf16le/note.txt" ([byte[]](@(0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes($utf16Text)))
+        New-SampleBytes "dirty-utf16be/note.txt" ([byte[]](@(0xFE, 0xFF) + [System.Text.Encoding]::BigEndianUnicode.GetBytes($utf16Text)))
+        # The same text without a BOM: recognised by the NUL parity, not by a marker.
+        New-SampleBytes "dirty-utf16le-nobom/note.txt" ([System.Text.Encoding]::Unicode.GetBytes($utf16Text))
+        New-SampleBytes "clean-utf16/notes.txt" ([System.Text.Encoding]::Unicode.GetBytes("UTF-16 sample line: clean" + "`n"))
+        # A genuinely binary file that happens to contain the pattern text. Its NUL bytes are neither
+        # absent nor all on one side of the byte pairs, so it must stay skipped instead of producing
+        # a hit (or the skip rule would be untestable).
+        $binarySample = "PNG" + "`0`0" + $userPathForbid + "`0`0" + "tail"
+        New-SampleBytes "clean-binary/asset.bin" ([System.Text.Encoding]::ASCII.GetBytes($binarySample))
+
         $denyFilePath = Join-Path $selfTestRoot "denylist.txt"
         [System.IO.File]::WriteAllText($denyFilePath, ("# comment line`n" + $sampleDenyWord + "`n"),
             (New-Object System.Text.UTF8Encoding($false)))
@@ -460,6 +538,11 @@ function Invoke-SelfTest {
             @{ Name = "fake-token-fails"; Dir = "dirty-token"; Deny = $false; Expect = 1; Category = "token"; Forbid = $sampleToken },
             @{ Name = "user-name-path-fails"; Dir = "dirty-user-path"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
             @{ Name = "chinese-user-name-path-fails"; Dir = "dirty-user-path-chinese"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $chineseUserForbid },
+            @{ Name = "utf16le-user-name-path-fails"; Dir = "dirty-utf16le"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
+            @{ Name = "utf16be-user-name-path-fails"; Dir = "dirty-utf16be"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
+            @{ Name = "utf16le-without-bom-fails"; Dir = "dirty-utf16le-nobom"; Deny = $false; Expect = 1; Category = "user-path"; Forbid = $userPathForbid },
+            @{ Name = "clean-utf16-passes"; Dir = "clean-utf16"; Deny = $false; Expect = 0; Category = ""; Forbid = "" },
+            @{ Name = "binary-with-pattern-text-is-skipped"; Dir = "clean-binary"; Deny = $false; Expect = 0; Category = ""; Forbid = "" },
             @{ Name = "tracked-keystore-fails"; Dir = "dirty-name-keystore"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "tracked-jks-fails"; Dir = "dirty-name-jks"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
             @{ Name = "tracked-gguf-fails"; Dir = "dirty-name-gguf"; Deny = $false; Expect = 1; Category = "sensitive-file"; Forbid = "" },
@@ -821,6 +904,7 @@ if ($directoryMode) {
         $currentPath = ""
         $newLine = 0
         $oldLine = 0
+        $binaryPaths = New-Object System.Collections.Generic.List[string]
         foreach ($line in $diff.Output) {
             if ($line -match '^diff --git a/(.+) b/(.+)$') {
                 $currentPath = $Matches[2]
@@ -837,6 +921,12 @@ if ($directoryMode) {
                 continue
             }
             $number = "-"
+            # git shows a text file saved as UTF-16 as "Binary files ... differ": no line of it
+            # reaches the diff. Remember the path so the blob itself can be read and scanned below.
+            if ($line -match '^Binary files .+ differ$') {
+                if (![string]::IsNullOrEmpty($currentPath)) { $binaryPaths.Add($currentPath) }
+                continue
+            }
             if ($line -match '^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@') {
                 $oldLine = [int]$Matches[1]
                 $newLine = [int]$Matches[2]
@@ -856,6 +946,14 @@ if ($directoryMode) {
             $units.Add([pscustomobject]@{ Location = $location; Number = $number; Text = $line })
         }
         Test-ScanUnits -Units $units.ToArray() -DenyWords $denyWords
+        # Text that git called binary (UTF-16 and friends) is read from the blob instead, on both
+        # sides of the change; a genuinely binary blob is not text and stays unread.
+        foreach ($binaryPath in $binaryPaths) {
+            foreach ($blobSpec in @("${sha}:${binaryPath}", "${sha}^:${binaryPath}")) {
+                $blobUnits = @(Read-GitBlobUnits -RepoRoot $repoRoot -Spec $blobSpec -Location ("$shortSha $binaryPath"))
+                if ($blobUnits.Count -gt 0) { Test-ScanUnits -Units $blobUnits -DenyWords $denyWords }
+            }
+        }
     }
     $script:findingScope = "head"
     $script:findingAccepted = $false
