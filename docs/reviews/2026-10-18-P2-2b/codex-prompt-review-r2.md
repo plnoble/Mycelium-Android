@@ -2,7 +2,7 @@
 
 只读复核：不要修改任何文件、不要联网、不要运行 Gradle、不要操作设备。工作区应保持干净。
 
-- 审核对象：`wp/P2-2b-release-ready`，代码尖端 `86d4466`（门禁在该提交的独立 worktree 上跑过）；随后只有 `docs/reviews/2026-10-18-P2-2b/DELIVERY.md` 的记账提交。
+- 审核对象：`wp/P2-2b-release-ready`，代码与脚本尖端 `06a79b1`（门禁在**该提交**的全新 worktree 上跑过：`PASS: 0 failures, 0 warnings`，347 例）；随后只有 `docs/reviews/2026-10-18-P2-2b/` 下交付报告与复审要求的记账提交。
 - 对照基线：`main @ 286f86a`。上一轮报告：`docs/reviews/2026-10-18-P2-2b/REVIEW.md`（结论「需修改」，13 项必修 M1–M13）。
 - 上一轮的公开扫描结论已过期：M9 修了 UTF-16 漏报并按用户 2026-10-20 裁定把相关历史提交补进了 `scripts/accepted-history-commits.txt`（理由「用户接受公开，不改写历史」）。当前 `check-public.ps1 -Full` 为 PASS、0 条阻断，这一读数要单独核，不要沿用旧结论。
 
