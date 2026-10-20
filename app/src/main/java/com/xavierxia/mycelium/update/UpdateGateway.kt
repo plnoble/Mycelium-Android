@@ -52,7 +52,11 @@ sealed interface VerifyOutcome {
 interface ApkVerifier {
     val isAvailable: Boolean
 
-    suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome
+    /**
+     * [call] 与这次下载用的是**同一个**取消句柄：校验（读边车、算哈希、读 APK）也算这次任务的一部分，
+     * 「取消」和协程取消都必须能停掉它（M3）。默认值只为老调用点，生产一律显式传入。
+     */
+    suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall = GatewayCall()): VerifyOutcome
 }
 
 /**
@@ -132,7 +136,7 @@ object UnwiredApkDownloader : ApkDownloader {
 object UnwiredApkVerifier : ApkVerifier {
     override val isAvailable: Boolean = false
 
-    override suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome =
+    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome =
         VerifyOutcome.Failed(NOT_WIRED)
 }
 

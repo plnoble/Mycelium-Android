@@ -261,7 +261,7 @@ private class WiredDownloader : ApkDownloader {
 private class WiredVerifier : ApkVerifier {
     override val isAvailable: Boolean = true
 
-    override suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome = VerifyOutcome.Verified
+    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome = VerifyOutcome.Verified
 }
 
 private class WiredInstaller : InstallSessionGateway {

@@ -37,7 +37,8 @@ sealed interface DownloadOutcome {
  */
 class FileDownloader(
     private val gateway: OutboundGateway,
-    private val pause: (Long) -> Unit = { Thread.sleep(it) },
+    /** 重试等待。默认实现**可被取消**（分片睡眠）；测例可换成记录或阻塞实现。 */
+    private val pause: (Long, GatewayCall) -> Unit = { delayMs, call -> cancellableSleep(delayMs, call) },
     private val attempts: Int = 3,
 ) {
     fun download(
@@ -109,7 +110,7 @@ class FileDownloader(
     /** True when the wait finished, false when the stop arrived around it. */
     private fun waitOrCancel(delayMs: Long, call: GatewayCall): Boolean = try {
         call.check()
-        pause(delayMs)
+        pause(delayMs, call)
         call.check()
         true
     } catch (_: GatewayCancelled) {
@@ -123,6 +124,21 @@ class FileDownloader(
         /** Targets with a download running in this process, keyed by normalized path. */
         val IN_FLIGHT: MutableSet<String> = ConcurrentHashMap.newKeySet()
     }
+}
+
+/**
+ * 等待，但一看到取消就提前结束：把一次 2/5/10 秒的等待切成 [sliceMs] 的小片，每片之间查一次取消。
+ * 直接 `Thread.sleep` 要睡满才醒 —— 「退避期间按取消，界面却还要等十秒」就是 M3 指出的那个缺口。
+ */
+internal fun cancellableSleep(delayMs: Long, call: GatewayCall, sliceMs: Long = 50L) {
+    var remaining = delayMs
+    while (remaining > 0) {
+        call.check()
+        val slice = minOf(remaining, sliceMs)
+        Thread.sleep(slice)
+        remaining -= slice
+    }
+    call.check()
 }
 
 /** Streams the file through SHA-256; the cancel switch is checked between chunks. */

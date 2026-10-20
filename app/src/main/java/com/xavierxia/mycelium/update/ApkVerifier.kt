@@ -1,6 +1,7 @@
 package com.xavierxia.mycelium.update
 
 import com.xavierxia.mycelium.net.GatewayCall
+import com.xavierxia.mycelium.net.GatewayCancelled
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -62,7 +63,7 @@ class LocalApkVerifier(
 ) : ApkVerifier {
     override val isAvailable: Boolean = true
 
-    override suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome = withContext(io) {
+    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome = withContext(io) {
         if (!apk.isFile) return@withContext VerifyOutcome.Failed("下载的文件不见了，请重新下载。")
 
         // 1) sha256：先比哈希，坏包不进入更贵的读签名步骤。
@@ -70,7 +71,10 @@ class LocalApkVerifier(
         val expected = sidecar.takeIf { it.isFile }?.readText()?.trim()?.lowercase(Locale.US)
             ?: return@withContext fail(apk, "找不到期望的校验和（.sha256），已删除，请重新下载。")
         val actual = try {
-            transport.sha256(apk, GatewayCall()).lowercase(Locale.US)
+            // 与下载同一个取消句柄：取消落在校验阶段也要能停下来，而不是把已下好的文件当失败删掉。
+            transport.sha256(apk, call).lowercase(Locale.US)
+        } catch (cancelled: GatewayCancelled) {
+            throw cancelled
         } catch (_: Exception) {
             return@withContext fail(apk, "读不出下载的文件，已删除，请重新下载。")
         }

@@ -96,9 +96,13 @@ internal class RecordingVerifier(private val outcome: VerifyOutcome = VerifyOutc
     override val isAvailable: Boolean = true
     var verifications = 0
         private set
+    /** 最近一次校验拿到的取消句柄：测例据此断言「校验与下载共用同一个句柄」（M3）。 */
+    var lastCall: GatewayCall? = null
+        private set
 
-    override suspend fun verify(apk: File, release: ReleaseInfo): VerifyOutcome {
+    override suspend fun verify(apk: File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome {
         verifications += 1
+        lastCall = call
         return outcome
     }
 }

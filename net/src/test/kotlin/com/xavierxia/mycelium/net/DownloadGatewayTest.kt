@@ -501,7 +501,7 @@ class DownloadGatewayTest {
                 parentFile.mkdirs()
                 writeBytes(ByteArray(4096) { 0x7F }) // a poisoned half file
             }
-            val outcome = FileDownloader(gateway(policyFor(server)), pause = { fail("不该重试") }).download(
+            val outcome = FileDownloader(gateway(policyFor(server)), pause = { _, _ -> fail("不该重试") }).download(
                 DownloadRequest("http://127.0.0.1:${server.port}/asset", update, file),
                 expectedSha256 = sha256(bytes),
             )
@@ -551,7 +551,7 @@ class DownloadGatewayTest {
         }.use { server ->
             val waits = mutableListOf<Long>()
             val file = target()
-            val outcome = FileDownloader(gateway(policyFor(server)), pause = { waits += it }).download(
+            val outcome = FileDownloader(gateway(policyFor(server)), pause = { ms, _ -> waits += ms }).download(
                 DownloadRequest("http://127.0.0.1:${server.port}/asset", update, file),
                 expectedSha256 = sha256(bytes),
             )
@@ -591,7 +591,7 @@ class DownloadGatewayTest {
         LocalHttp { HttpReply(404, ByteArray(0)) }.use { server ->
             val waits = mutableListOf<Long>()
             val file = target()
-            val outcome = FileDownloader(gateway(policyFor(server)), pause = { waits += it }).download(
+            val outcome = FileDownloader(gateway(policyFor(server)), pause = { ms, _ -> waits += ms }).download(
                 DownloadRequest("http://127.0.0.1:${server.port}/asset", update, file),
             )
             assertNotNull(outcome as? DownloadOutcome.Failed, "期望 Failed，实际 $outcome")
