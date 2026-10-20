@@ -610,6 +610,39 @@ class DownloadGatewayTest {
     }
 
     @Test
+    fun aSecondThreadIsRefusedWhileTheFirstDownloadIsStillWriting() {
+        // 真并发（两个 OS 线程），而不是在进度回调里同线程重入：这才是「同一文件不许两个写者」的场景。
+        val bytes = bodyBytes(64 * 1024)
+        LocalHttp { HttpReply(200, bytes) }.use { server ->
+            val file = target()
+            val downloader = FileDownloader(gateway(policyFor(server)))
+            val entered = java.util.concurrent.CountDownLatch(1)
+            val release = java.util.concurrent.CountDownLatch(1)
+            val first = AtomicReference<DownloadOutcome?>(null)
+            val worker = Thread {
+                first.set(
+                    downloader.download(
+                        DownloadRequest("http://127.0.0.1:${server.port}/asset", update, file),
+                        onProgress = DownloadProgress { _, _ ->
+                            entered.countDown()
+                            release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                        },
+                    ),
+                )
+            }
+            worker.start()
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS), "第一个下载应已开始写")
+            val second = downloader.download(DownloadRequest("http://127.0.0.1:${server.port}/asset", update, file))
+            assertTrue(second is DownloadOutcome.Rejected, "另一线程并发下载同一文件必须被拒：$second")
+            release.countDown()
+            worker.join(10_000)
+            assertEquals(1, server.count.get(), "第二个请求根本不该发出去")
+            assertTrue(first.get() is DownloadOutcome.Completed, "实际 ${first.get()}")
+            assertArrayEquals(bytes, file.readBytes())
+        }
+    }
+
+    @Test
     fun fileDownloaderDeletesThePartialFileWhenTheServerRefuses() {
         LocalHttp { HttpReply(404, ByteArray(0)) }.use { server ->
             val waits = mutableListOf<Long>()
