@@ -206,6 +206,12 @@ class UpdateCenter(
                 finishInstalled(record.tagName)
                 return
             }
+            // 安装结果回来时要核对是不是**当前候选**（M5）：上个候选的迟到回执只清记录，
+            // 不许拿它改这一轮的界面状态。
+            if (record.tagName != prefs.pendingReleaseTag) {
+                sessionState.clear(record.sessionId)
+                return
+            }
             if (record.phase.isTerminal) {
                 consumeTerminal(record)
                 return
@@ -543,7 +549,8 @@ class UpdateCenter(
         val release = (result as? UpdateResult.Available)?.release
         val shown = release?.takeIf { it.tagName != prefs.ignoredTag }
         val previous = _state.value
-        val previousTag = previous.release?.tagName
+        // 进程重建后卡片可能还没回来，落盘的目标 tag 也算上一个候选（M5）。
+        val previousTag = previous.release?.tagName ?: prefs.pendingReleaseTag
         // 检查失败**不动**候选：卡片、续传目标与 `.part` 都还属于上一个已知版本（M5）。
         val failed = result is UpdateResult.Error
         if (shown != null) {
@@ -555,7 +562,12 @@ class UpdateCenter(
         }
         // 候选换了版本：旧版本的下到一半 / 已就绪状态就地结束，旧文件也不属于任何候选了（M5）。
         // 不这么做，「已有 v0.5.0 的 Ready 文件、又查到 v0.6.0」会把旧包按新 tag 交给安装器。
-        val switchedFrom = if (shown != null && previousTag != null && shown.tagName != previousTag) previousTag else null
+        val switchedFrom = when {
+            previousTag == null -> null
+            shown == null && !failed -> previousTag
+            shown != null && shown.tagName != previousTag -> previousTag
+            else -> null
+        }
         if (switchedFrom != null) {
             // 换 tag 也要先停旧任务、等它退出再删旧包（M3）。
             val stopping = stopCurrent()
