@@ -146,7 +146,7 @@ lint 原文表与警告原文行：
 - **只列不拦**：`[local-path] 183 条`（本机盘符路径，交统筹逐条看）。
 - **范围对照（原文）**：`findings by scope: HEAD 103, history 154`；`accepted-history hits: 72; history hits outside the list: 82`。这 82 条里 **80 条是 `local-path`（本来就不拦）**，只有上面那 2 条是 `user-path` 阻断项。
 - **对这 2 条的判断（供统筹裁定，本轮没有自己动手）**：命中段落是一段 **3 个 ASCII 字符的示例目录名**（此处原写「4 个」，经全量审实测为 3 个，已回改），**不是本机账户名**，也不等于本仓历史上被接受公开的那批用户名；这一行本身就是「描述该类模式」的那句话（这次洗刷就是 `9e5b830` 干的事）。也就是说，它是**模式形状的误报**，但按脚本现有规矩它照样阻断。
-- **我选的保守做法**：**没有**把这 2 个提交加进 `accepted-history-commits.txt`，**没有**放宽 `check-public.ps1` 的规则，**没有**为了过检查去删证据文本。留给统筹三选一：①把这 2 个提交加进清单（先例：清单就是为「用户接受公开的历史」设的）②放宽规则（例如让「描述模式的示例段」不算命中）③保持 FAIL 并接受「推送门禁过不了」。**无论选哪个，本分支当前的推送门禁都是 FAIL（退出码 1）。**
+- **实际做法（此处按实回改）**：用户 2026-10-20 裁定「接受公开、不改写历史」，于是这 2 个提交连同 `3dc17e1`、`2076456`、`0f9d680` 一并补进了 `scripts/accepted-history-commits.txt`（清单 13 → 18 个，见第八节与 `28d6253`）。**本节上面那段原写「没有加进清单、三选一交统筹」，与后来实际做法相反，特此更正**：没有放宽 `check-public.ps1` 的规则，也没有为了过检查去删证据文本。
 - 另有三类只能靠重写未推送历史才能清掉的东西：**(a) 本次新发现、HEAD 仍在的那一条** —— `docs/reviews/2026-10-19-P2-2b-wording/check-all.txt` 里（UTF-16，见上）的账户名路径，涉及 `3dc17e1`、`2076456`、`0bb81f9` 与当前尖端；**(b)** git 提交元数据里的作者邮箱本地部分含本机账户名；**(c)** `9ef4eb9` 树里的本机账户名/设备型号字面量（HEAD 已洗成占位符）。**(a) 不在脚本的阻断项里 —— 那是脚本自己漏了它（M9）**；三条的处置方式等统筹/用户裁定。
 
 ## 六、真机环节
@@ -192,7 +192,7 @@ lint 原文表与警告原文行：
 | 事项 | 我先选的保守做法 |
 |---|---|
 | 范围补充分支 `wp/P2-2b-persona-pack-wording`（改动 `f1bb2d8`、`4da756c`，门禁证据 `2076456`，界面文字与 `:contract` 的 8 句报错统一成「人物包」） | **已经合入，不是「今晚没有合」**：全量审实测，合并提交 `5c33c55` 是 `0bb81f9` 的祖先，也与当前尖端 `36672cd` 同在一条历史里，`docs/reviews/2026-10-19-P2-2b-wording/` 的证据因此就在本次全量审的范围内。**此处原写「今晚没有合」不属实，已按实测回改**；`docs/tracks/开发线.md` 里那句「待合进 `wp/P2-2b-release-ready`，随本包一起审」也要同步改成「已合入」——见 M12。 |
-| `check-public.ps1` 的 2 条 `[user-path]` 阻断项（第五节） | **没有**自己加进已接受清单、**没有**放宽规则、**没有**删证据文本；三选一交统筹（加清单 / 放宽规则 / 接受 FAIL）。 |
+| `check-public.ps1` 的 2 条 `[user-path]` 阻断项（第五节） | **已按用户 2026-10-20 裁定办**：补进已接受清单（清单 13 → 18，见第八节与 `28d6253`）；**没有**放宽规则、**没有**删证据文本。第五节那句「没有自己加进清单」是当时的状态，已按实际回改。 |
 | git 提交元数据里作者邮箱的本地部分含本机账户名（历史里有，**以后的新提交也还会有**，除非改配置或改历史） | 不改历史、不动 git 全局配置；新提交照常提交（沿用 P2-2 的处置），等统筹定。 |
 | `GatewayPurpose` 没加「下载」专用枚举：下载复用 `Update`，`sentBody` 恒为 `""`（下载审计没有正文） | 不加（加要动 `AllowedHosts` 的 `when` 与 app 的 `purposeLabel`，本轮没有收益）；如实记「下载审计没有正文」，等统筹定。 |
 | 「校验失败截图」要不要单列一条真机项（方案审点名要，但 `PLAN.md` 只记了取舍） | **按单列处理**（第六节 B3），交统筹确认。 |
@@ -262,3 +262,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 * **M10 历史自测夹具不完全等于五类真实历史形态**：自测里的五个仓库是一次性建出来的近似形态，能挡住「多 hunk / 重命名 / UTF-16 / 合并 / 空范围」这几类漏扫，但不等于真实历史的完整形态。推送前由统筹自己再扫一遍真实历史（`check-public.ps1 -Full`）。
 * **复审建议第 2～4 条**（历史扫描器的进一步加固）留到 0.4.0 之后再做。
 * **作者邮箱**：统筹已裁定不处理。
+## 十一、按第三轮修复后的尖端重跑：门禁 + 公共扫描
+
+统筹 2026-10-20 要求「修完后在全新 worktree 跑 `check-all.ps1`（零失败零警告）+ `check-public.ps1 -Full` 和 `-SelfTest`」。实况如下。
+
+* **跑在哪一个提交**：全新 worktree `D:\Agent\Worktrees\Mycelium-Android\p2-2b-final`，`git worktree add --detach` 定格在 **`d3fa186`**。之后的提交只有 `docs/reviews/2026-10-18-P2-2b/DELIVERY.md`（`git diff --stat d3fa186..HEAD` 实测：1 file changed, 1 insertion, 1 deletion），**代码树与尖端完全一致**，所以下面这份门禁就是尖端的门禁。
+* **llama.cpp 准备**：全新 worktree 里 `llm/vendor/llama.cpp` 是不入库的第三方源码，`prepare-llama.ps1` 在本机离线会去 clone 而失败；这次把主工作区里已备好的那棵（`git rev-parse HEAD` = `5e03bdd8700948b9c41c54dd1b00f28a2aebc03f`，与 `CMakeLists.txt` 里钉的提交一致）整棵拷进去，再用 `check-all.ps1 -SkipLlamaPrepare` 跑。
+* **门禁结果：PASS**。`check-all exit=0`；单测 **391 例 / 0 失败 / 0 错误 / 0 跳过**（`:app` 217、`:contract` 22、`:hearth` 46、`:llm` 13、`:model-api` 3、`:net` 62、`:roundtable` 28）；lint **0 错误 / 0 警告 / 0 hints**（debug 与 release 都 0）；Kotlin 编译错误行 0；warnings to fix 0；三个 APK 都产出（`app-debug.apk` 59.9 MiB signed、`app-debug-androidTest.apk` 2.8 MiB signed、`app-release-unsigned.apk` 38.9 MiB unsigned）。日志：仓库外 `D:\Agent\Worktrees\Mycelium-Android\p2-2-work\final-gate2\check-all.txt`（`.exitcode` 同目录）。
+  这条门禁是**冷构建**（新 worktree、原生 CMake 从零配），本机跑了约 1 小时 50 分；期间还并行跑过别的 Gradle 构建抢守护进程，所以比正常慢。
+* **`check-public.ps1 -Full`：退出码 0（PASS）**。读数：被跟踪文件 406（405 扫描、1 个二进制跳过）；基线 `origin/main 3c7074c2b62b2a1f045434673414e6476b5ce977`；已接受清单 **18** 个提交、18 个都在范围内；本地词表未配置；**阻断项 0**（`user-path` 0、`local-denylist` 0）；`findings by scope: HEAD 117, history 185`；`accepted-history hits: 100`（`user-path 24、local-path 76`）；范围外 85 条全部是只列不拦的类别；**302 条只列不拦，交统筹逐条看**。日志：同目录 `check-public-full.txt`。
+* **`check-public.ps1 -SelfTest`：37 项全过**（`check-public: self test: 37 checks, 37 passed, 0 failed`），含第三轮新加的 `utf16-mixed-endianness-fails`。日志：同目录 `check-public-selftest.txt`。
+* **与第五节的关系**：第五节的读数（被跟踪 390、范围 178 个提交、2 条 `user-path` 阻断）取自 `0bb81f9` 那次；按当前尖端重跑，同一脚本**退出码 0、无阻断项**——差别来自两点：清单从 13 个补到 18 个（用户 2026-10-20 裁定），以及 M9 之后 16 位文本按 LE/BE 都解码、多扫出内容。**以第十一节这份为准**。
+
