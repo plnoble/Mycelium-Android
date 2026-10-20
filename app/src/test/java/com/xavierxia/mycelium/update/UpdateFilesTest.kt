@@ -39,10 +39,29 @@ class UpdateFilesTest {
         val half = files(0).requiredBytes(size38, existingBytes = size38 / 2)
         val full = files(0).requiredBytes(size38, existingBytes = size38)
 
-        assertEquals(fresh, half)
-        assertEquals(fresh, full)
-        // 续传更不该比从头下还贵。
-        assertFalse(half > fresh)
+        // M4 修正后的口径：已在盘上的字节不占新增空间。
+        assertEquals(38 * mib + 38 * mib + 32 * mib, fresh)
+        assertEquals(19 * mib + 38 * mib + 32 * mib, half)
+        assertEquals(38 * mib + 32 * mib, full)
+        // 续传必须比从头下更省 —— 旧公式让两者相等，那正是审核说的「把续传误判成不够」。
+        assertTrue("续传要比从头下更省", half < fresh)
+        assertTrue("下完了只剩会话副本与余量", full < half)
+    }
+
+    @Test
+    fun aHalfDownloadedPackagePassesWithNinetyMiBFree() {
+        // 审核点名的场景：38 MiB 的包已下 19 MiB、可用 90 MiB → 需要 89 MiB，必须放行；少一字节才拦。
+        files(90 * mib).requireSpace(size38, existingBytes = size38 / 2)
+        assertThrows(SpaceShortage::class.java) {
+            files(89 * mib - 1).requireSpace(size38, existingBytes = size38 / 2)
+        }
+    }
+
+    @Test
+    fun theInstallStepNeedsTheSessionCopyAgain() {
+        // 下载完只剩 70 MiB：会话副本 38 + 余量 32，安装前必须被拦下（M4）。
+        files(70 * mib).requireSessionSpace(size38)
+        assertThrows(SpaceShortage::class.java) { files(70 * mib - 1).requireSessionSpace(size38) }
     }
 
     @Test

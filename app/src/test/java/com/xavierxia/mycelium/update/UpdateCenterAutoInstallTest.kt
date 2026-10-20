@@ -76,6 +76,35 @@ class UpdateCenterAutoInstallTest {
     }
 
     @Test
+    fun whenTheSpaceDropsBeforeInstallingNoSessionIsCreated() {
+        var free = Long.MAX_VALUE / 4
+        val store = UpdateFiles(tmp.root, availableBytes = { free })
+        val installer = RecordingInstaller()
+        val center = testCenter(
+            source = CountingReleaseSource { testRelease("0.5.0") },
+            prefs = prefs,
+            clock = { 100 * 3_600_000L },
+            files = store,
+            downloader = RecordingDownloader(),
+            verifier = object : ApkVerifier {
+                override val isAvailable: Boolean = true
+                override suspend fun verify(apk: java.io.File, release: ReleaseInfo, call: GatewayCall): VerifyOutcome {
+                    // 校验之后、安装之前，空间被别的应用吃掉了（M4 的复查要拦住这种）。
+                    free = 0L
+                    return VerifyOutcome.Verified(5L)
+                }
+            },
+            installer = installer,
+        )
+        runBlocking { center.checkIfDue() }
+
+        center.startDownload()
+
+        assertEquals("空间不够就不许建会话", 0, installer.installs)
+        assertTrue("要给明确的失败", center.state.value.download is DownloadUiState.Failed)
+    }
+
+    @Test
     fun aCancelledVerificationNeverReachesTheInstaller() {
         val installer = RecordingInstaller()
         val files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })

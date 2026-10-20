@@ -377,7 +377,8 @@ class UpdateCenterTest {
         val downloader = RecordingDownloader()
         val verifier = RecordingVerifier()
         val installer = RecordingInstaller()
-        val files = UpdateFiles(downloadDir)
+        // M4 起安装前要复查空间，这里必须给一个明确的可用空间（默认走 StatFs，单测里没有真实值）。
+        val files = UpdateFiles(downloadDir, availableBytes = { Long.MAX_VALUE / 4 })
         val now = 100 * hour
         val center = testCenter(
             source,

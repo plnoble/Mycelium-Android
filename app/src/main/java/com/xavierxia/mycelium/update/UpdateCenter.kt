@@ -345,6 +345,13 @@ class UpdateCenter(
 
     private fun startSession(ready: DownloadUiState.Ready) {
         val release = _state.value.release ?: return
+        // 安装前复查空间（M4）：下载完到点安装之间，可用空间可能已经被别的应用吃掉。
+        try {
+            files.requireSessionSpace(ready.size)
+        } catch (shortage: SpaceShortage) {
+            failInstall(shortage.message.orEmpty())
+            return
+        }
         // 上一次会话还挂着（非终态）时再来一次：先放弃它，否则新记录会被幂等规则挡下。
         val previous = sessionState.read()
         if (previous != null) {

@@ -97,8 +97,11 @@ class UpdateFiles(
     fun freeBytes(): Long = availableBytes()
 
     /**
-     * 需要腾出多少：`当前文件已占用 + 剩余下载 + 会话副本 + 余量`（C4 第 3 条的公式）。
-     * `occupied + remaining` 恒等于整包大小，所以续传不会把已有字节重复算一遍。
+     * 需要腾出多少：`剩余下载 + 会话副本 + 余量`（C4 第 3 条的公式，M4 修正）。
+     *
+     * **已经在盘上的字节不占新增空间**，所以这里是 `remaining`，而不是 `occupied + remaining`：
+     * 38 MiB 的包已下 19 MiB、可用 90 MiB 时，需要的是 19+38+32=89 MiB —— 旧公式算成 108 MiB，
+     * 会把一次正常的续传误判成空间不够。
      */
     fun requiredBytes(apkSizeBytes: Long?, existingBytes: Long = 0L): Long {
         val size = apkSizeBytes
@@ -106,7 +109,23 @@ class UpdateFiles(
         val occupied = existingBytes.coerceIn(0L, size)
         val remaining = size - occupied
         val margin = maxOf(MARGIN_MIN_BYTES, size / 4)
-        return occupied + remaining + size + margin
+        return remaining + size + margin
+    }
+
+    /**
+     * 安装那一步还要一份会话副本 + 余量。下载完成到用户点安装之间可用空间可能已经变了，
+     * 所以安装入口必须单独复查一次（M4），不能沿用下载前那次判断。
+     */
+    fun sessionRequiredBytes(apkSizeBytes: Long): Long {
+        val size = apkSizeBytes.coerceAtLeast(0L)
+        return size + maxOf(MARGIN_MIN_BYTES, size / 4)
+    }
+
+    /** 安装前复查空间：不够就抛 [SpaceShortage]（文案里同样有「还差多少」）。 */
+    fun requireSessionSpace(apkSizeBytes: Long) {
+        val needed = sessionRequiredBytes(apkSizeBytes)
+        val actual = freeBytes()
+        if (actual < needed) throw SpaceShortage(needed, actual)
     }
 
     /** 不够就抛 [SpaceShortage]（差值在人话里）；够就静默返回。下载前必调。 */
