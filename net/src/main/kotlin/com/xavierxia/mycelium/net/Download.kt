@@ -131,6 +131,15 @@ internal class HopWalker(
 ) {
     private val contacted = mutableListOf<String>()
 
+    /** 是否为最初请求的那个域名（大小写不敏感）。 */
+    private fun sameHostAsStart(here: URI, start: URI): Boolean =
+        here.host?.equals(start.host, ignoreCase = true) == true
+
+    private companion object {
+        /** 只该发给最初那个域名的凭据类请求头。 */
+        val CREDENTIAL_HEADERS = setOf("authorization", "cookie", "proxy-authorization")
+    }
+
     /** Redirects followed in the walk that just ran. */
     var redirects: Int = 0
         private set
@@ -156,7 +165,13 @@ internal class HopWalker(
                 connection.readTimeout = boundedReadTimeout(readTimeoutMs)
                 connection.instanceFollowRedirects = false
                 connection.setRequestProperty("Accept-Encoding", "identity")
-                headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+                headers.forEach { (name, value) ->
+                    // 跨域跳转不带凭据（工作包 1.2 第 3 条）：Authorization / Cookie /
+                    // Proxy-Authorization 只发给最初那个域名；跳到别的域名（CDN）就摘掉。
+                    if (sameHostAsStart(uri, start) || name.lowercase() !in CREDENTIAL_HEADERS) {
+                        connection.setRequestProperty(name, value)
+                    }
+                }
                 if (range != null) connection.setRequestProperty("Range", range)
                 call.check()
                 if (body != null) {
