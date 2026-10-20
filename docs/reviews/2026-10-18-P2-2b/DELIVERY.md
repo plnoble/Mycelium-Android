@@ -162,6 +162,19 @@ lint 原文表与警告原文行：
 * **B 组（四步走查、系统确认、未知来源往返、校验失败截图、v2-only 签名、哈希耗时、cacheDir 回收、跳转链域名）全部未做**，原因见下条；C 组（P2-1c 测速与温度 0 的对比）同样未做。
 * **为什么 B 组现在做不了**：手机上装的是**调试包**，而 `MyceliumApp.kt:140` 用 `BuildConfig.APPLICATION_ID.endsWith(".debug")` 判定 `isDebugPackage`，`UpdateCenter.kt:147` 对调试包直接 `return` —— 调试包**根本没有更新入口**（这正是 M1 的 `debugPackageHasNoInstallEntry` 测例断言的设计）。所以真机更新流程只能用「applicationId 不以 `.debug` 结尾」的包走，即 release 变体，而它的 applicationId 与手机上的正式版 `com.xavierxia.mycelium` 冲突（红线：不碰真机正式版）。**走法需要用户/统筹先定**：(A) 临时建一个走查变体（applicationId 如 `…upcheck`、`versionName` 临时设 `0.1.0` 让线上真实 `0.1.1` 变成「有更新」、用本机调试签名，只在本机改、不提交，走完还原）；(B) 用 release 变体覆盖正式版（会替换正式版数据）；(C) 由统筹在发布侧自己验。我按无人在场的保守做法选 **(A) 的推迟**：不动正式版、不改 build 配置，等用户定。
 
+**走查变体怎么复现（2026-10-20 夜，本机临时做法，不提交）**
+
+1. 临时把 `app/build.gradle.kts` 里 debug 的 `applicationIdSuffix` 由 `".debug"` 改成 `".upcheck"`（不改这一行，`isDebugPackage` 就是 true，更新入口根本不会出现），再把顶层 `versionCode` 临时改成 `1`、`versionName` 临时改成 `"0.1.0"`——这样线上真实的 `0.1.1` 才成为「有更新」。**改前先备份**（本次备份在仓库外 `p2-2-work\app-build-gradle.kts.original`），走查完还原。
+2. `gradlew :app:assembleDebug --offline`，得到 `app\build\outputs\apk\debug\app-debug.apk`（包名 `com.xavierxia.mycelium.upcheck`，与手机上的正式版 `com.xavierxia.mycelium` 和调试包 `…debug` 都不同，互不覆盖）。
+3. `adb install -r` 装上，`monkey -p com.xavierxia.mycelium.upcheck -c android.intent.category.LAUNCHER 1` 启动；「我的」页出现红点与「发现新版本：0.1.1 / 安装包 21.9 MiB / 下载并安装」。
+4. 点「下载并安装」→「下载中 x / 21.9」→ 校验 → 拉起系统确认界面（**「安装」由用户点**）。
+5. **走查完要清理**：`adb uninstall com.xavierxia.mycelium.upcheck`（本次载到一半时手机断开，这个包**还留在手机上**，要卸掉），并确认正式版仍是 `0.1.1` / code `2` / `lastUpdateTime 2026-10-10 05:23:04`。
+
+**本次实测到的两点，先记下来**
+
+* **下载速度**：2026-10-20 23:0x，本机（手机经 Wi-Fi）从 GitHub 下 21.9 MiB，55 秒只走了 0.3 MiB，约 **0.3 MiB/分钟**；按这个速度要一个多小时。走查时要么耐心等，要么换网络再看。
+* **断了之后能续上**：应用把 `.part` 留在 `updates/` 下，重连后再点「下载并安装」是续传；断线那一刻进度停在 0.3 / 21.9。
+
 **以下三组仍是留给真机、且需要用户在场的事项（编号沿用原清单）**
 
 
