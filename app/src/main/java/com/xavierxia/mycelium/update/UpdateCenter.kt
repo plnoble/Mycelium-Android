@@ -266,10 +266,9 @@ class UpdateCenter(
         // 下载中、校验中不许再次进入（M3）：取消之后状态才回到 Idle，届时才允许重试。
         val busy = _state.value.download
         if (busy is DownloadUiState.Running || busy is DownloadUiState.Verifying) return
+        // 下载任务里会 join 它（见下）：先等上一次任务真正退出再开始新的。这里不另起协程等，
+        // 那样什么也不保证（工作包 1.2 第 2 条）。
         val previous = pendingStop ?: downloadJob
-        if (previous != null) {
-            scope.launch { previous.join() }
-        }
         val generation = synchronized(stateLock) {
             downloadGeneration++
             downloadCall = call
