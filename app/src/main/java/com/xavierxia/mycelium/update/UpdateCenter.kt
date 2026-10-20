@@ -15,6 +15,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
@@ -114,6 +115,10 @@ class UpdateCenter(
     private var downloadCall: GatewayCall? = null
     /** 任务身份：每次发起、取消、忽略都加一；旧任务回来的进度与终态一律作废（M3）。 */
     private var downloadGeneration = 0L
+    /** 「判代次 + 写状态」必须在同一把锁里，否则取消与迟到的进度会交错（M3）。 */
+    private val stateLock = Any()
+    /** 正在跑的那次下载；取消/重开要等它真正退出再删文件或开始新的（M3）。 */
+    private var downloadJob: Job? = null
     /** 自动检查的在途闸门：同一时刻只允许一次自动检查（M6）。 */
     private val checkGate = Mutex()
     /** 这次要装的版本号（校验时从包里读出来的，M7）：落盘后供进程重建与「已经装上了」判定使用。 */
@@ -251,9 +256,8 @@ class UpdateCenter(
             val target = files.apkFile(release.tagName)
             val outcome = try {
                 downloader.downloadApk(release, target, expected, call) { written, total ->
-                    if (current()) {
-                        _state.value = _state.value.copy(download = DownloadUiState.Running(written, total))
-                    }
+                    // 进度也走同一个串行写入点：取消之后迟到的进度写不进来（M3）。
+                    writeIfCurrent(generation) { it.copy(download = DownloadUiState.Running(written, total)) }
                 }
             } catch (shortage: SpaceShortage) {
                 // 下载器在下任何字节之前就查了空间（未知大小时拿到真实长度后再查一次）；
@@ -277,15 +281,32 @@ class UpdateCenter(
 
     /** 点「取消」：立刻停（下载器按 C4 保留 `.part` 以便续传），界面马上回到「没在下」。 */
     fun cancelDownload() {
-        downloadCall?.cancel()
-        downloadCall = null
-        // 取消后立刻重下时，上一轮的进度与终态不能再落到界面上（M3）。
-        downloadGeneration++
-        val current = _state.value.download
-        if (current is DownloadUiState.Running || current is DownloadUiState.Verifying) {
-            _state.value = _state.value.copy(download = DownloadUiState.Idle)
+        synchronized(stateLock) {
+            downloadCall?.cancel()
+            downloadCall = null
+            // 取消后立刻重下时，上一轮的进度与终态不能再落到界面上（M3）。
+            downloadGeneration++
+            val current = _state.value.download
+            if (current is DownloadUiState.Running || current is DownloadUiState.Verifying) {
+                _state.value = _state.value.copy(download = DownloadUiState.Idle)
+            }
         }
+        // 旧任务可能还在写：清掉自己的引用，等它真正退出（需要删除/重开的一方再去 join）。
+        val job = downloadJob
+        downloadJob = null
+        if (job != null) scope.launch { job.join() }
     }
+
+    /**
+     * 只有「代次仍是当前」时才写状态，判断与写入在同一把锁里（M3）：
+     * 取消一旦自增代次，任何在飞的进度、Ready、安装都写不进来。
+     */
+    private inline fun writeIfCurrent(generation: Long, crossinline block: (UpdateUiState) -> UpdateUiState): Boolean =
+        synchronized(stateLock) {
+            if (generation != downloadGeneration) return@synchronized false
+            _state.value = block(_state.value)
+            true
+        }
 
     /**
      * 「下载并安装」。三步定稿（C5 / 工作包第 5 步）：
