@@ -5,6 +5,8 @@
 #
 # Failure rules (exit code 1):
 #   * Gradle exit code != 0 (failing tests, compile errors, lint errors, ...)
+#     Gradle is always invoked with --continue, so one failed task does not hide the rest;
+#     the exit code is still non-zero and every failure is listed in the summary
 #   * compile warnings, lint warnings or Gradle deprecation warnings in the output
 #   * failing or errored test cases
 #   * an expected task did not run, or an expected report / APK is missing (a missing report is
@@ -28,10 +30,22 @@
 #   --tasks                comma-separated Gradle selectors for a subset run (debugging only)
 #   upstream-url           passed to scripts/prepare-llama.sh (default: the official repository)
 #   --self-test            only run the lint summary parser / gate self test and exit (no Gradle,
-#                          no environment check)
+#                          no environment check). Also checks that the Gradle arguments this script
+#                          builds contain --continue.
 #   --self-test-report F   extra real lint report to parse in the self test (repeatable); a report
 #                          whose summary line cannot be found fails the self test
 set -uo pipefail
+
+# Arguments actually handed to gradlew, as one line. The real run and the self test both call this,
+# so dropping --continue fails the self test instead of only showing up on the next red CI run.
+# $1 is 1 when the run may use the network, anything else stays offline.
+gradle_arguments() {
+  if [ "$1" = "1" ]; then
+    echo "--console=plain --warning-mode all --continue"
+  else
+    echo "--console=plain --warning-mode all --continue --offline"
+  fi
+}
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT/build/check-all"
@@ -188,6 +202,23 @@ EOF
       "$h_errors" "$h_warnings" "$h_hints" "$h_parsed" "$h_got"
   done
 
+  # --continue must be present whether or not the run is online. gradle_arguments is what the real
+  # run uses, so dropping the flag there fails this check.
+  local offline_args online_args off_ok on_ok
+  offline_args="$(gradle_arguments 0)"
+  online_args="$(gradle_arguments 1)"
+  off_ok=0; on_ok=0
+  case " $offline_args " in *" --continue "*) off_ok=1 ;; esac
+  case " $online_args " in *" --continue "*) on_ok=1 ;; esac
+  if [ "$off_ok" = "1" ] && [ "$on_ok" = "1" ]; then
+    echo "PASS  gradle arguments contain --continue (offline and online)"
+  else
+    echo "FAIL  gradle arguments contain --continue (offline and online)"
+    printf '      offline: %s\n' "$offline_args"
+    printf '      online:  %s\n' "$online_args"
+    SELF_FAILURES=$((SELF_FAILURES + 1))
+  fi
+
   echo
   if [ "$SELF_FAILURES" -eq 0 ]; then
     echo "check-all self test: PASS"
@@ -291,8 +322,10 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/gradle.log"
 SUMMARY="$LOG_DIR/summary.md"
 
-ARGS=(--console=plain --warning-mode all)
-[ "$ONLINE" = "1" ] || ARGS+=(--offline)
+# --continue: one module's test failure must not skip the remaining modules. The exit code stays
+# non-zero, and the summary below still lists every failed task. gradle_arguments is what the self
+# test checks, so the flag cannot be dropped here without that test going red.
+IFS=' ' read -r -a ARGS <<< "$(gradle_arguments "$ONLINE")"
 
 echo "check-all: 仓库 $ROOT"
 echo "check-all: 跑 Gradle：gradlew ${ARGS[*]} ${TASKS[*]}"

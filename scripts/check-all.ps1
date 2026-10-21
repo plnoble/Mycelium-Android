@@ -9,6 +9,8 @@
   and decides the exit code like this:
 
     * Gradle exit code != 0 (failing tests, compile errors, lint errors, ...)  -> failure
+      Gradle is always invoked with --continue, so one failed task does not hide the rest;
+      the exit code is still non-zero and every failure is listed in the summary
     * compile warnings, lint warnings or Gradle deprecation warnings           -> failure
     * failing or errored test cases                                           -> failure
     * an expected task did not run, or an expected report / APK is missing     -> failure
@@ -61,7 +63,8 @@
   Only run the lint summary parser / gate self test and exit: no environment check, no Gradle. It
   drives the real parser with sample lint report texts (hints only, one warning, errors, "No issues
   found", no summary line) and asserts that hints never fail the gate while errors and warnings do.
-  Any extra paths in SelfTestReport are parsed as well.
+  Any extra paths in SelfTestReport are parsed as well. It also checks that the Gradle arguments
+  this script builds contain --continue, so one failed task cannot hide the rest.
 
 .PARAMETER SelfTestReport
   Extra lint report files (for example a real build/reports/lint-results-debug.txt) to parse in the
@@ -149,6 +152,16 @@ function Add-LintHintToSummary {
     return ($lines -join "`r`n")
 }
 
+# The argument list actually handed to gradlew. Kept next to the real invocation so the self test
+# and the run cannot drift apart: dropping --continue here is what this check fails on.
+function Get-GradleArguments {
+    param([bool]$Offline, [string[]]$TaskList)
+    $built = @("/c", ".\gradlew.bat", "--console=plain", "--warning-mode", "all", "--continue")
+    if ($Offline) { $built += "--offline" }
+    $built += $TaskList
+    return $built
+}
+
 function Invoke-LintSelfTest {
     param([string[]]$ExtraReport = @())
 
@@ -207,6 +220,20 @@ function Invoke-LintSelfTest {
         Write-Host "$verdict  real report: $path"
         Write-Host "      errors=$($summary.Errors) warnings=$($summary.Warnings) hints=$($summary.Hints) parsed=$($summary.Parsed) -> $real"
         Write-Host "      same text with '1 hint' in the summary: errors=$($hintSummary.Errors) warnings=$($hintSummary.Warnings) hints=$($hintSummary.Hints) parsed=$($hintSummary.Parsed) -> $hinted (must match)"
+    }
+
+    # --continue must be present whether or not the run is offline, and it must not depend on which
+    # tasks were asked for. A script that only adds the flag on the happy path fails here.
+    $offlineArgs = Get-GradleArguments -Offline $true -TaskList @("test")
+    $onlineArgs = Get-GradleArguments -Offline $false -TaskList @(":net:test", ":app:testDebugUnitTest")
+    $continueOk = ($offlineArgs -contains "--continue") -and ($onlineArgs -contains "--continue")
+    if ($continueOk) {
+        Write-Host "PASS  gradle arguments contain --continue (offline and online)"
+    } else {
+        $failed++
+        Write-Host "FAIL  gradle arguments contain --continue (offline and online)" -ForegroundColor Red
+        Write-Host "      offline: $($offlineArgs -join ' ')"
+        Write-Host "      online:  $($onlineArgs -join ' ')"
     }
 
     Write-Host ""
@@ -376,9 +403,10 @@ $summaryPath = Join-Path $logDir "summary.md"
 
 # ".\" is required: with NoDefaultCurrentDirectoryInExePath set (hardened shells, some sandboxes and
 # CI images) cmd.exe does not look in the working directory for a bare "gradlew.bat".
-$arguments = @("/c", ".\gradlew.bat", "--console=plain", "--warning-mode", "all")
-if (!$AllowNetwork) { $arguments += "--offline" }
-$arguments += $Tasks
+# --continue: one module's test failure must not skip the remaining modules. The exit code stays
+# non-zero, and the summary below still lists every failed task. Get-GradleArguments is what the
+# self test checks, so the flag cannot be dropped here without that test going red.
+$arguments = Get-GradleArguments -Offline (!$AllowNetwork) -TaskList $Tasks
 
 Write-Host "check-all: repository $root"
 Write-Host "check-all: gradlew.bat $(($arguments | Select-Object -Skip 2) -join ' ')"
