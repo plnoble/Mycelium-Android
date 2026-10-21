@@ -429,6 +429,13 @@ private class MetadataRun(
                 } finally {
                     runCatching { input.close() }
                 }
+                // A declared length the body did not meet is a truncated response, not a success.
+                // Some JDKs (Temurin 21 on Linux CI) return EOF from a short body without throwing,
+                // so the byte count has to be checked here rather than relying on Premature EOF.
+                val declared = hop.contentLength
+                if (declared != null && received != declared) {
+                    throw GatewayRejected("响应在读完之前就结束了：声明 $declared 字节，实际收到 $received 字节")
+                }
             } finally {
                 hop.disconnect()
             }

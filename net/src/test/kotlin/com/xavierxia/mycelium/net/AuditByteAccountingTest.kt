@@ -34,9 +34,14 @@ class AuditByteAccountingTest {
                     server.accept().use { socket ->
                         socket.getInputStream().read(ByteArray(4096))
                         val head = ("HTTP/1.1 200 OK\r\nContent-Length: $declared\r\n\r\n").toByteArray()
-                        socket.getOutputStream().write(head)
-                        socket.getOutputStream().write(body, 0, actual)
-                        socket.getOutputStream().flush()
+                        val output = socket.getOutputStream()
+                        output.write(head)
+                        output.write(body, 0, actual)
+                        output.flush()
+                        // 只 close() 套接字不够：Temurin 21（Linux CI）在 Content-Length 没凑齐时
+                        // 仍把这次读取当成成功（读到实际写出的那些字节，不报提前结束）。先关掉
+                        // 输出方向，让客户端确定读到 EOF，再关套接字。
+                        socket.shutdownOutput()
                     }
                 } finally {
                     done.countDown()
