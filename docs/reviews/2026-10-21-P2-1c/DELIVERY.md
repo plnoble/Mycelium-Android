@@ -55,7 +55,8 @@
 | `0562f7f` | `check-all.ps1 -LlamaSourceRepository <P0-7 的 llama-build>` | PASS：435 例 0 失败、lint 0/0、0 警告 |
 | `5775394` | 同上 | PASS：443 例 0 失败、lint 0/0、0 警告 |
 | `f8ad3b0` | 同上 | PASS：447 例 0 失败、lint 0/0、0 警告 |
-| `1230b55`（最终） | 同上 | PASS：447 例 0 失败、lint 0/0、0 警告 |
+| `1230b55`（最后一个代码提交） | 同上 | PASS：447 例 0 失败、lint 0/0、0 警告 |
+| `2a48a39`（分支尖端，其后只有文档提交） | 同上 | PASS：447 例 0 失败、lint 0/0、0 警告 |
 
 环境：`JAVA_HOME=D:\Development\Android-studio\jbr`（JBR 25）、`ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`、
 `MYCELIUM_LLAMA_SOURCE=<spike-P0-7 的 cpp/llama-build>`；本机连不上 Maven Central，所以门禁与所有 Gradle 命令都走 `--offline`。
