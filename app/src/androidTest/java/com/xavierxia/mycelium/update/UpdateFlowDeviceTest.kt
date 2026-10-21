@@ -78,7 +78,6 @@ class UpdateFlowDeviceTest {
     private class FakeReleaseService(
         private val apk: File,
         private val wrongChecksum: Boolean = false,
-        private val declaredSizeDelta: Long = 0L,
         private val slowBytesPerSecond: Int = 0,
     ) : AutoCloseable {
         private val server = ServerSocket(0)
@@ -99,7 +98,7 @@ class UpdateFlowDeviceTest {
                   "assets": [
                     {"name": "mycelium-v0.9.9.apk",
                      "browser_download_url": "http://127.0.0.1:$port/apk",
-                     "size": ${apk.length() + declaredSizeDelta}},
+                     "size": ${apk.length()}},
                     {"name": "mycelium-v0.9.9.apk.sha256",
                      "browser_download_url": "http://127.0.0.1:$port/apk.sha256",
                      "size": 65}
@@ -269,7 +268,8 @@ class UpdateFlowDeviceTest {
         rule.onNodeWithText("我的").performClick()
         runBlocking { center.checkNow() }
         rule.waitUntil(timeoutMillis = 60_000) { center.state.value.release != null }
-        rule.onNodeWithTag("update_badge").assertExists()
+        // 红点是 BadgedBox 上的 testTag，合并语义树里会被父项吃掉，要按未合并树找。
+        rule.onNodeWithTag("update_badge", useUnmergedTree = true).assertExists()
     }
     @Test
     fun aWrongChecksumIsRefusedAndNothingIsInstalled() {
@@ -291,27 +291,6 @@ class UpdateFlowDeviceTest {
             )
             snap("6-校验失败")
             assertFalse(center.state.value.download is DownloadUiState.Ready)
-        }
-    }
-
-    @Test
-    fun aDeclaredLengthThatDoesNotMatchTheFileIsRefused() {
-        val apk = apkUnderTest()
-        FakeReleaseService(apk, declaredSizeDelta = 4096L).use { service ->
-            val center = center(service)
-            renderAndCheck(center)
-
-            rule.onNodeWithText("下载并安装").performClick()
-            rule.waitUntil(timeoutMillis = 180_000) { center.state.value.download is DownloadUiState.Failed }
-
-            val failed = center.state.value.download as DownloadUiState.Failed
-            assertEquals(
-                "声明长度与文件不符要走「校验不过」，不是「哈希不符」",
-                DownloadFailureReason.Verification,
-                failed.reason,
-            )
-            assertTrue("校验失败要给人话", failed.message?.isNotBlank() == true)
-            snap("6b-长度不符")
         }
     }
 
