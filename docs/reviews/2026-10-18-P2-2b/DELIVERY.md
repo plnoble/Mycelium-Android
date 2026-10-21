@@ -377,3 +377,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 
 做完后在全新 worktree 重跑门禁与 `check-public -Full`（见第十五节）。
 
+## 十五、§1.5 四件之后的最终门禁（2026-10-21）
+
+* 全新 worktree `p2-2b-gate-3`（脚本先断言它确实是 git 检出）跑在 **`a76463f`**；`git diff --name-only a76463f..HEAD` 实测其后只动本文件，故即代码尖端的门禁。
+* `check-all.ps1 -SkipLlamaPrepare`：**PASS**，**407 例 / 0 失败 / 0 错误 / 0 跳过**（比上一轮的 395 例多 12 条：第 1 件四条收尾测例 + 第 2 件八条去标记测例）；lint 0 错误 / 0 警告 / 0 hints；Kotlin 编译错误行 0。日志：`p2-2-work\final-gate4\check-all.txt`。
+* `check-public.ps1 -Full`：**退出码 0**，阻断项 0（`user-path` 0），323 条只列不拦；`-SelfTest`：**退出码 0**（37/37）。日志同目录。
