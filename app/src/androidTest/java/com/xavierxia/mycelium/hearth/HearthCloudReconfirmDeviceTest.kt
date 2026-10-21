@@ -166,13 +166,17 @@ private fun ComposeContentTestRule.exists(text: String): Boolean =
  * 所以用锚点（测试数据的名字，唯一）的位置把按钮定到它下面那张卡上。
  */
 private fun ComposeContentTestRule.clickButtonBelow(anchorText: String, buttonText: String) {
-    val anchorTop = onNodeWithText(anchorText).fetchSemanticsNode().boundsInRoot.top
+    val anchor = onNodeWithText(anchorText).fetchSemanticsNode().boundsInRoot
     val buttons = onAllNodesWithText(buttonText, useUnmergedTree = true)
     val nodes = buttons.fetchSemanticsNodes()
-    val index = nodes.indices
-        .filter { nodes[it].boundsInRoot.top >= anchorTop }
-        .minByOrNull { nodes[it].boundsInRoot.top }
-    checkNotNull(index) { "「$anchorText」下面没有「$buttonText」，界面结构变了？" }
+    // 同一张卡片里按钮和标题的顶边不一定齐平（字体行高不同、Row 对齐方式不同），所以按**垂直距离**
+    // 取最近的那个，而不是「必须在标题下方」。锚点名字带唯一标签，最近的按钮就是这张卡上的。
+    val anchorMiddle = (anchor.top + anchor.bottom) / 2f
+    val index = nodes.indices.minByOrNull { candidate ->
+        val middle = (nodes[candidate].boundsInRoot.top + nodes[candidate].boundsInRoot.bottom) / 2f
+        kotlin.math.abs(middle - anchorMiddle)
+    }
+    checkNotNull(index) { "「$anchorText」旁边找不到「$buttonText」，界面结构变了？" }
     buttons[index].performTouchInput { click() }
 }
 
