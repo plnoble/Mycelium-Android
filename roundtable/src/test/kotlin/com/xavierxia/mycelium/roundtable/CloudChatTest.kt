@@ -15,6 +15,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -240,6 +241,44 @@ class CloudChatTest {
         assertTrue(latin.startsWith("SQLite format 3"))
         assertTrue(latin.contains(String(sentence.toByteArray(), Charsets.ISO_8859_1)))
         assertTrue(latin.contains(String("回答也不应出现".toByteArray(), Charsets.ISO_8859_1)))
+    }
+
+    /**
+     * P2-1c 第 3 步：圆桌**不许**请求提示缓存。
+     *
+     * 断言的是 `ask()` 真正传进 `ChatModel` 的那一份参数（记录下来的实参），不是重新 new 一个默认
+     * 对象：谁哪天在圆桌的调用处塞了键，这一条会立刻变红。
+     */
+    @Test
+    fun theRoundtableAsksForNoPromptCache() {
+        val model = RecordingChatModel()
+        val chat = CloudChat(
+            model = model,
+            providerName = "假服务",
+            modelName = "deepseek-flash",
+            openPack = ::openSample,
+            template = template,
+            rulesJson = rules,
+        )
+
+        runBlocking { chat.ask("记账", AnswerMode.ThoughtInference, emptyList()) }
+
+        val parameters = model.seen.single()
+        assertNull(parameters.cacheKey, "圆桌调用不许带缓存键")
+    }
+
+    private class RecordingChatModel : com.xavierxia.mycelium.model.ChatModel {
+        val seen = mutableListOf<com.xavierxia.mycelium.model.GenerationParameters>()
+        override val info = com.xavierxia.mycelium.model.ModelInfo("test", "fake", com.xavierxia.mycelium.model.ModelLocation.CLOUD)
+        override fun stop() {}
+
+        override fun generate(
+            messages: List<com.xavierxia.mycelium.model.ChatMessage>,
+            parameters: com.xavierxia.mycelium.model.GenerationParameters,
+        ) = kotlinx.coroutines.flow.flow {
+            seen += parameters
+            emit("""{"statements":[{"text":"先转走定投金额","kind":"evidence","citation_ids":["C1"]}],"refusal_reason":null}""")
+        }
     }
 
     private fun chat(server: LocalHttp, readTimeoutMs: Int = 60_000) = CloudChat(

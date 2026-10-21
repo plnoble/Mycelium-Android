@@ -71,4 +71,38 @@ class PromptTest {
 
     private fun character(name: String) = CharacterStore { memorySession() }
         .create(CharacterDraft(name = name), "t")
+
+    @Test
+    fun theCacheKeyCarriesCharacterModeConversationAndModel() {
+        val row = character("老周")
+        val base = localPromptCacheKey(row, HearthMode.IMMERSIVE, "conv-1", "temp-1", "model-a")
+
+        assertEquals(
+            localPromptCacheKey(row, HearthMode.IMMERSIVE, "conv-1", "temp-1", "model-a"),
+            base,
+            "同一人物、同一会话、同一模式、同一模型的键必须稳定",
+        )
+        assertEquals(
+            base,
+            localPromptCacheKey(row, HearthMode.IMMERSIVE, "conv-1", "temp-9", "model-a"),
+            "已经有会话 ID 时，临时会话的身份不影响键",
+        )
+        listOf(
+            "换人物" to localPromptCacheKey(row.copy(id = "another"), HearthMode.IMMERSIVE, "conv-1", "temp-1", "model-a"),
+            "换模式" to localPromptCacheKey(row, HearthMode.TEST, "conv-1", "temp-1", "model-a"),
+            "换会话" to localPromptCacheKey(row, HearthMode.IMMERSIVE, "conv-2", "temp-1", "model-a"),
+            "换模型" to localPromptCacheKey(row, HearthMode.IMMERSIVE, "conv-1", "temp-1", "model-b"),
+        ).forEach { (what, other) -> assertFalse(base == other, "$what 必须换键") }
+    }
+
+    @Test
+    fun twoTemporaryConversationsNeverShareAKey() {
+        val row = character("老周")
+        val first = localPromptCacheKey(row, HearthMode.TEST, null, "temp-1", "model-a")
+        val againInTheSameOne = localPromptCacheKey(row, HearthMode.TEST, null, "temp-1", "model-a")
+        val second = localPromptCacheKey(row, HearthMode.TEST, null, "temp-2", "model-a")
+
+        assertEquals(first, againInTheSameOne, "同一段临时会话内稳定")
+        assertFalse(first == second, "两段还没落库的会话不能共用一个键（方案审必修 3）")
+    }
 }

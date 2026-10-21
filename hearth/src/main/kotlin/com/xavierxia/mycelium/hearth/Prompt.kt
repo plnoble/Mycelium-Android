@@ -35,6 +35,21 @@ fun assemblePrompt(character: HearthCharacter, history: List<ChatMessage>, quest
 /** The generation parameters this character was set up with. */
 fun HearthCharacter.parameters() = GenerationParameters(maxTokens = maxTokens, temperature = temperature)
 
+/**
+ * The identity of one conversation's prompt (P2-1c): the engine may reuse the prefix it already read
+ * only while this key stays the same. It carries the character, the mode, the conversation and the
+ * model the prompt is read with. A brand new conversation has no stored id yet, so
+ * [temporarySession] stands in for it — one distinct value per new conversation, never a shared
+ * literal, or two different temporary conversations would look like the same prompt to the engine.
+ */
+fun localPromptCacheKey(
+    character: HearthCharacter,
+    mode: HearthMode,
+    conversationId: String?,
+    temporarySession: String,
+    modelId: String,
+): String = listOf(character.id, mode.name, conversationId ?: temporarySession, modelId).joinToString("|")
+
 fun systemPrompt(character: HearthCharacter): String = buildString {
     append("你是「").append(character.name.trim()).append("」。用这个身份说话，不要说自己是程序或模型。")
     line("性格", character.personality)

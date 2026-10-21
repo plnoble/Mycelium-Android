@@ -149,6 +149,12 @@ private data class Turn(
     val question: String,
     /** The label may be refreshed from the live service snapshot just before the request. */
     var chosen: Chosen,
+    /**
+     * The prompt-cache key this turn generates with (P2-1c), fixed when the turn is created so a page
+     * that moves on cannot change the identity of a round that is already running. `null` means
+     * "reuse nothing": cloud answers, and any caller that passes no key, behave exactly as before.
+     */
+    val cacheKey: String?,
 ) {
     /** A turn is stored at most once, whatever the cancellation timing turns out to be. */
     val written = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -220,6 +226,25 @@ class HearthViewModel @JvmOverloads constructor(
 
     /** The turn that is running right now, so stop can mark it as stopped. */
     private var activeTurn: Turn? = null
+
+    /**
+     * A brand new conversation has no stored id until its first turn is written, so the cache key
+     * cannot use a shared literal: two new conversations of the same character would look like one
+     * prompt to the engine, and the second would reuse a prefix that belongs to the first. A fresh
+     * value is drawn whenever the page starts a new conversation (new chat, back into test mode, or
+     * opening a character) and travels inside the [Turn] so a round keeps the identity it started
+     * with.
+     */
+    private var temporarySession: String = newTemporarySession()
+
+    private fun newTemporarySession(): String = java.util.UUID.randomUUID().toString()
+
+    /** The cache key for one round; a cloud round reuses nothing (P2-1c). */
+    private fun cacheKeyFor(character: HearthCharacter, mode: HearthMode, conversationId: String?, chosen: Chosen): String? =
+        when (chosen) {
+            is Chosen.Local -> localPromptCacheKey(character, mode, conversationId, temporarySession, chosen.record.sha256)
+            is Chosen.Cloud -> null
+        }
 
     /**
      * Which turn owns the screen. It is bumped when a turn starts and when the page moves on; any
@@ -484,6 +509,7 @@ class HearthViewModel @JvmOverloads constructor(
 
     fun openChat(character: HearthCharacter) = viewModelScope.launch {
         abandonTurn()
+        temporarySession = newTemporarySession()
         mutable.update {
             it.copy(
                 openCharacter = character,
@@ -628,6 +654,7 @@ class HearthViewModel @JvmOverloads constructor(
     fun setMode(mode: HearthMode) = viewModelScope.launch {
         if (mutable.value.mode == mode) return@launch
         abandonTurn()
+        temporarySession = newTemporarySession()
         if (mode == HearthMode.TEST) {
             // Test mode reads and writes no stored history, so the state of the stored read must not
             // follow it in: a failed immersive read would otherwise leave the test page unable to
@@ -684,6 +711,7 @@ class HearthViewModel @JvmOverloads constructor(
         // Switching conversation stops the running turn; it must never keep generating into the
         // page that is now showing something else (and it must not leave the page busy).
         abandonTurn()
+        temporarySession = newTemporarySession()
         mutable.update {
             it.copy(openConversation = null, messages = emptyList(), droppedTurns = 0)
         }
@@ -788,7 +816,7 @@ class HearthViewModel @JvmOverloads constructor(
             }
         }
         val chosen = choose(character) ?: return false
-        val turn = Turn(character, mode, conversationId, question, chosen)
+        val turn = Turn(character, mode, conversationId, question, chosen, cacheKeyFor(character, mode, conversationId, chosen))
         val token = beginGeneration()
         val buffer = StringBuilder()
         // The running turn is recorded here, not inside the coroutine: a stop pressed between the
@@ -868,7 +896,7 @@ class HearthViewModel @JvmOverloads constructor(
                 if (token != generationToken) return@launch
                 val prepared = withContext(Dispatchers.IO) { regeneration(character, current.mode, conversationId) } ?: return@launch
                 val (question, window) = prepared
-                turn = Turn(character, current.mode, conversationId, question, chosen)
+                turn = Turn(character, current.mode, conversationId, question, chosen, cacheKeyFor(character, current.mode, conversationId, chosen))
                 activeTurn = turn
                 if (token == generationToken) {
                     mutable.update {
@@ -1016,7 +1044,8 @@ class HearthViewModel @JvmOverloads constructor(
         try {
             withContext(Dispatchers.IO) {
                 stopBeforeGenerating(turn)
-                model.generate(messages, turn.character.parameters()).collect { delta ->
+                // 本地模型按这一轮冻好的键决定复用多少（P2-1c）；云端轮次的键是 null，行为不变。
+                model.generate(messages, turn.character.parameters().copy(cacheKey = turn.cacheKey)).collect { delta ->
                     // A delta that arrives after the stop is not part of this answer any more: the turn
                     // keeps what it had produced *before* the stop, so this one is dropped instead of
                     // being shown or stored (and it no longer counts as "produced").
