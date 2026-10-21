@@ -109,7 +109,12 @@ jobs:
       # Tag/versionName, docs/releases/<tag>.md, versionCode growth and the pinned signing
       # certificate fingerprint. Any failure stops the release here.
       - name: Release gate
-        run: bash scripts/release-guard.sh --tag "$RELEASE_TAG" --apk "mycelium-$RELEASE_TAG.apk"
+        # apksigner 固定用上面装的 build-tools 36.0.0（输出格式本机验证过）。runner 镜像里还预装了更新的
+        # build-tools 37，脚本默认挑最新版，它的 --print-certs 输出格式和 36 不同，读不出指纹
+        # （2026-10-21 run 39599697019、39601747956）。
+        run: >-
+          bash scripts/release-guard.sh --tag "$RELEASE_TAG" --apk "mycelium-$RELEASE_TAG.apk"
+          --apksigner "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner"
 
       - name: Generate SHA-256
         run: sha256sum "mycelium-$RELEASE_TAG.apk" > "mycelium-$RELEASE_TAG.apk.sha256"

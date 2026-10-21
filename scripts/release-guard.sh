@@ -337,8 +337,9 @@ DIGEST_LINES="$(printf '%s\n' "$VERIFY_RAW" | tr -d '\r' | grep -E '^Signer.* ce
 UNIQUE_FPS="$(printf '%s\n' "$DIGEST_LINES" | grep -oE '[0-9A-Fa-f]{64} *$' | tr -d ' ' | tr 'A-F' 'a-f' | sort -u)"
 SIGNER_COUNT="$(printf '%s\n' "$UNIQUE_FPS" | grep -cE '^[0-9a-f]{64}$' || true)"
 if [ "$SIGNER_COUNT" -ne 1 ]; then
-  # 只打印签名方案、签名者数量和指纹（都是公开信息），不打印证书持有人（DN）。
-  printf '%s\n' "$VERIFY_RAW" | tr -d '\r' | grep -E '^(Verified using|Number of signers|Signer.* SHA-256 digest)' >&2 || true
+  # 把 apksigner 的原始输出打出来（最多 40 行）便于看清格式，但去掉证书持有人（DN）那几行。
+  echo "[release-guard] apksigner 原始输出（已去掉 DN 行）：" >&2
+  printf '%s\n' "$VERIFY_RAW" | tr -d '\r' | grep -v -i 'DN:' | head -40 >&2 || true
   abort "签名证书不是恰好一张（去重后 $SIGNER_COUNT 张）：$APK"
 fi
 ACTUAL_FP="$UNIQUE_FPS"
