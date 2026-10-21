@@ -317,4 +317,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 * §1.3.2 三条场景与四张截图：**待跑**（「安装」由用户点）。
 * §1.3.3 真实网络读数与签名读取结果：**待跑**。
 * §1.3.4 升级保数据的如实写法已在本文件第六节（v0.1.1 是阶段 0 外壳，只证明数据目录不被清空）。
+## 十三、真机 §1.3 结果（2026-10-21）
+
+手机：NX809J（序列号不入库）。正式版 `com.xavierxia.mycelium` 开工前后各只读核对一次：`0.1.1` / code `2` / `lastUpdateTime 2026-10-10 05:23:04`，**全程未被碰过**。
+
+### §1.3.1 全部设备测例，一次 invocation 跑完，0 失败
+
+* 归档：`p2-2-work\device-evidence\instrument-28-final.txt`（412 行，结尾 `OK (28 tests)`）。跑法：`adb shell am instrument -w -r -e class <13 个测试类> com.xavierxia.mycelium.debug.test/androidx.test.runner.AndroidJUnitRunner`（`scripts/device/run-device-tests.ps1` 把同样的动作写成脚本，并核对行数、`OK (n tests)` 结尾与失败标记）。
+* 第一次 29 例 3 失败：把 `Hearth.BoundedDeviceTest`（辅助类，没有测试方法）当成测试类列进去，重跑去掉。
+* 两条真问题按 §1.3a 裁定修好（各自提交）：
+  * `7e616ca` 改址复验：同卡片按钮原来要求「按钮顶边在标题下方」，同行里两者顶边并不齐平 → 改成按垂直中心距离取最近的按钮。真机单例 **OK**，随后 28 例里也过。
+  * `3c82bf3` 加载期停止：真因不是加载慢，而是 `HearthViewModel.send` 在 `historyReady()` 为假时**拒收**（返回 `false`，什么都不做），测例等 `!historyLoading` 就发、发了个空炮，于是永远等不到「正在加载」提示。按返回值重试到被接下再等提示（判据修正，没有加时间）。真机单例 **OK（2.99s）**。
+  * 另：`a6826a9` 红点要按未合并语义树找；`a164e8d` 走查要等会话真的交给系统（`Committed` 或 `Pending`），否则测例一结束写入就被打断、系统确认界面起不来。
+
+### §1.3.3 真实网络（只下不装）
+
+`UpdateRealNetworkDeviceTest` 在手机上按 `Update` 用途走真网关下载 v0.1.1 的正式 APK 与 `.sha256`：**哈希一致**。设备上的报告 `update-flow/real-network.txt`（已取回 `p2-2-work\device-evidence\update-flow-device\real-network.txt`）：
+
+* apk 23,004,794 字节；`expected == actual == 1a21350d267321a9255c1d252a4eac50fa183e043f67434a7d68a337ce490ead`。
+* checksum 取回 2651 ms；下载 11351 ms；整包哈希 34 ms；读包信息 47 ms。
+* 逐跳域名：`github.com` → `release-assets.githubusercontent.com`（两跳，与实际一致；审计里两次请求各自一串）。
+* **v2-only 签名在这台手机上读得到**：`getPackageArchiveInfo(GET_SIGNING_CERTIFICATES)` 返回 package=`com.xavierxia.mycelium`、versionCode=`2`、signerCount=`1`、signerSha256=`bb72a9c7e71137dd…`。
+* 顺带一条：真发布的 `.sha256` 是 `sha256sum` 格式（64 位十六进制 + 两个空格 + 文件名，共 85 字符）。生产端 `ChecksumText.parseFirstSha256` 本来就这么取，是我的测例写错了断言，已按同一解析器改（`83f51ce`）。
+
+### §1.3.2 整条更新流程（Compose 设备测试，注入只存在于 androidTest）
+
+* `UpdateFlowDeviceTest` 在本机假服务上走真流程：假 `releases/latest` JSON（走真解析路径）+ 流式 60 MiB APK + `.sha256`；`isDebugPackage = false` 让应用内安装入口出现；调试包本身仍不自动检查、也不提供应用内安装。
+* 已过并留证（截图在 `p2-2-work\device-evidence\update-flow-device\`）：
+  * 错哈希：走到「哈希不符」，`2-卡片.png`、`6-校验失败.png`；
+  * 下载中取消：连接数与缓存都不再长，`3-下载中.png`、`7-取消后.png`；
+  * 整条走查：`1-红点与卡片.png`、`3-下载中-进度.png`、第一次的 `4a-未知来源说明.png`、`5-系统确认.png`。
+* 走到系统那一步的证据：会话记录 `installSessionPhase = Pending`、`installSessionId = 161908514`、`installSessionTargetVersionCode = 6`，系统界面 `com.android.packageinstaller/.PackageInstallerActivity` 在前台；这台 ROM 还要先勾「已了解该应用存在的风险」，「安装」按钮才会亮（截图 `h2-系统确认.png`）。
+* **2026-10-21 10:13 用户在系统界面上点了「安装」**；此后手机与电脑断开（`adb devices` 为空，重启 adb 后 90 秒仍未回来），**装完的核对（versionCode = 6、数据目录 `files/profileInstalled` 仍在）与「把正常调试包装回去」待手机接回后补做**。
 
