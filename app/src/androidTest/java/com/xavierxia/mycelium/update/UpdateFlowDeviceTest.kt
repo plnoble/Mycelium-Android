@@ -353,10 +353,22 @@ class UpdateFlowDeviceTest {
                 rule.onNodeWithText("去设置").performClick()
                 rule.waitUntil(timeoutMillis = 300_000) { center.state.value.download is DownloadUiState.Installing }
             }
+            // 「正在安装」只是本应用把会话建起来了；系统确认界面要等会话**commit 给系统**才会出现。
+            // 之前测例在这里就结束了，进程一收尾写入就被打断，会话停在 Created、系统界面根本没起来。
+            val prefs = UpdatePreferences(context)
+            var phase: InstallPhase? = null
+            val commitDeadline = System.currentTimeMillis() + 120_000
+            while (System.currentTimeMillis() < commitDeadline) {
+                phase = prefs.read()?.phase
+                if (phase == InstallPhase.Committed || phase == InstallPhase.Pending) break
+                Thread.sleep(100)
+            }
             snap("5-系统确认")
+            // Committed = 已把 EXTRA_INTENT 交给系统；Pending = 系统确认界面已起来、等用户点
+            // （这台 ROM 会先让人勾「已了解风险」再点「安装」）。两种都算走到了系统那一步。
             assertTrue(
-                "应当停在「正在安装」等用户点系统界面的安装",
-                center.state.value.download is DownloadUiState.Installing,
+                "会话要么 commit 要么 pending 给系统（现在是 $phase），系统确认界面才会出现",
+                phase == InstallPhase.Committed || phase == InstallPhase.Pending,
             )
         }
     }
