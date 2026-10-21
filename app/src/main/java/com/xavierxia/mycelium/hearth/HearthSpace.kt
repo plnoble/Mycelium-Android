@@ -401,6 +401,12 @@ private fun CharacterChat(vm: HearthViewModel, state: HearthState, character: He
                 )
             }
             state.notice?.let { note -> Text(note) }
+            if (state.waitingForVisibleText) {
+                Text(
+                    "这一轮到现在还没有可显示的内容。可以点下面的「停止」，或者去这个人物的编辑页把它换成云端模型。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             if (state.droppedTurns > 0) {
                 Text("较早的 ${state.droppedTurns} 轮对话放不下了，已经省略；人物设定一直都在。", style = MaterialTheme.typography.bodySmall)
             }

@@ -376,9 +376,11 @@ internal class FakeLocalEngine : LocalEngine {
         generates.incrementAndGet()
         cacheKeys += parameters.cacheKey
         val gate = generationGate
-        generationGate = null
         try {
-            gate?.await()
+            // 不在这里把闸门置空：置空会让「放行」与「捕获闸门」之间出现竞态，releaseGeneration()
+            // 可能正好落在两者之间而被丢掉，这一轮就永远卡住。complete() 是幂等的，复用同一个
+            // deferred 即可；下一次 holdNextGeneration() 会换成新的。
+            generationGate?.await()
             tokens.forEach { emit(it) }
             completed.incrementAndGet()
         } catch (teardown: CancellationException) {

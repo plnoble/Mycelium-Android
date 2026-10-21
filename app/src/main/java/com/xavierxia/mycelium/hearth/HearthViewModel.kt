@@ -63,6 +63,11 @@ data class HearthState(
     val droppedTurns: Int = 0,
     val busy: Boolean = false,
     /**
+     * 这一轮已经在生成，但到现在还没有任何可显示的正文（P2-1c 的 D）。只用于界面提示：可以停止，
+     * 或者去人物编辑里给这个人物换个云端模型。与 [notice] 分开，免得和加载/错误提示互相覆盖。
+     */
+    val waitingForVisibleText: Boolean = false,
+    /**
      * True from the moment a conversation switch (or a return to the page) fixed its new target
      * until that conversation's own history is on screen. A send during that wait would be captured
      * against the conversation the page is leaving, so it is refused until this is false.
@@ -238,6 +243,32 @@ class HearthViewModel @JvmOverloads constructor(
     private var temporarySession: String = newTemporarySession()
 
     private fun newTemporarySession(): String = java.util.UUID.randomUUID().toString()
+
+    /**
+     * 本地轮次多久还没有可显示正文就给提示（P2-1c 的 D）。先定 20 秒，真机之后再调；测试把它调小。
+     */
+    internal var hiddenWaitHintMillis: Long = 20_000L
+
+    /** 「这一轮还没出正文」的计时任务：出了正文、停止、失败、换页都要取消它。 */
+    private var visibleTextWatch: kotlinx.coroutines.Job? = null
+
+    /** 从接受这一轮开始计时（含加载与读提示）：到点还没有正文才提示，且只提示仍然在跑的那一轮。 */
+    private fun watchForVisibleText(turn: Turn, token: Int) {
+        visibleTextWatch?.cancel()
+        visibleTextWatch = viewModelScope.launch {
+            kotlinx.coroutines.delay(hiddenWaitHintMillis)
+            if (token == generationToken && activeTurn === turn && !turn.produced && !turn.userStopped) {
+                mutable.update { it.copy(waitingForVisibleText = true) }
+            }
+        }
+    }
+
+    /** 有可显示正文了、停了、失败了、换页了：提示与计时都撤掉。提示是页面级的，不认轮次。 */
+    private fun clearVisibleTextHint() {
+        visibleTextWatch?.cancel()
+        visibleTextWatch = null
+        if (mutable.value.waitingForVisibleText) mutable.update { it.copy(waitingForVisibleText = false) }
+    }
 
     /** The cache key for one round; a cloud round reuses nothing (P2-1c). */
     private fun cacheKeyFor(character: HearthCharacter, mode: HearthMode, conversationId: String?, chosen: Chosen): String? =
@@ -579,6 +610,8 @@ class HearthViewModel @JvmOverloads constructor(
     /** Stops the running turn (if any) and makes sure its later callbacks are ignored. */
     private fun abandonTurn() {
         beginGeneration()
+        visibleTextWatch?.cancel()
+        visibleTextWatch = null
         cloudModel?.stop()
         cloudModel = null
         currentChosen = null
@@ -588,7 +621,7 @@ class HearthViewModel @JvmOverloads constructor(
         operation = null
         // The page has to be usable straight away: a turn that is gone cannot keep the send button
         // disabled, and a question waiting for confirmation belongs to the page that asked it.
-        mutable.update { it.copy(busy = false, streaming = null, streamLabel = null, sendConfirm = null) }
+        mutable.update { it.copy(busy = false, streaming = null, streamLabel = null, sendConfirm = null, waitingForVisibleText = false) }
     }
 
     fun consumePendingQuestion() = mutable.update { it.copy(pendingQuestion = null) }
@@ -823,6 +856,7 @@ class HearthViewModel @JvmOverloads constructor(
         // send and the first line of the task still has to land on this turn, or the engine's stop
         // flag (which the load's own runNative clears) would be the only place the intent could live.
         activeTurn = turn
+        watchForVisibleText(turn, token)
         operation = viewModelScope.launch {
             try {
                 // The window boundary asks whether this turn may read that conversation at all. The
@@ -898,6 +932,7 @@ class HearthViewModel @JvmOverloads constructor(
                 val (question, window) = prepared
                 turn = Turn(character, current.mode, conversationId, question, chosen, cacheKeyFor(character, current.mode, conversationId, chosen))
                 activeTurn = turn
+                watchForVisibleText(turn, token)
                 if (token == generationToken) {
                     mutable.update {
                         it.copy(busy = true, streaming = "", streamLabel = chosen.label, droppedTurns = window.droppedTurns, notice = null)
@@ -933,6 +968,7 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     fun stop() {
+        clearVisibleTextHint()
         // Record the intent on the running turn first: an engine that fails while loading reports a
         // plain exception, and that must still end as a stop (question back, nothing stored).
         val turn = activeTurn
@@ -1053,6 +1089,7 @@ class HearthViewModel @JvmOverloads constructor(
                     // Marked before the delta reaches the screen or the buffer: from this point the turn
                     // has something to keep, which is what a stop is allowed to preserve.
                     turn.produced = true
+                    clearVisibleTextHint()
                     onDelta(delta)
                 }
             }
@@ -1154,6 +1191,7 @@ class HearthViewModel @JvmOverloads constructor(
         // A turn from a page the user has already left is dropped whole: nothing is shown and
         // nothing is stored, no matter where the cancellation happened to land.
         if (token != generationToken) return
+        clearVisibleTextHint()
         val byEngine = !turn.chosen.isCloud && engine.lastStats?.stopped == true
         val wasStopped = stopped || turn.userStopped || byEngine
         if (answer.isBlank()) {
