@@ -37,6 +37,9 @@ class CancellablePauseTest {
         call.cancel()
         assertTrue(returned.await(3, TimeUnit.SECONDS), "十秒的等待应该在取消后很快结束")
         assertTrue(elapsed.get() < 2_000, "实际等了 ${elapsed.get()} ms，太久了")
+        // returned 在 worker 的 finally 里就放行了，那一刻线程还没真正退出；先等它退出再断言，
+        // 否则机器忙时偶尔会看到 isAlive=true（CI run 39598001295 就是这样红的）。
+        worker.join(2_000)
         assertFalse(worker.isAlive)
     }
 
