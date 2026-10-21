@@ -328,15 +328,20 @@ if [ "$VERIFY_STATUS" -ne 0 ]; then
   abort "apksigner 校验 ${APK} 失败（退出码 $VERIFY_STATUS）：${HINT:-没有可读的错误输出}"
 fi
 
-SIGNER_COUNT="$(printf '%s\n' "$VERIFY_RAW" | grep -cE '^Signer #[0-9]+ certificate SHA-256 digest')"
+# apksigner 不同版本、不同签名方案的写法不一样：v1/v2 是「Signer #1 certificate SHA-256 digest: …」，
+# v3/v3.1 还可能写成「Signer (minSdkVersion=…, maxSdkVersion=…) certificate SHA-256 digest: …」。
+# 只认第一种时，CI 上的 build-tools 37 数出 0 个签名者（2026-10-21 run 39599697019）。所以收下所有
+# 「Signer … certificate SHA-256 digest」行，去重后必须恰好一个指纹：同一张证书在 v2、v3 里各出现
+# 一次算一张；出现两张不同的证书（例如轮换过密钥）照样中止。
+DIGEST_LINES="$(printf '%s\n' "$VERIFY_RAW" | tr -d '\r' | grep -E '^Signer.* certificate SHA-256 digest: *[0-9A-Fa-f]{64} *$' || true)"
+UNIQUE_FPS="$(printf '%s\n' "$DIGEST_LINES" | grep -oE '[0-9A-Fa-f]{64} *$' | tr -d ' ' | tr 'A-F' 'a-f' | sort -u)"
+SIGNER_COUNT="$(printf '%s\n' "$UNIQUE_FPS" | grep -cE '^[0-9a-f]{64}$' || true)"
 if [ "$SIGNER_COUNT" -ne 1 ]; then
-  abort "签名者数量不是 1（实际 $SIGNER_COUNT）：$APK"
+  # 只打印签名方案、签名者数量和指纹（都是公开信息），不打印证书持有人（DN）。
+  printf '%s\n' "$VERIFY_RAW" | tr -d '\r' | grep -E '^(Verified using|Number of signers|Signer.* SHA-256 digest)' >&2 || true
+  abort "签名证书不是恰好一张（去重后 $SIGNER_COUNT 张）：$APK"
 fi
-ACTUAL_FP="$(printf '%s\n' "$VERIFY_RAW" | grep -E '^Signer #[0-9]+ certificate SHA-256 digest' |
-  head -1 | sed -e 's/.*: *//' | tr -d '\r' | tr 'A-F' 'a-f')"
-if [ -z "$ACTUAL_FP" ]; then
-  abort "apksigner 没有给出签名证书的 SHA-256 指纹：$APK"
-fi
+ACTUAL_FP="$UNIQUE_FPS"
 
 info "签名指纹（实际）：$ACTUAL_FP"
 info "签名指纹（期望）：$EXPECTED_FP"
