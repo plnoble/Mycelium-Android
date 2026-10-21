@@ -67,9 +67,12 @@ class RedirectCredentialsTest {
             val calls = server.calls()
             assertEquals(2, calls.size, "应该正好两跳：/start 与 /final")
             // LocalHttp 把请求头名统一成小写。
+            // 同域保留只断言平台一定会发出去的凭据头。JDK 的 HttpURLConnection 在没走代理时
+            // 可以丢掉调用方设的 Proxy-Authorization（CI 上的 Temurin 21 就是这样：期望
+            // Basic eA==，实际是 null）；本机 JBR 25 则会原样发出。产品代码仍然在同域时设置
+            // 这个头，测例不拿一个平台可能吞掉的头当正例。跨域必须摘掉它，见下一条反例。
             assertEquals("Bearer hf_secret_token", calls[1].headers["authorization"], "同域跳转要保留 Authorization")
             assertEquals("session=abc", calls[1].headers["cookie"], "同域跳转要保留 Cookie")
-            assertEquals("Basic eA==", calls[1].headers["proxy-authorization"], "同域跳转要保留 Proxy-Authorization")
             assertEquals("keep-me", calls[1].headers["x-trace"], "普通头一直保留")
         }
     }
