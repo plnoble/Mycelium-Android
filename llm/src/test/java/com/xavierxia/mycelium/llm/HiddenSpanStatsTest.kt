@@ -129,6 +129,8 @@ class HiddenSpanStatsTest {
         assertNotNull("失败之后也要留下这一轮的统计", engine.lastStats)
         val stats = checkNotNull(engine.lastStats)
         assertEquals("已经产生的两个隐藏 token 要记下来", 2L, stats.hiddenTokens)
-        assertTrue("失败的轮次按「已停止」记账", stats.stopped)
+        // 这一轮没走到原生读数：统计必须标明「读数不完整」，而不是把未知的 token/耗时写成 0
+        // 再当作测出来的值（全量审必修 6）。
+        assertTrue("读数不完整要标明，不能冒充测出来的值", !stats.nativeReadingsComplete)
     }
 }

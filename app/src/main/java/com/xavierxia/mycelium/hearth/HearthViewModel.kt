@@ -249,15 +249,24 @@ class HearthViewModel @JvmOverloads constructor(
      */
     internal var hiddenWaitHintMillis: Long = 20_000L
 
-    /** 「这一轮还没出正文」的计时任务：出了正文、停止、失败、换页都要取消它。 */
+    /** 「这一轮还没出正文」的计时任务：出了正文、停止、失败、收尾、换页都要取消它。 */
     private var visibleTextWatch: kotlinx.coroutines.Job? = null
 
-    /** 从接受这一轮开始计时（含加载与读提示）：到点还没有正文才提示，且只提示仍然在跑的那一轮。 */
-    private fun watchForVisibleText(turn: Turn, token: Int) {
+    /**
+     * 这一轮**可显示正文**（非空白）是否已经出现过。只有它才结束 D 的等待：原生 token 到了但全是
+     * 隐藏段或空白，不算「有正文」。
+     */
+    private var visibleTextSeen = false
+
+    /**
+     * 从接受这一轮（发送或重做被受理）开始计时：到点还没有可显示正文才提示，且只在仍然跑着的那一轮
+     * 里提示（token 对不上就不提示）。云端轮次不参与 D：思考段不在本机跑，提示「换云端模型」没有意义。
+     */
+    private fun watchForVisibleText(token: Int) {
         visibleTextWatch?.cancel()
         visibleTextWatch = viewModelScope.launch {
             kotlinx.coroutines.delay(hiddenWaitHintMillis)
-            if (token == generationToken && activeTurn === turn && !turn.produced && !turn.userStopped) {
+            if (token == generationToken && !visibleTextSeen) {
                 mutable.update { it.copy(waitingForVisibleText = true) }
             }
         }
@@ -856,7 +865,8 @@ class HearthViewModel @JvmOverloads constructor(
         // send and the first line of the task still has to land on this turn, or the engine's stop
         // flag (which the load's own runNative clears) would be the only place the intent could live.
         activeTurn = turn
-        watchForVisibleText(turn, token)
+        visibleTextSeen = false
+        if (chosen is Chosen.Local) watchForVisibleText(token)
         operation = viewModelScope.launch {
             try {
                 // The window boundary asks whether this turn may read that conversation at all. The
@@ -892,6 +902,7 @@ class HearthViewModel @JvmOverloads constructor(
                         finishTurn(turn, buffer.toString(), stopped = true, cancelled = turn.chosen.isCloud, token = token)
                     }
                 } else if (token == generationToken) {
+                    clearVisibleTextHint()
                     mutable.update { it.copy(notice = failure.message ?: "生成失败") }
                 }
             } finally {
@@ -918,6 +929,9 @@ class HearthViewModel @JvmOverloads constructor(
         val conversationId = if (current.mode == HearthMode.TEST) null else current.openConversation
         val token = beginGeneration()
         val buffer = StringBuilder()
+        // 重做也在**受理这一刻**开始计时，而不是等历史读完（全量审必修 7）。
+        visibleTextSeen = false
+        if (chosen is Chosen.Local) watchForVisibleText(token)
         operation = viewModelScope.launch {
             var turn: Turn? = null
             try {
@@ -932,7 +946,6 @@ class HearthViewModel @JvmOverloads constructor(
                 val (question, window) = prepared
                 turn = Turn(character, current.mode, conversationId, question, chosen, cacheKeyFor(character, current.mode, conversationId, chosen))
                 activeTurn = turn
-                watchForVisibleText(turn, token)
                 if (token == generationToken) {
                     mutable.update {
                         it.copy(busy = true, streaming = "", streamLabel = chosen.label, droppedTurns = window.droppedTurns, notice = null)
@@ -954,6 +967,7 @@ class HearthViewModel @JvmOverloads constructor(
                         replaceTurn(running, buffer.toString(), stopped = true, cancelled = running.chosen.isCloud, token = token)
                     }
                 } else if (token == generationToken) {
+                    clearVisibleTextHint()
                     mutable.update { it.copy(notice = failure.message ?: "生成失败") }
                 }
             } finally {
@@ -990,6 +1004,7 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     override fun onCleared() {
+        clearVisibleTextHint()
         cloudModel?.stop()
         engine.stop()
         operation?.cancel()
@@ -1089,7 +1104,11 @@ class HearthViewModel @JvmOverloads constructor(
                     // Marked before the delta reaches the screen or the buffer: from this point the turn
                     // has something to keep, which is what a stop is allowed to preserve.
                     turn.produced = true
-                    clearVisibleTextHint()
+                    // 只有非空白的可显示正文才算「不再等」：光有隐藏段或空片段不算。
+                    if (delta.isNotBlank()) {
+                        visibleTextSeen = true
+                        clearVisibleTextHint()
+                    }
                     onDelta(delta)
                 }
             }

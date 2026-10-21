@@ -25,16 +25,27 @@ internal class ThinkingFilter(private var hidden: Boolean = false) {
     private var pending = ""
 
     /**
-     * Whether the next pushed text starts inside a hidden span (P2-1c, step E). The engine reads this
-     * *before* pushing a native token to attribute that token: a token that opens or closes the tag
-     * counts as hidden, because at least part of its text is. No generation is changed by this.
-     */
+ * Whether the next pushed text starts inside a hidden span (P2-1c, step E). The engine reads this
+ * *before* pushing a native token to attribute that token.
+ */
     val isHidden: Boolean get() = hidden
 
+    /**
+     * Whether **any** part of the text pushed last was inside a hidden span (P2-1c, step E). This is
+     * the attribution the engine records: a token that opens the span, one that closes it, and a
+     * token that carries a whole hidden segment between the tags all count, because at least part of
+     * their text was hidden. Set by every [push]; no generation is changed by it.
+     */
+    var sawHiddenText: Boolean = false
+        private set
+
     fun push(text: String): String {
+        sawHiddenText = hidden
         pending += text
         val output = StringBuilder()
         while (pending.isNotEmpty()) {
+            // 这一轮循环消耗/保留的文本只要处在隐藏状态里，这个 token 就算隐藏（E 的口径）。
+            sawHiddenText = sawHiddenText || hidden
             val marker = if (hidden) "</think>" else "<think>"
             val index = pending.indexOf(marker)
             if (index >= 0) {

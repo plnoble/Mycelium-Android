@@ -45,6 +45,12 @@ data class GenerationStats(
      * quoted as "time until the user sees the first character".
      */
     val hiddenMillis: Long = 0,
+    /**
+     * False when this round ended without the native readings coming back (a real cancellation, or a
+     * native call that failed before reporting). The token and time numbers are then unknown, not
+     * zero, and must not be quoted as measurements (plan review, must-fix 6).
+     */
+    val nativeReadingsComplete: Boolean = true,
 ) {
     val tokensPerSecond: Double get() = generatedTokens * 1000.0 / generationMillis.coerceAtLeast(1)
 }
@@ -105,6 +111,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      */
     private var cacheOwner: String? = null
     private var cachedPrompt: IntArray? = null
+
+    /**
+     * 原生最后交回来的那一份读数（提示 token 序列 + 8 项读数）。取消发生时，收集方会被取消，但
+     * `runNative` 仍然 join 了 worker，所以这份读数可能是齐的：收尾统计用它，而不是编一组零。
+     * 只在它自己那一轮里有效（每轮开头清、收尾用掉即清）。
+     */
+    @Volatile private var lastNativeReadings: Pair<IntArray, LongArray>? = null
     override val loadedModel: StateFlow<ModelInfo?> = loaded.asStateFlow()
     override val info: ModelInfo get() = checkNotNull(loaded.value) { "请先加载模型" }
     @Volatile override var lastStats: GenerationStats? = null
@@ -165,9 +178,14 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     }
 
     /**
-     * 隐藏段等了多久（P2-1c 的 E）：从这一轮的第一个原生 token 起，到第一段非空白正文出现为止。
-     * 没有 token、或者第一个 token 就是可见正文时为 0。**不含**读提示、模板与加载，所以它不是
-     * 「用户多久看到第一个字」。
+     * Milliseconds from this round's first native token to the first non-blank visible body text
+     * (P2-1c, step E). Zero when no token arrived or the very first one was visible text.
+     *
+     * **Known limits, by construction** (full review, must-fix 5): it measures the wait for the
+     * first visible text, not the sum of every hidden interval — a hidden span that appears after
+     * visible text has started is not timed, and pure whitespace / waiting for a UTF-8 sequence
+     * counts as part of the wait. It also excludes prompt reading, template work and model loading,
+     * so it must never be quoted as "time until the user sees the first character".
      */
     private fun hiddenMillis(firstTokenNanos: Long, firstVisibleNanos: Long): Long {
         if (firstTokenNanos == 0L) return 0
@@ -187,6 +205,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 snapshot.forEach { json.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content)) }
                 val payload = json.toString().toByteArray(Charsets.UTF_8)
                 val cacheKey = parameters.cacheKey
+                // 上一轮的读数只在它自己那一轮里用；每一轮开头清掉，免得取消收尾读到旧的一份。
+                lastNativeReadings = null
                 var filter = ThinkingFilter()
                 val utf8 = Utf8Stream()
                 // P2-1c 的 E：隐藏思考段用了多少 token、等了多久。只记账，不改生成内容。
@@ -200,31 +220,32 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // would let a later round with that key reuse a prefix that belongs to another
                     // round. Nothing is reused here either way (plan review, must-fix 2).
                     if (cacheKey == null) forgetCachedPrompt()
+                    var requested = 0
                     val (prompt, values) = runNative {
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
                         val reuse = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
-                        tokens to native.generate(payload, parameters.maxTokens,
+                        requested = reuse
+                        // 读数在原生回来的那一刻就存下来：收集方被取消时 `runNative` 会抛，但它其实
+                        // 还是等到了 worker 退出，这份读数照样能用（方案审必修 6）。
+                        (tokens to native.generate(payload, parameters.maxTokens,
                             parameters.temperature, parameters.topP, parameters.seed, reuse, object : TokenCallback {
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {
                                     if (!isActive) return false
-                                    // 归属在 push **之前**判定：开/闭标签的那个 token 至少有一部分是隐藏
-                                    // 的，所以算隐藏 token（口径写进交付报告）。生成内容与计数都不受影响。
-                                    val wasHidden = filter.isHidden
+                                    // 归属由过滤器自己报：这个 token 消耗/保留的文本只要有一段处在隐藏
+                                    // 状态（开标签、闭标签、整段都在一个 token 里），就算隐藏 token。
                                     val text = filter.push(utf8.push(bytes))
                                     if (firstTokenNanos == 0L) firstTokenNanos = System.nanoTime()
-                                    if (wasHidden) hiddenTokens++
+                                    if (filter.sawHiddenText) hiddenTokens++
                                     if (firstVisibleNanos == 0L && text.isNotBlank()) firstVisibleNanos = System.nanoTime()
                                     return text.isEmpty() || trySendBlocking(text).isSuccess
                                 }
-                            })
+                            })).also { lastNativeReadings = it }
                     }
-                    // Strict contract: a bridge that does not report the reuse split cannot be told
-                    // apart from one that reused nothing, and a count that disagrees with the sequence
-                    // the engine was handed would make every later comparison meaningless. Both fail
-                    // loudly instead of being taken as "reused nothing" (plan review, must-fix 5).
+                    // 严格计数契约（方案审必修 4）：长度、提示长度一致、以及**每一项**读数的范围都要自洽。
+                    // 任何一项对不上就立刻失败，不把不一致的读数当成「这一轮没复用」。
                     if (values.size != 8) {
                         error("原生读数应有 8 项（提示 token、生成 token、读提示毫秒、生成毫秒、是否停止、复用 token、实读 token、未复用原因），实际 ${values.size} 项")
                     }
@@ -233,11 +254,25 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     }
                     val reused = values[5]
                     val read = values[6]
-                    if (reused < 0 || read < 0 || reused + read > values[0]) {
-                        error("原生报的复用/实读数不合理：复用 $reused、实读 $read、整段 ${values[0]}")
+                    val stopped = values[4] != 0L
+                    val reuseCeiling = minOf(requested, prompt.size - 1).toLong()
+                    if (values[1] < 0 || values[2] < 0 || values[3] < 0) {
+                        error("原生报的生成 token 数或耗时为负：${values.toList()}")
+                    }
+                    if (reused < 0 || reused > reuseCeiling) {
+                        error("原生报的复用数 $reused 超出这一轮请求的 $requested（上限 $reuseCeiling）")
+                    }
+                    if (read < 0 || read > values[0] - reused) {
+                        error("原生报的实读数 $read 不合理：整段 ${values[0]}、复用 $reused")
+                    }
+                    if (!stopped && reused + read != values[0]) {
+                        error("这一轮没有停止却没把提示读完：复用 $reused + 实读 $read ≠ 整段 ${values[0]}")
+                    }
+                    if (values[7] !in 0L..4L) {
+                        error("原生报的未复用原因码 ${values[7]} 不认识")
                     }
                     lastStats = GenerationStats(
-                        values[0], values[1], values[2], values[3], values[4] != 0L, reused, read, values[7],
+                        values[0], values[1], values[2], values[3], stopped, reused, read, values[7],
                         hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos),
                     )
                     // Only a prompt that was read to its end is a cache entry the next round may
@@ -259,12 +294,25 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
-                    // 这一轮没走到原生读数，但隐藏段已经产生的部分要留下来——最需要诊断的正是
-                    // 「长时间思考之后被停掉」那一态（方案审必修 8）。统计先提交，再继续传播取消/异常。
+                    // 取消的是收集方，原生那一轮 worker 其实已经被 join 回来了：它交回的读数照样能用。
+                    // 有就用真实读数收尾；没有就把这一轮标成「读数不完整」，不把未知量写成 0
+                    // （方案审必修 6）。
+                    val readings = lastNativeReadings
+                    lastNativeReadings = null
+                    val values = readings?.second
+                    val cancelled = failure is kotlinx.coroutines.CancellationException
                     lastStats = GenerationStats(
-                        promptTokens = 0, generatedTokens = 0, promptMillis = 0, generationMillis = 0,
-                        stopped = true, reuseFallbackReason = 0,
-                        hiddenTokens = hiddenTokens, hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
+                        promptTokens = values?.getOrNull(0) ?: 0L,
+                        generatedTokens = values?.getOrNull(1) ?: 0L,
+                        promptMillis = values?.getOrNull(2) ?: 0L,
+                        generationMillis = values?.getOrNull(3) ?: 0L,
+                        stopped = if (values != null) values[4] != 0L else cancelled,
+                        reusedPromptTokens = values?.getOrNull(5) ?: 0L,
+                        readPromptTokens = values?.getOrNull(6) ?: 0L,
+                        reuseFallbackReason = values?.getOrNull(7) ?: 0L,
+                        hiddenTokens = hiddenTokens,
+                        hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
+                        nativeReadingsComplete = values != null,
                     )
                     throw failure
                 }

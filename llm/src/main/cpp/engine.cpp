@@ -36,13 +36,6 @@ struct Engine {
 } engine;
 
 using Clock = std::chrono::steady_clock;
-
-// P2-1c：一轮最多能把循环状态回退多远（见 load() 与 generate()）。要回退得比这更多的一轮，
-// 直接整段重读。目标模型（qwen35 这类混合状态模型）没有这个窗口就完全没法裁尾：llama.cpp 的
-// 循环内存注释写着「Mamba / RWKV 这类模型的状态无法在序列末尾被部分擦除」，于是每一轮都会
-// 退回整段重读。窗口取值要盖住「上一轮生成出来的 token 数 + 模板多出来的那几个」；默认生成
-// 预算（maxTokens）是 256。
-constexpr uint32_t ROLLBACK_TOKENS = 320;
 long elapsed(Clock::time_point start) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
 }
@@ -102,11 +95,15 @@ int shared_prefix(const std::vector<llama_token> & a, const std::vector<llama_to
     while (shared < limit && a[shared] == b[shared]) shared++;
     return shared;
 }
-// 除非拥有它的那一轮正常走到结尾，否则把记住的提示丢掉。所有提前 return 与异常出口都会经过
-// 这个析构，所以没有任何一条出路能把「引擎无法担保的状态」留给下一轮（方案审必修第 4 条）。
+// 除非拥有它的那一轮把原生读数交回调用方，否则把记住的提示丢掉，并把原生内存一起清掉：只在
+// token 向量上作废、把内存留给下一轮，等于让下一轮去复用一份没人担保的状态（全量审必修 3）。
 struct PromptGuard {
     bool committed = false;
-    ~PromptGuard() { if (!committed) engine.cachedPrompt.clear(); }
+    ~PromptGuard() {
+        if (committed) return;
+        engine.cachedPrompt.clear();
+        if (engine.context) llama_memory_clear(llama_get_memory(engine.context), true);
+    }
 };
 }
 
@@ -139,9 +136,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         cp.n_ctx = context;
         cp.n_threads = threads;
         cp.n_threads_batch = threads;
-        cp.n_batch = ROLLBACK_TOKENS + 1;
-        cp.n_ubatch = ROLLBACK_TOKENS + 1;
-        cp.n_rs_seq = ROLLBACK_TOKENS;
+        cp.n_batch = 128;
+        cp.n_ubatch = 128;
+        // 不请求循环状态回退快照（`n_rs_seq`，P2-1c 全量审阻断 1、2）：
+        //  - `llama-batch.cpp` 里 `split_equal()` 断言 `n_ubatch > n_rs_seq + 1`，按窗口配批次会直接 abort；
+        //  - 更要紧的是：这个版本的快照按 ubatch 写，而生成阶段每次只解一个 token，较老的槽不会随
+        //    已生成的 token 整体后移；`seq_rm()` 只核对回退距离是否超过窗口，核不出槽里的状态是否对应
+        //    那个位置。也就是说窗口内的「成功回退」也可能恢复到位置不对的循环状态，而错误状态会答错。
+        // 所以这里保持 0：纯注意力模型仍能按位置精确裁剪 KV（复用照常提速），混合状态模型（qwen35
+        // 这类）的循环侧会让 seq_rm 返回 false，于是整段重读——正确但拿不到提速，交统筹决定是否单开
+        // 一个工作包做「按位置可恢复的检查点」。
         cp.offload_kqv = false;
         cp.op_offload = false;
         cp.abort_callback = abort_decode;
@@ -208,7 +212,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         if (reuse < 0) reuse = 0;
         // Reported to the caller so "why did this round still read everything?" has an answer:
         // 1 = nothing was asked for, 2 = nothing shareable was held, 3 = this build refused to drop
-        // only a suffix (the rollback window is too small for this round).
+        // only a suffix (the model's state cannot be rolled back that far), 4 = this round's decode
+        // failed, so its state was dropped.
         jlong fallback = 0;
         auto * memory = llama_get_memory(engine.context);
         bool trimmed = false;
@@ -263,18 +268,23 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             // Decode the final token as well, so timing includes every generated token.
             auto batch = llama_batch_get_one(&token, 1);
             if (llama_decode(engine.context, batch) != 0) {
-                if (cancelled) break;
-                throw std::runtime_error("Generation failed");
+                // 状态不明（不是「检查点上的正常停止」）：这一轮的循环状态不可信，保守作废并如实
+                // 报成因 4，交给下一轮整段重读（全量审必修 3）。
+                engine.cachedPrompt.clear();
+                llama_memory_clear(llama_get_memory(engine.context), true);
+                fallback = 4;
+                break;
             }
         }
         // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,
-        //  tokens reused from the cache, tokens actually read} — the caller records the last two.
-        // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,
         //  tokens reused from the cache, tokens actually read, why a reuse did not happen}
-        guard.committed = true;
         jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback};
         auto result = env->NewLongArray(8);
-        if (result) env->SetLongArrayRegion(result, 0, 8, values);
+        if (!result) return nullptr;                       // 读数没回去：guard 清缓存与内存
+        env->SetLongArrayRegion(result, 0, 8, values);
+        if (env->ExceptionCheck()) return nullptr;         // 同上
+        // 读数真的交到调用方手里了，这一轮的缓存才算数。
+        guard.committed = true;
         return result;
     } catch (const std::exception & e) {
         // A failed round leaves a prompt that may be half read: forget it instead of letting the next
