@@ -66,8 +66,33 @@ class HearthLocalStopDuringLoadDeviceTest {
             // 加载一个没加载过的模型：4B Q4 的加载要好几秒，停止点一定落在「正在加载」里。
             LocalModelEngine.shared.unload()
             hearthWaitUntil(20_000) { LocalModelEngine.shared.loadedModel.value == null }
-            model.send(question)
-            hearthWaitUntil(20_000) { model.state.value.notice?.contains("正在加载") == true }
+            // `historyLoading` 结束不等于「可以发了」：`send` 在 `historyReady()` 为假时**拒收**
+            // （返回 false，什么都不做）。所以按返回值重试到这一问真的被接下——这才是等待的判据。
+            var accepted = false
+            val acceptDeadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < acceptDeadline) {
+                accepted = model.send(question)
+                if (accepted) break
+                Thread.sleep(100)
+            }
+            assertTrue(
+                "这一问一直没被接下：send 返回 false（historyReady 为假）" +
+                    " notice=${model.state.value.notice} busy=${model.state.value.busy}",
+                accepted,
+            )
+            // 被接下之后才该看到「正在加载」（本地模型第一次加载）。超时也要说清看到的是什么。
+            var seenNotice: String? = null
+            val loadingDeadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < loadingDeadline) {
+                seenNotice = model.state.value.notice
+                if (seenNotice?.contains("正在加载") == true) break
+                Thread.sleep(50)
+            }
+            assertTrue(
+                "没等到「正在加载」：notice=$seenNotice busy=${model.state.value.busy} " +
+                    "loaded=${LocalModelEngine.shared.loadedModel.value?.id?.take(8)}",
+                seenNotice?.contains("正在加载") == true,
+            )
             model.stop()
 
             hearthWaitUntil(60_000) { !model.state.value.busy }

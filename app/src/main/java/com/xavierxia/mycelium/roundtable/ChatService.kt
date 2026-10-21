@@ -6,6 +6,8 @@ import com.xavierxia.mycelium.contract.AnswerMode
 import com.xavierxia.mycelium.net.AndroidGateway
 import com.xavierxia.mycelium.net.GatewayPurpose
 import com.xavierxia.mycelium.net.GatewayRequest
+import com.xavierxia.mycelium.update.GatewayUpdateTransport
+import com.xavierxia.mycelium.update.UpdateTransport
 import com.xavierxia.mycelium.net.HttpText
 import com.xavierxia.mycelium.update.GitHubReleaseClient
 import net.zetetic.database.sqlcipher.SQLiteDatabase
@@ -137,6 +139,12 @@ class ChatService(context: Context) {
         )
         HttpText(response.status, response.body)
     }
+
+    /**
+     * 第 4 步：应用内下载、取 `.sha256` 与本地哈希都从这一个口子出去，用的还是 [gateway] 手上的
+     * 同一个 `OutboundGateway`，所以下载同样写进 `privacy/audit.json`（一次安装两条：APK + 校验文件）。
+     */
+    fun updateTransport(): UpdateTransport = GatewayUpdateTransport(gateway.gateway)
 
     private fun gatewayFor(store: CloudSettingsStore) = AndroidGateway(app, store.allBaseUrls())
 

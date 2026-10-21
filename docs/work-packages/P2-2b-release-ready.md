@@ -197,3 +197,17 @@
 - 方案审和全量审必做。这个包涉及出网和安装，额度够的话加一轮专项审，审网关重定向白名单、下载校验和安装来源。
 - 真机截图交统筹看。
 - 通过后由统筹合并进本地 `main`。
+
+## 范围补充（2026-10-19 用户定：导出的文件统一叫「人物包」）
+
+- 来源：Windows 侧总计划 v1.8 第 2 条（2026-10-19 用户拍板）——导出的文件在界面上统一叫「人物包」（原「角色包」）；文件格式内部名 `mycelium-persona-pack` 与 `contract/` 都不改。用户 2026-10-19 另定：这一项**随本包（0.4.0）一起发，不单独发版**。
+- 只改用户看得见的文字，不动任何逻辑、契约、格式：
+  - `MyceliumApp.kt`：圆桌导入按钮「导入角色包」→「导入人物包」；空态说明「在电脑版知衍的角色页导出角色包，传到手机后在这里导入。」→「…的人物页导出人物包…」；导入失败兜底「角色包没有通过校验」→「人物包没有通过校验」；「我的」页「已导入的角色包」→「已导入的人物包」、空态「还没有导入角色包。在圆桌页选择电脑版导出的文件。」→「还没有导入人物包。…」。
+  - `PackLibrary.kt` / `Roundtable.kt`：导入失败兜底与 64 MB 上限提示改成「人物包」。
+  - `app/src/test/.../MainActivityTest.kt`：对应的两条界面断言同步改。
+  - `docs/releases/v0.4.0.md`：三处「导入的角色包」→「导入的人物包」（0.4.0 还没打标签，发布说明是草稿）。
+- **统筹裁定（2026-10-19）**：A 同意——`:contract` 里 8 句用户看得见的报错文字也改成「人物包」，只改文字、不动格式与契约；B 同意——空态里的「人物页」保留；C 不用改——`app/build.gradle.kts` 的注释与 `PackLibraryTest` 的用例标签不动。`contract/` 与内部名 `mycelium-persona-pack` 照旧不动。
+- **没改**：`contract/`（`SPEC.md`、`pack-db.sql`、`manifest.schema.json`）、`.mpack` 与内部名 `mycelium-persona-pack`、包内表结构、`:contract` 的校验逻辑（只改了 8 句报错文案，见下）、导入与检索逻辑、圆桌与炉边的对话逻辑。`app/build.gradle.kts` 里一处注释和 `PackLibraryTest` 里一个测试用例标签仍写「角色包」（统筹裁定 C：不改）。
+- **按裁定 A 改掉的 8 句**：`contract-lib/src/main/kotlin/com/xavierxia/mycelium/contract/PersonaPack.kt` 第 53、57、61、134、150、167、172、185 行 `PackRejected` 的报错文字「角色包→人物包」。这些消息**确实会显示给用户**——`PackLibrary.importBytes` 把 `error.message` 装进 `ImportOutcome.Rejected`，`MyceliumApp.kt` 的 `notice()` 对 `Rejected` 直接返回 `message`。只改文字，不动格式、契约与包内 SQL；`PersonaPackTest` 只断言消息非空、不锁文案，测试无需改。
+- 证据：`docs/reviews/2026-10-19-P2-2b-wording/`（交付报告 + `check-all` 输出）。
+- 分支：`wp/P2-2b-persona-pack-wording`（从 `wp/P2-2b-release-ready` 尖端拉），合并进 `wp/P2-2b-release-ready` 即随本包一起审。

@@ -16,17 +16,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,16 +39,20 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.xavierxia.mycelium.hearth.HearthSpace
@@ -69,7 +77,21 @@ import com.xavierxia.mycelium.roundtable.InstalledVersion
 import com.xavierxia.mycelium.roundtable.Roundtable
 import com.xavierxia.mycelium.roundtable.SqlCipherPackDatabase
 import com.xavierxia.mycelium.roundtable.StoredMessage
+import com.xavierxia.mycelium.update.AndroidInstallSessionGateway
+import com.xavierxia.mycelium.update.CurrentAppFacts
+import com.xavierxia.mycelium.update.DownloadFailureReason
+import com.xavierxia.mycelium.update.DownloadUiState
+import com.xavierxia.mycelium.update.GatewayApkDownloader
+import com.xavierxia.mycelium.update.LocalApkVerifier
+import com.xavierxia.mycelium.update.PackageManagerApkFactsReader
+import com.xavierxia.mycelium.update.ReleaseInfo
+import com.xavierxia.mycelium.update.UpdateCenter
+import com.xavierxia.mycelium.update.plainReleaseNotes
+import com.xavierxia.mycelium.update.UpdateError
+import com.xavierxia.mycelium.update.UpdateFiles
+import com.xavierxia.mycelium.update.UpdateFormat
 import com.xavierxia.mycelium.update.UpdateManager
+import com.xavierxia.mycelium.update.UpdatePreferences
 import com.xavierxia.mycelium.update.UpdateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,15 +103,71 @@ private enum class Space(val label: String) { Roundtable("圆桌"), Hearth("炉�
 private val roundtableColors = lightColorScheme(primary = Color(0xFF8D4A2B), secondary = Color(0xFF8D4A2B))
 private val hearthColors = darkColorScheme(primary = Color(0xFF7EB6A4), secondary = Color(0xFF7EB6A4))
 
+/** 点开了「我的」上的小红点时用的标记；红点本身没有文字，测例靠它断言。 */
+internal const val UpdateBadgeTag = "update_badge"
+
+/**
+ * 正式入口：状态由 [MainActivity] 造的 [UpdateCenter]（Activity 级 ViewModel）持有。
+ *
+ * 这个重载**没有默认值**是有意的：两个都带 `= null` 的重载会让 `MyceliumApp()` 的调用歧义
+ * （方案审 C3 第 3 条）。
+ */
+@Composable
+fun MyceliumApp(updateCenter: UpdateCenter) {
+    MyceliumAppScaffold(updateCenter)
+}
+
+/**
+ * 第 2 步已提交的重载，`MyceliumAppTest` 按位置传 manager，签名保留不动：内部包一个最小 center。
+ *
+ * 调试包判定在这里算一次；Robolectric 下 debug 变体的 applicationId 带 `.debug`，所以单测里
+ * 不会自动检查（也就不会真的打网络）。
+ */
 @Composable
 fun MyceliumApp(updateManager: UpdateManager? = null) {
     val context = LocalContext.current
+    val chat = remember { ChatService(context) }
+    val scope = rememberCoroutineScope()
+    val center = remember(updateManager, scope) {
+        val manager = updateManager ?: UpdateManager(chat.releaseSource())
+        val files = UpdateFiles(File(context.cacheDir, "updates"))
+        // 第 4 步接线：应用内下载与四项校验都走 ChatService 手上的同一个网关，
+        // 审计因此和聊天/检查更新写进同一份 privacy/audit.json。
+        val transport = chat.updateTransport()
+        val prefs = UpdatePreferences(context)
+        UpdateCenter(
+            updates = manager,
+            prefs = prefs,
+            isDebugPackage = BuildConfig.APPLICATION_ID.endsWith(".debug"),
+            files = files,
+            downloader = GatewayApkDownloader(files, transport),
+            verifier = LocalApkVerifier(
+                transport = transport,
+                archive = PackageManagerApkFactsReader(context),
+                installed = CurrentAppFacts(context),
+                selfPackageName = BuildConfig.APPLICATION_ID,
+            ),
+            // 第 5 步接线：会话与回执共用同一份偏好存储，进程重建后还能把结果认回来。
+            installer = AndroidInstallSessionGateway(context, prefs),
+            sessionState = prefs,
+            scope = scope,
+        )
+    }
+    MyceliumAppScaffold(center)
+}
+
+@Composable
+private fun MyceliumAppScaffold(center: UpdateCenter) {
+    val context = LocalContext.current
     val roundtable = remember { Roundtable(context) }
     val chat = remember { ChatService(context) }
-    val updates = updateManager ?: remember { UpdateManager(chat.releaseSource()) }
     var space by remember { mutableStateOf(Space.Roundtable) }
     var revision by remember { mutableIntStateOf(0) }
+    val state by center.state.collectAsState()
     val colors = if (space == Space.Hearth) hearthColors else roundtableColors
+
+    // 打开 App 时按 24 小时节流查一次；UpdateManager 自己在 Dispatchers.IO 上跑，不挡首帧。
+    LaunchedEffect(Unit) { center.checkIfDue() }
 
     MaterialTheme(colorScheme = colors) {
         Scaffold(
@@ -97,10 +175,20 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
             bottomBar = {
                 NavigationBar {
                     Space.entries.forEach { item ->
+                        val badged = item == Space.Mine && state.release != null && !center.isDebugPackage
                         NavigationBarItem(
                             selected = space == item,
                             onClick = { space = item },
-                            icon = { Text(if (item == Space.Roundtable) "桌" else if (item == Space.Hearth) "炉" else "我") },
+                            icon = {
+                                if (badged) {
+                                    // 不带数字的小圆点：只表示「我的」里有事。
+                                    BadgedBox(badge = { Badge() }, modifier = Modifier.testTag(UpdateBadgeTag)) {
+                                        Text(spaceIcon(item))
+                                    }
+                                } else {
+                                    Text(spaceIcon(item))
+                                }
+                            },
                             label = { Text(item.label) },
                         )
                     }
@@ -110,10 +198,16 @@ fun MyceliumApp(updateManager: UpdateManager? = null) {
             when (space) {
                 Space.Roundtable -> RoundtableScreen(roundtable, chat, revision, padding) { revision++ }
                 Space.Hearth -> HearthSpace(padding)
-                Space.Mine -> MineScreen(roundtable, chat, updates, revision, padding) { revision++ }
+                Space.Mine -> MineScreen(roundtable, chat, center, revision, padding) { revision++ }
             }
         }
     }
+}
+
+private fun spaceIcon(item: Space): String = when (item) {
+    Space.Roundtable -> "桌"
+    Space.Hearth -> "炉"
+    Space.Mine -> "我"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -162,7 +256,7 @@ private fun PersonaList(
                 notice = outcome.notice()
                 if (outcome is ImportOutcome.Imported) onChanged()
             } catch (failure: Exception) {
-                notice = failure.message ?: "角色包没有通过校验"
+                notice = failure.message ?: "人物包没有通过校验"
             } finally {
                 busy = false
             }
@@ -170,11 +264,11 @@ private fun PersonaList(
     }
     Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) {
-            Text(if (busy) "正在校验" else "导入角色包")
+            Text(if (busy) "正在校验" else "导入人物包")
         }
         notice?.let { Text(it) }
         if (personas.isEmpty()) {
-            Text("在电脑版知衍的角色页导出角色包，传到手机后在这里导入。")
+            Text("在电脑版知衍的人物页导出人物包，传到手机后在这里导入。")
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(personas, key = { it.personaId }) { persona ->
@@ -362,18 +456,20 @@ private fun ClaimScreen(roundtable: Roundtable, version: InstalledVersion, claim
 private fun MineScreen(
     roundtable: Roundtable,
     chat: ChatService,
-    updateManager: UpdateManager,
+    center: UpdateCenter,
     revision: Int,
     padding: PaddingValues,
     onChanged: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var checking by remember { mutableStateOf(false) }
-    var update by remember { mutableStateOf<UpdateResult?>(null) }
+    val state by center.state.collectAsState()
     var pendingDelete by remember { mutableStateOf<InstalledVersion?>(null) }
     var page by remember { mutableStateOf("packs") }
     var localModels by remember { mutableStateOf(false) }
+    // 跳「安装未知应用」设置页。回来立刻复查：允许了就接着装，没允许就停在说明上（工作包第 5 步）。
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        center.onResume()
+    }
     if (localModels) {
         LocalModelsScreen(padding, onBack = { localModels = false })
         return
@@ -397,26 +493,58 @@ private fun MineScreen(
             TextButton(onClick = { page = "cloud" }) { Text("云端模型") }
         }
         item {
-            Button(enabled = !checking, onClick = {
-                scope.launch {
-                    checking = true
-                    try {
-                        update = updateManager.checkForUpdate()
-                    } finally {
-                        checking = false
-                    }
-                }
-            }) {
-                if (checking) CircularProgressIndicator() else Text(stringResource(R.string.home_check_updates))
+            Button(enabled = !state.checking, onClick = { scope.launch { center.checkNow() } }) {
+                if (state.checking) CircularProgressIndicator() else Text(stringResource(R.string.home_check_updates))
             }
         }
-        item { UpdateText(update, context) }
+        // 失败不打扰：自动检查不填 error，只有手动检查才在这里给人话。
+        val updateError = state.error
+        if (updateError != null) {
+            item { Text(stringResource(R.string.update_failed, updateErrorText(updateError))) }
+        }
+        // 安装结果的一句话：成功与取消会把卡片收掉，所以它不挂在卡片上（工作包第 5 步）。
+        val installNotice = state.installNotice
+        if (installNotice != null) {
+            item { Text(installNotice) }
+        }
+        val release = state.release
+        if (release != null) {
+            item {
+                UpdateCard(
+                    release = release,
+                    installReady = center.installReady,
+                    download = state.download,
+                    onDownload = { center.startDownload() },
+                    onInstall = { center.install() },
+                    onCancel = { center.cancelDownload() },
+                    onIgnore = { center.ignore(release.tagName) },
+                )
+            }
+        } else {
+            item { UpdateText(state.lastResult) }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.update_auto_check))
+                Switch(checked = state.autoCheck, onCheckedChange = { center.setAutoCheck(it) })
+            }
+        }
+        item {
+            // 「上次检查」显示的是**成功跑完**的时间；失败不会把它推后，也不会把它改掉。
+            Text(
+                if (state.lastSuccessAtMs == 0L) {
+                    stringResource(R.string.update_last_check_never)
+                } else {
+                    stringResource(R.string.update_last_check, UpdateFormat.lastCheckAt(state.lastSuccessAtMs))
+                },
+            )
+        }
         item {
             TextButton(onClick = { page = "privacy" }) { Text("隐私记录") }
         }
-        item { Text("已导入的角色包", style = MaterialTheme.typography.titleMedium) }
+        item { Text("已导入的人物包", style = MaterialTheme.typography.titleMedium) }
         if (installed.isEmpty()) {
-            item { Text("还没有导入角色包。在圆桌页选择电脑版导出的文件。") }
+            item { Text("还没有导入人物包。在圆桌页选择电脑版导出的文件。") }
         }
         items(installed, key = { "${it.personaId}/${it.versionId}" }) { version ->
             Card(Modifier.fillMaxWidth()) {
@@ -443,24 +571,160 @@ private fun MineScreen(
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
         )
     }
+    // 「安装未知应用」先说明、再带路。只带路，开不开由用户决定；这时还没有建安装会话。
+    if (state.download is DownloadUiState.NeedsUnknownSources) {
+        AlertDialog(
+            onDismissRequest = { center.dismissUnknownSources() },
+            title = { Text("需要允许「安装未知应用」") },
+            text = {
+                Text(
+                    "更新包已经下载并校验好了，要交给系统的安装器才能装上。" +
+                        "系统要求你先允许本应用安装应用。点「去设置」打开本应用的设置页，" +
+                        "打开那个开关再回来，就可以接着装。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    center.unknownSourcesIntent()?.let { settingsLauncher.launch(it) }
+                }) { Text("去设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { center.dismissUnknownSources() }) { Text("以后再说") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun UpdateText(result: UpdateResult?, context: Context) {
+private fun UpdateText(result: UpdateResult?) {
     when (result) {
         null -> Unit
         is UpdateResult.UpToDate -> Text(stringResource(R.string.update_latest))
         is UpdateResult.NoPublishedRelease -> Text(stringResource(R.string.update_none_published))
-        is UpdateResult.Error -> Text(stringResource(R.string.update_failed, result.message))
-        is UpdateResult.Available -> {
-            Text(stringResource(R.string.update_new_version, result.release.versionName))
-            Row {
-                Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, result.release.apkDownloadUrl.toUri())) }) {
-                    Text(stringResource(R.string.update_open_apk))
+        // 失败在错误行、有新版在卡片里，这里都不重复。
+        is UpdateResult.Error -> Unit
+        // 有新版但被用户忽略过：什么都不显示，直到出现更新的版本。
+        is UpdateResult.Available -> Unit
+    }
+}
+
+/**
+ * 「我的」页顶部的更新卡片：版本号、大小、更新说明（纯文本，太长可展开）、忽略、
+ * 以及（接线后）下载并安装。发布页按钮始终在：缺附件、被白名单拒绝、签名读不出都还能点到它。
+ *
+ * 下载中点「取消」立刻停，进度条按 `written / total` 前进；`total` 未知时是不确定态。
+ * 校验失败的人话由 `DownloadUiState.Failed.message` 带上来（第 4 步：要说清是哪一项）。
+ */
+@Composable
+private fun UpdateCard(
+    release: ReleaseInfo,
+    installReady: Boolean,
+    download: DownloadUiState,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onCancel: () -> Unit,
+    onIgnore: () -> Unit,
+) {
+    val context = LocalContext.current
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.update_new_version, release.versionName))
+            Text(
+                release.apkSizeBytes?.let { stringResource(R.string.update_size, UpdateFormat.mebibytes(it)) }
+                    ?: stringResource(R.string.update_size_unknown),
+            )
+            if (release.releaseNotes.isNotBlank()) {
+                UpdateNotes(release.releaseNotes)
+            }
+            when (download) {
+                is DownloadUiState.Running -> {
+                    val total = download.total
+                    if (total != null && total > 0L) {
+                        LinearProgressIndicator(
+                            progress = { (download.written.toFloat() / total).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text("下载中 ${UpdateFormat.mebibytes(download.written)} / ${UpdateFormat.mebibytes(total)}")
+                    } else {
+                        // 服务器没说长度：不确定态，不假装知道百分比。
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text("下载中 ${UpdateFormat.mebibytes(download.written)}")
+                    }
                 }
+                is DownloadUiState.Verifying -> Text("正在校验下载的文件…")
+                is DownloadUiState.Ready -> Text("下载并校验通过，可以安装。")
+                is DownloadUiState.Installing -> Text("正在安装…请在系统的安装界面上点「安装」。")
+                is DownloadUiState.NeedsUnknownSources -> Text("要先允许「安装未知应用」，才能把安装包交给系统。")
+                is DownloadUiState.NeedsVerification ->
+                    Text("这次安装还没确认完成。可以回到系统界面确认，或者稍后再看这里。")
+                is DownloadUiState.Failed -> Text(downloadFailureText(download.reason, download.message))
+                is DownloadUiState.Idle -> Unit
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 下载/校验/安装三件都接线（且非调试包、两个附件都在）才画这个按钮：
+                // 不放按了没用的入口，也不给缺附件的发布画一个装不上的按钮。
+                val installable = release.apkUrl != null && release.sha256Url != null
+                if (download is DownloadUiState.Running) {
+                    Button(onClick = onCancel) { Text("取消") }
+                } else if (download is DownloadUiState.Ready) {
+                    // 下载并校验通过之后才出现的安装入口（第 5 步）。
+                    Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
+                } else if (installReady && installable && download !is DownloadUiState.Installing && download !is DownloadUiState.Verifying) {
+                    Button(onClick = onDownload) { Text(stringResource(R.string.update_download_install)) }
+                }
+                TextButton(onClick = onIgnore) { Text(stringResource(R.string.update_ignore_version)) }
+            }
+            if (release.apkUrl == null || release.sha256Url == null) {
+                // 真的缺附件才这么说；「还没接线」不冒充「没有安装包」。
+                Text(stringResource(R.string.update_no_installable_asset))
+            }
+            TextButton(onClick = {
+                context.startActivity(Intent(Intent.ACTION_VIEW, release.releasePageUrl.toUri()))
+            }) {
+                Text(stringResource(R.string.update_open_release_page))
             }
         }
     }
+}
+
+/** 校验/下载失败的人话：第 4 步的实现给了具体项就用它，否则按类型回退到通用文案。 */
+private fun downloadFailureText(reason: DownloadFailureReason, message: String?): String = message ?: when (reason) {
+    DownloadFailureReason.ChecksumMismatch -> "校验和不符：下载的文件和发布里的不一致。"
+    DownloadFailureReason.NotAllowed -> "下载被拒绝：地址不在允许的下载域名里。"
+    DownloadFailureReason.Network -> "网络失败，稍后再试。"
+    DownloadFailureReason.Verification -> "校验没通过，下载的文件已经删掉。"
+    DownloadFailureReason.Storage -> "存储空间不够。"
+    DownloadFailureReason.Installation -> "安装没成功。"
+}
+
+/** 更新说明是纯文本（不渲染 Markdown），显示前先去掉标记符号；超过几行折起来，给一个展开入口。 */
+@Composable
+private fun UpdateNotes(notes: String) {
+    var expanded by remember { mutableStateOf(false) }
+    val text = remember(notes) { plainReleaseNotes(notes) }
+    val foldable = text.length > NOTES_FOLD_LENGTH
+    Text(
+        text = text,
+        maxLines = if (foldable && !expanded) NOTES_COLLAPSED_LINES else Int.MAX_VALUE,
+        overflow = TextOverflow.Ellipsis,
+    )
+    if (foldable) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(stringResource(if (expanded) R.string.update_notes_collapse else R.string.update_notes_expand))
+        }
+    }
+}
+
+private const val NOTES_FOLD_LENGTH = 120
+private const val NOTES_COLLAPSED_LINES = 4
+
+/** 错误类型到文案只在这里对应：界面认类型，改文案不用碰解析逻辑。 */
+@Composable
+private fun updateErrorText(error: UpdateError): String = when (error) {
+    UpdateError.Network -> stringResource(R.string.update_error_network)
+    UpdateError.RateLimited -> stringResource(R.string.update_error_rate_limited)
+    is UpdateError.Server -> stringResource(R.string.update_error_server, error.status)
+    UpdateError.Malformed -> stringResource(R.string.update_error_malformed)
 }
 
 private fun ImportOutcome.notice(): String = when (this) {
@@ -833,13 +1097,22 @@ private fun AuditCard(entry: AuditEntry) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(entry.at.take(19).replace('T', ' '))
-            Text("${purposeLabel(entry.purpose)} · ${entry.host} · HTTP ${entry.status ?: "无"} · ${if (entry.succeeded) "成功" else "失败"}")
+            // 第 1 步起记的是**每一跳的域名链**。旧记录只有一个 host 且 hostPath 为空——那种记录
+            // 一定是连上过才写下来的，所以「成功 + 空链」才按旧格式回填；失败且空链表示**一次都没连**，
+            // 这时不能再显示成「联系过这个域名」（M11）。
+            val hosts = if (entry.hostPath.isEmpty() && entry.succeeded) listOf(entry.host) else entry.hostPath
+            val chain = if (hosts.isEmpty()) "未联系任何域名" else hosts.joinToString(" → ")
+            Text("${purposeLabel(entry.purpose)} · $chain · HTTP ${entry.status ?: "无"} · ${if (entry.succeeded) "成功" else "失败"}")
             val usage = if (entry.promptTokens != null || entry.completionTokens != null) {
                 " · token 用量 ${entry.promptTokens ?: 0} 入 / ${entry.completionTokens ?: 0} 出"
             } else {
                 ""
             }
             Text("${entry.sentCharacters} 字$usage")
+            // 旧记录没有字节数，就少这一行，不补 0。
+            entry.receivedBytes?.let {
+                Text(stringResource(R.string.privacy_downloaded_bytes, UpdateFormat.mebibytes(it)))
+            }
             if (entry.sentBody.isNotEmpty()) {
                 Text(entry.sentBody)
             } else if (!entry.purpose.recordsBody) {

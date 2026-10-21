@@ -20,8 +20,9 @@ class UpdateManager(
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (error: Exception) {
-            UpdateResult.Error(error.message ?: "Unknown error")
+        } catch (failure: Exception) {
+            // 界面拿到的是原因类型，不是英文原文；文案在 strings.xml。
+            UpdateResult.Error(failure.toUpdateError())
         }
     }
 }

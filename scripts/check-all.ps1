@@ -5,14 +5,20 @@
 
 .DESCRIPTION
   One command runs everything, prints a summary table (per module and per test task: cases and
-  failures; lint errors and warnings; every APK with its path, size and signature state) and
-  decides the exit code like this:
+  failures; lint errors, warnings and hints; every APK with its path, size and signature state)
+  and decides the exit code like this:
 
     * Gradle exit code != 0 (failing tests, compile errors, lint errors, ...)  -> failure
     * compile warnings, lint warnings or Gradle deprecation warnings           -> failure
     * failing or errored test cases                                           -> failure
     * an expected task did not run, or an expected report / APK is missing     -> failure
       (a missing report is never counted as zero)
+    * a lint report without a summary line                                     -> failure
+      (a report is never silently counted as clean)
+    * lint errors or lint warnings                                             -> failure
+    * lint hints (informational)                                               -> NOT a failure
+      counted and shown in the lint table (ruling 2026-10-19: both gates must agree that an
+      informational hint does not fail the build)
 
   Only a fully clean run returns 0.
 
@@ -50,13 +56,30 @@
 
 .PARAMETER Tasks
   Gradle task selectors for a subset run (debugging only). The default is the full contract above.
+
+.PARAMETER SelfTest
+  Only run the lint summary parser / gate self test and exit: no environment check, no Gradle. It
+  drives the real parser with sample lint report texts (hints only, one warning, errors, "No issues
+  found", no summary line) and asserts that hints never fail the gate while errors and warnings do.
+  Any extra paths in SelfTestReport are parsed as well.
+
+.PARAMETER SelfTestReport
+  Extra lint report files (for example a real build/reports/lint-results-debug.txt) to parse in the
+  -SelfTest run; a comma-separated list works. Each one must produce a summary line and must reach
+  the outcome its own counts imply, and appending a hint to its summary must not change that
+  outcome. A report whose summary line cannot be found fails the self test.
+
+.EXAMPLE
+  ./scripts/check-all.ps1 -SelfTest
 #>
 [CmdletBinding()]
 param(
     [string]$LlamaSourceRepository = $env:MYCELIUM_LLAMA_SOURCE,
     [switch]$SkipLlamaPrepare,
     [switch]$AllowNetwork,
-    [string[]]$Tasks = @()
+    [string[]]$Tasks = @(),
+    [switch]$SelfTest,
+    [string[]]$SelfTestReport = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +99,128 @@ function Stop-WithError {
     param([string]$Message)
     Write-Host "check-all: $Message" -ForegroundColor Red
     exit 1
+}
+
+# --- lint summary parsing (shared by the real run and by -SelfTest) ----------
+#
+# AGP's lint text report ends with either "No issues found." or a summary line. When informational
+# issues exist the summary has a third group, "<n> errors, <n> warnings, <n> hints" (and "1 hint" /
+# "1 warning" / "1 error" in the singular). Ruling 2026-10-19: only errors and warnings fail the
+# gate; a hint is counted and printed in the lint table but is not a failure. A report without a
+# summary line is never treated as clean (this is what made this script disagree with the .sh one).
+function Get-LintSummary {
+    param([string]$Text)
+    $errors = 0; $warnings = 0; $hints = 0; $parsed = $false
+    foreach ($line in @($Text -split "`r?`n")) {
+        if ($line -match '^\s*(\d+) errors?, (\d+) warnings?(?:, (\d+) hints?)?\s*$') {
+            $errors = [int]$Matches[1]
+            $warnings = [int]$Matches[2]
+            $hints = if ($Matches[3] -eq "") { 0 } else { [int]$Matches[3] }
+            $parsed = $true
+        }
+    }
+    if (!$parsed -and $Text -match 'No issues found') { $parsed = $true }
+    return [pscustomobject]@{ Errors = $errors; Warnings = $warnings; Hints = $hints; Parsed = $parsed }
+}
+
+# The gate for a single report: no summary line fails, errors and warnings fail, hints never do.
+function Test-LintSummary {
+    param([object]$Summary)
+    if (!$Summary.Parsed) { return $false }
+    return ($Summary.Errors -eq 0 -and $Summary.Warnings -eq 0)
+}
+
+# Rewrites the summary line of a lint report so that it advertises a single informational hint. Used
+# by -SelfTest to prove with real report text that a hint cannot change the outcome.
+function Add-LintHintToSummary {
+    param([string]$Text)
+    $lines = @($Text -split "`r?`n")
+    $index = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*\d+ errors?, \d+ warnings?(?:, \d+ hints?)?\s*$') { $index = $i }
+        elseif ($lines[$i] -match 'No issues found') { $index = $i }
+    }
+    if ($index -lt 0) { return $Text }
+    if ($lines[$index] -match '^\s*(\d+) errors?, (\d+) warnings?') {
+        $lines[$index] = "$($Matches[1]) errors, $($Matches[2]) warnings, 1 hint"
+    } else {
+        $lines[$index] = "0 errors, 0 warnings, 1 hint"
+    }
+    return ($lines -join "`r`n")
+}
+
+function Invoke-LintSelfTest {
+    param([string[]]$ExtraReport = @())
+
+    # Sample texts covering the real AGP wording, both number forms and the missing summary line.
+    $cases = @(
+        @{ Name = "hints only, singular (0 errors, 0 warnings, 1 hint)";   Text = "0 errors, 0 warnings, 1 hint`n"; Pass = $true },
+        @{ Name = "hints only, plural (0 errors, 0 warnings, 3 hints)";    Text = "0 errors, 0 warnings, 3 hints`n"; Pass = $true },
+        @{ Name = "hints only, CRLF line ending (1 hint)";                 Text = "0 errors, 0 warnings, 1 hint`r`n"; Pass = $true },
+        @{ Name = "no issues (No issues found.)";                          Text = "No issues found.`n"; Pass = $true },
+        @{ Name = "zero of everything (0 errors, 0 warnings, 0 hints)";    Text = "0 errors, 0 warnings, 0 hints`n"; Pass = $true },
+        @{ Name = "one warning, singular (0 errors, 1 warning, 0 hints)";  Text = "0 errors, 1 warning, 0 hints`n"; Pass = $false },
+        @{ Name = "one warning, singular, no hints group (0 errors, 1 warning)"; Text = "0 errors, 1 warning`n"; Pass = $false },
+        @{ Name = "two warnings, real AGP form (0 errors, 2 warnings)";    Text = "0 errors, 2 warnings`n"; Pass = $false },
+        @{ Name = "one error, singular (1 error, 0 warnings, 0 hints)";    Text = "1 error, 0 warnings, 0 hints`n"; Pass = $false },
+        @{ Name = "errors plus hints (2 errors, 0 warnings, 3 hints)";     Text = "2 errors, 0 warnings, 3 hints`n"; Pass = $false },
+        @{ Name = "errors and warnings plus hints (1 error, 4 warnings, 2 hints)"; Text = "1 error, 4 warnings, 2 hints`n"; Pass = $false },
+        @{ Name = "no summary line, issue text only";                      Text = "app/src/main/java/Foo.kt:12: Warning: unused [UnusedResources]`n"; Pass = $false },
+        @{ Name = "empty report (no summary line)";                        Text = ""; Pass = $false }
+    )
+
+    $failed = 0
+    Write-Host "check-all self test: lint summary parser and gate"
+    Write-Host ""
+    foreach ($case in $cases) {
+        $summary = Get-LintSummary -Text $case.Text
+        $passed = Test-LintSummary -Summary $summary
+        $ok = ($passed -eq $case.Pass)
+        if (!$ok) { $failed++ }
+        $verdict = if ($ok) { "PASS" } else { "FAIL" }
+        $got = if ($passed) { "pass" } else { "fail" }
+        $want = if ($case.Pass) { "pass" } else { "fail" }
+        Write-Host "$verdict  $($case.Name)"
+        Write-Host "      errors=$($summary.Errors) warnings=$($summary.Warnings) hints=$($summary.Hints) parsed=$($summary.Parsed) -> $got (expected $want)"
+    }
+
+    # Real report text: the summary line must be found (the regression that made this script FAIL
+    # where the .sh one passed) and appending a hint must not change the outcome. A single argument
+    # may carry several comma-separated paths ("-File" cannot bind an array).
+    $reportPaths = @($ExtraReport | ForEach-Object { $_ -split ',' } | Where-Object { !([string]::IsNullOrWhiteSpace($_)) })
+    foreach ($path in $reportPaths) {
+        if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
+            Write-Host "FAIL  real report not found: $path"
+            $failed++
+            continue
+        }
+        $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+        $summary = Get-LintSummary -Text $text
+        $realVerdict = Test-LintSummary -Summary $summary
+        $hintSummary = Get-LintSummary -Text (Add-LintHintToSummary -Text $text)
+        $hintVerdict = Test-LintSummary -Summary $hintSummary
+        $ok = ($summary.Parsed -and $hintSummary.Parsed -and $hintSummary.Hints -ge 1 -and $hintVerdict -eq $realVerdict)
+        if (!$ok) { $failed++ }
+        $verdict = if ($ok) { "PASS" } else { "FAIL" }
+        $real = if ($realVerdict) { "pass" } else { "fail" }
+        $hinted = if ($hintVerdict) { "pass" } else { "fail" }
+        Write-Host "$verdict  real report: $path"
+        Write-Host "      errors=$($summary.Errors) warnings=$($summary.Warnings) hints=$($summary.Hints) parsed=$($summary.Parsed) -> $real"
+        Write-Host "      same text with '1 hint' in the summary: errors=$($hintSummary.Errors) warnings=$($hintSummary.Warnings) hints=$($hintSummary.Hints) parsed=$($hintSummary.Parsed) -> $hinted (must match)"
+    }
+
+    Write-Host ""
+    if ($failed -eq 0) {
+        Write-Host "check-all self test: PASS ($($cases.Count) samples, $($reportPaths.Count) real report(s))"
+        exit 0
+    }
+    Write-Host "check-all self test: FAIL ($failed case(s))" -ForegroundColor Red
+    exit 1
+}
+
+if ($SelfTest) {
+    Invoke-LintSelfTest -ExtraReport $SelfTestReport
+    exit 0
 }
 
 # Runs a native command with the error preference relaxed for its duration. In Windows PowerShell
@@ -312,16 +457,19 @@ foreach ($file in @(Get-ChildItem -Path (Join-Path $root "*\build\reports\lint-r
     $fullTaskName = "$($module):lint$variantSuffix"
     if (!$taskStates.ContainsKey($fullTaskName)) { continue }
     $text = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
-    $errors = 0; $warnings = 0; $parsed = $false
-    if ($text -match '(?s)(\d+) errors?, (\d+) warnings?\s*$') {
-        $errors = [int]$Matches[1]; $warnings = [int]$Matches[2]; $parsed = $true
-    } elseif ($text -match 'No issues found') {
-        $parsed = $true
-    }
+    $summary = Get-LintSummary -Text $text
     foreach ($issue in @($text -split "`r?`n" | Where-Object { $_ -match ': (Error|Warning): ' })) {
         $lintIssueLines += "$module($variant): $issue"
     }
-    $lintRows += [pscustomobject]@{ Module = $module; Variant = $variant; Errors = $errors; Warnings = $warnings; Parsed = $parsed; Path = $file.FullName }
+    $lintRows += [pscustomobject]@{
+        Module   = $module
+        Variant  = $variant
+        Errors   = $summary.Errors
+        Warnings = $summary.Warnings
+        Hints    = $summary.Hints
+        Parsed   = $summary.Parsed
+        Path     = $file.FullName
+    }
 }
 $lintRows = @($lintRows | Sort-Object Module, Variant)
 
@@ -425,11 +573,17 @@ foreach ($report in $unreadableReports) { $problems += "unreadable test report: 
 
 $totalTests = 0; $totalFailures = 0; $totalErrors = 0
 foreach ($row in $testRows) { $totalTests += $row.Tests; $totalFailures += $row.Failures; $totalErrors += $row.Errors }
-$totalLintErrors = 0; $totalLintWarnings = 0
-foreach ($row in $lintRows) { $totalLintErrors += $row.Errors; $totalLintWarnings += $row.Warnings }
+$totalLintErrors = 0; $totalLintWarnings = 0; $totalLintHints = 0
+foreach ($row in $lintRows) {
+    $totalLintErrors += $row.Errors
+    $totalLintWarnings += $row.Warnings
+    $totalLintHints += $row.Hints
+}
 
 if ($totalFailures -gt 0) { $problems += "$totalFailures failing test cases" }
 if ($totalErrors -gt 0) { $problems += "$totalErrors errored test cases" }
+# Hints are informational: counted and printed in the lint table, never added to $problems
+# (ruling 2026-10-19). Errors and warnings keep failing the gate as before.
 if ($totalLintErrors -gt 0) { $problems += "$totalLintErrors lint errors" }
 if ($totalLintWarnings -gt 0) { $problems += "$totalLintWarnings lint warnings" }
 if ($warningLines.Count -gt 0) { $problems += "$($warningLines.Count) warnings in the build output" }
@@ -466,12 +620,14 @@ $report.Add("| **total** | | **$totalTests** | **$totalFailures** | **$totalErro
 $report.Add("")
 $report.Add("## lint")
 $report.Add("")
-$report.Add("| module | variant | errors | warnings |")
-$report.Add("|---|---|---|---|")
+$report.Add("| module | variant | errors | warnings | hints |")
+$report.Add("|---|---|---|---|---|")
 foreach ($row in $lintRows) {
-    $report.Add("| $($row.Module) | $($row.Variant) | $($row.Errors) | $($row.Warnings) |")
+    $report.Add("| $($row.Module) | $($row.Variant) | $($row.Errors) | $($row.Warnings) | $($row.Hints) |")
 }
-$report.Add("| **total** | | **$totalLintErrors** | **$totalLintWarnings** |")
+$report.Add("| **total** | | **$totalLintErrors** | **$totalLintWarnings** | **$totalLintHints** |")
+$report.Add("")
+$report.Add("- lint hints (informational, counted and shown above, never a failure): $totalLintHints")
 $report.Add("")
 $report.Add("## artifacts")
 $report.Add("")
@@ -499,7 +655,7 @@ $report.Add("")
 $report.Add("## result")
 $report.Add("")
 if ($passed) {
-    $report.Add("**PASS**: 0 failures, 0 warnings, exit code 0.")
+    $report.Add("**PASS**: 0 failures, 0 warnings, exit code 0 (lint hints: $totalLintHints, informational, not a failure).")
 } else {
     $report.Add("**FAIL**:")
     foreach ($problem in $problems) { $report.Add("- $problem") }
