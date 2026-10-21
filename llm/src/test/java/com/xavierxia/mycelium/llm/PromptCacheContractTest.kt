@@ -136,30 +136,30 @@ class PromptCacheContractTest {
 
     @Test
     fun zeroCommonPrefixReusesNothing() = runBlocking {
-        val engine = engineWith(
-            ScriptedBridge(
-                vectors = listOf(intArrayOf(1, 2, 3), intArrayOf(9, 8, 7)),
-                readings = listOf(ok(count = 3, reused = 0, read = 3), ok(count = 3, reused = 0, read = 3)),
-            ),
+        val bridge = ScriptedBridge(
+            vectors = listOf(intArrayOf(1, 2, 3), intArrayOf(9, 8, 7)),
+            readings = listOf(ok(count = 3, reused = 0, read = 3), ok(count = 3, reused = 0, read = 3)),
         )
+        val engine = engineWith(bridge)
         engine.round()
         engine.round()
 
+        assertEquals("两轮都不该请求复用", listOf(0, 0), bridge.requested)
         assertEquals("完全没有公共前缀：第二轮一个都不许复用", 0, engine.lastStats!!.reusedPromptTokens)
         assertEquals("整段都读", 3L, engine.lastStats!!.readPromptTokens)
     }
 
     @Test
     fun aDivergenceInTheMiddleReusesOnlyThePrefix() = runBlocking {
-        val engine = engineWith(
-            ScriptedBridge(
-                vectors = listOf(intArrayOf(1, 2, 3, 4), intArrayOf(1, 2, 9, 9, 9)),
-                readings = listOf(ok(count = 4, reused = 0, read = 4), ok(count = 5, reused = 2, read = 3)),
-            ),
+        val bridge = ScriptedBridge(
+            vectors = listOf(intArrayOf(1, 2, 3, 4), intArrayOf(1, 2, 9, 9, 9)),
+            readings = listOf(ok(count = 4, reused = 0, read = 4), ok(count = 5, reused = 2, read = 3)),
         )
+        val engine = engineWith(bridge)
         engine.round()
         engine.round()
 
+        assertEquals("第二轮请求的就是公共前缀两个 token", listOf(0, 2), bridge.requested)
         assertEquals("只能复用前两个 token", 2, engine.lastStats!!.reusedPromptTokens)
         assertEquals("剩下的三个都要读", 3L, engine.lastStats!!.readPromptTokens)
     }
@@ -178,5 +178,60 @@ class PromptCacheContractTest {
         // 公共前缀是 2，但这一轮至少要解一个 token，所以只能复用 1。
         assertEquals("变短的提示仍要留一个 token 去解", 1, engine.lastStats!!.reusedPromptTokens)
         assertEquals("另一个 token 要读", 1L, engine.lastStats!!.readPromptTokens)
+    }
+
+    @Test
+    fun aStopBitThatIsNeitherZeroNorOneFails() = runBlocking {
+        val engine = engineWith(
+            ScriptedBridge(listOf(IntArray(4)), listOf(ok(count = 4, reused = 0, read = 4).also { it[4] = 2 })),
+        )
+
+        val failure = runCatching { engine.round() }
+
+        assertTrue("停止位不认识就必须失败，实际 $failure", failure.isFailure)
+        assertTrue("失败原因要提到停止位：$failure", failure.exceptionOrNull()?.message.orEmpty().contains("停止位"))
+    }
+
+    @Test
+    fun aReasonThatContradictsTheRequestFails() = runBlocking {
+        val engine = engineWith(
+            ScriptedBridge(
+                vectors = listOf(IntArray(4) { it }, IntArray(4) { it }),
+                readings = listOf(ok(count = 4, reused = 0, read = 4), ok(count = 4, reused = 0, read = 4, reason = 1)),
+            ),
+        )
+        engine.round()
+
+        val failure = runCatching { engine.round() }
+
+        assertTrue("第二轮明明请求了复用却报「没人要」，必须失败，实际 $failure", failure.isFailure)
+        assertTrue("失败原因要提到原因码：$failure", failure.exceptionOrNull()?.message.orEmpty().contains("原因码"))
+    }
+
+    @Test
+    fun aReasonOfNothingShareableWhileClaimingReuseFails() = runBlocking {
+        val engine = engineWith(
+            ScriptedBridge(
+                vectors = listOf(IntArray(4) { it }, IntArray(4) { it }),
+                readings = listOf(ok(count = 4, reused = 0, read = 4), ok(count = 4, reused = 2, read = 2, reason = 2)),
+            ),
+        )
+        engine.round()
+
+        val failure = runCatching { engine.round() }
+
+        assertTrue("原因说没得复用却报了复用，必须失败，实际 $failure", failure.isFailure)
+    }
+
+    @Test
+    fun generatedTokensBeyondThisRoundsBudgetFail() = runBlocking {
+        val engine = engineWith(
+            ScriptedBridge(listOf(IntArray(4)), listOf(ok(count = 4, reused = 0, read = 4).also { it[1] = 100_000 })),
+        )
+
+        val failure = runCatching { engine.round() }
+
+        assertTrue("超过这一轮预算就必须失败，实际 $failure", failure.isFailure)
+        assertTrue("失败原因要提到预算：$failure", failure.exceptionOrNull()?.message.orEmpty().contains("预算"))
     }
 }

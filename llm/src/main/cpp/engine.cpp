@@ -212,8 +212,7 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         if (reuse < 0) reuse = 0;
         // Reported to the caller so "why did this round still read everything?" has an answer:
         // 1 = nothing was asked for, 2 = nothing shareable was held, 3 = this build refused to drop
-        // only a suffix (the model's state cannot be rolled back that far), 4 = this round's decode
-        // failed, so its state was dropped.
+        // only a suffix (the model's state cannot be rolled back that far).
         jlong fallback = 0;
         auto * memory = llama_get_memory(engine.context);
         bool trimmed = false;
@@ -268,12 +267,9 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             // Decode the final token as well, so timing includes every generated token.
             auto batch = llama_batch_get_one(&token, 1);
             if (llama_decode(engine.context, batch) != 0) {
-                // 状态不明（不是「检查点上的正常停止」）：这一轮的循环状态不可信，保守作废并如实
-                // 报成因 4，交给下一轮整段重读（全量审必修 3）。
-                engine.cachedPrompt.clear();
-                llama_memory_clear(llama_get_memory(engine.context), true);
-                fallback = 4;
-                break;
+                // 生成中途 decode 失败：状态不明，这一轮必须以失败收场——若把它当成正常读数交回去，
+                // Kotlin 会因为「提示已读完」把它登记成可复用的缓存（方案审 r2 必修 1）。
+                throw std::runtime_error("Generation failed");
             }
         }
         // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,

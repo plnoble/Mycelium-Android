@@ -114,7 +114,8 @@ class PromptCacheTest {
             if (read == tokens.size - reuseTokens) kvState = tokens
             return longArrayOf(
                 tokens.size.toLong(),
-                1L,
+                // 提示没读完就停的那一轮不可能已经解出正文 token：0。
+                if (read == tokens.size - reuseTokens) 1L else 0L,
                 7L,
                 3L,
                 if (stopped) 1L else 0L,

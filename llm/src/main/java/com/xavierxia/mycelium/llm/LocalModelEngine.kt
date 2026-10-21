@@ -169,12 +169,76 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      * identical to what was read last time. At least one token always stays to be read — a round
      * that reads nothing at all would make "did the prompt get read completely?" unanswerable.
      */
+    /** 两个 token 序列的公共前缀长度，与原生侧算的是同一个定义。 */
     private fun reusablePrefix(prompt: IntArray): Int {
         val cached = cachedPrompt?.takeIf { cacheOwner != null } ?: return 0
         val limit = minOf(cached.size, prompt.size - 1)
         var shared = 0
         while (shared < limit && cached[shared] == prompt[shared]) shared++
         return shared
+    }
+
+    /**
+     * 把原生读数解析成这一轮的统计：正常路径与取消收尾共用同一套校验（方案审 r2 必修 2）。
+     * [values] 为 null 表示「没有读数」（真取消/原生没回），返回 null，由调用方标成 incomplete。
+     * 任何一项不自洽都抛错——坏读数不许被发布成有效测量。
+     */
+    private fun readingsOf(
+        values: LongArray?,
+        prompt: IntArray,
+        requested: Int,
+        maxTokens: Int,
+        hiddenTokens: Long,
+        hiddenMillis: Long,
+    ): GenerationStats? {
+        if (values == null) return null
+        if (values.size != 8) {
+            error("原生读数应有 8 项（提示 token、生成 token、读提示毫秒、生成毫秒、是否停止、复用 token、实读 token、未复用原因），实际 ${values.size} 项")
+        }
+        if (values[0] != prompt.size.toLong()) {
+            error("原生报的提示长度 ${values[0]} 与本侧 tokenize 出来的 ${prompt.size} 对不上")
+        }
+        val count = values[0]
+        val generated = values[1]
+        val promptMillis = values[2]
+        val generationMillis = values[3]
+        val stopBit = values[4]
+        val reused = values[5]
+        val read = values[6]
+        val reason = values[7]
+        if (stopBit !in 0L..1L) error("原生报的停止位 $stopBit 不认识")
+        val stopped = stopBit == 1L
+        if (generated < 0 || generated > maxTokens.toLong()) {
+            error("原生报的生成 token 数 $generated 超出这一轮的预算 $maxTokens")
+        }
+        if (promptMillis < 0 || generationMillis < 0) {
+            error("原生报的耗时为负：读提示 $promptMillis、生成 $generationMillis")
+        }
+        val reuseCeiling = minOf(requested, prompt.size - 1).toLong()
+        if (reused < 0 || reused > reuseCeiling) {
+            error("原生报的复用数 $reused 超出这一轮请求的 $requested（上限 $reuseCeiling）")
+        }
+        if (read < 0 || read > count - reused) {
+            error("原生报的实读数 $read 不合理：整段 $count、复用 $reused")
+        }
+        if (!stopped && reused + read != count) {
+            error("这一轮没有停止却没把提示读完：复用 $reused + 实读 $read ≠ 整段 $count")
+        }
+        if (reused + read != count && generated != 0L) {
+            error("提示还没读完就报了生成 token：读完 ${reused + read}/$count、生成 $generated")
+        }
+        if (reason !in 0L..4L) error("原生报的未复用原因码 $reason 不认识")
+        if (reason == 4L) error("原生报了这一轮 decode 失败（原因 4），这一轮不能当读数用")
+        if ((reason == 1L) != (requested == 0)) {
+            error("原因码 $reason 与这一轮请求的复用数 $requested 不一致")
+        }
+        if ((reason == 2L || reason == 3L) && reused != 0L) {
+            error("原因码 $reason 说没有复用，却报了复用 $reused")
+        }
+        if (reason == 0L && reused == 0L && requested > 0) {
+            error("这一轮请求了复用却没复用，也没给出原因")
+        }
+        return GenerationStats(count, generated, promptMillis, generationMillis, stopped, reused, read, reason, hiddenTokens, hiddenMillis)
     }
 
     /**
@@ -207,6 +271,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 val cacheKey = parameters.cacheKey
                 // 上一轮的读数只在它自己那一轮里用；每一轮开头清掉，免得取消收尾读到旧的一份。
                 lastNativeReadings = null
+                // 这一轮实际请求复用的 token 数：收尾校验要用，所以声明在 try 之外。
+                var requested = 0
                 var filter = ThinkingFilter()
                 val utf8 = Utf8Stream()
                 // P2-1c 的 E：隐藏思考段用了多少 token、等了多久。只记账，不改生成内容。
@@ -220,7 +286,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // would let a later round with that key reuse a prefix that belongs to another
                     // round. Nothing is reused here either way (plan review, must-fix 2).
                     if (cacheKey == null) forgetCachedPrompt()
-                    var requested = 0
+                    requested = 0
                     val (prompt, values) = runNative {
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
@@ -237,51 +303,28 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                                     // 归属由过滤器自己报：这个 token 消耗/保留的文本只要有一段处在隐藏
                                     // 状态（开标签、闭标签、整段都在一个 token 里），就算隐藏 token。
                                     val text = filter.push(utf8.push(bytes))
-                                    if (firstTokenNanos == 0L) firstTokenNanos = System.nanoTime()
+                                    val now = System.nanoTime()
+                                    if (firstTokenNanos == 0L) firstTokenNanos = now
                                     if (filter.sawHiddenText) hiddenTokens++
-                                    if (firstVisibleNanos == 0L && text.isNotBlank()) firstVisibleNanos = System.nanoTime()
+                                    // 第一个 token 就是正文时，等待就是 0：不能把同一次回调里的几微秒
+                                    // 也算成「等过」（否则「没有隐藏段就没有等待」会随机器抖动）。
+                                    if (firstVisibleNanos == 0L && text.isNotBlank()) firstVisibleNanos = now
                                     return text.isEmpty() || trySendBlocking(text).isSuccess
                                 }
                             })).also { lastNativeReadings = it }
                     }
-                    // 严格计数契约（方案审必修 4）：长度、提示长度一致、以及**每一项**读数的范围都要自洽。
-                    // 任何一项对不上就立刻失败，不把不一致的读数当成「这一轮没复用」。
-                    if (values.size != 8) {
-                        error("原生读数应有 8 项（提示 token、生成 token、读提示毫秒、生成毫秒、是否停止、复用 token、实读 token、未复用原因），实际 ${values.size} 项")
-                    }
-                    if (values[0] != prompt.size.toLong()) {
-                        error("原生报的提示长度 ${values[0]} 与本侧 tokenize 出来的 ${prompt.size} 对不上")
-                    }
-                    val reused = values[5]
-                    val read = values[6]
-                    val stopped = values[4] != 0L
-                    val reuseCeiling = minOf(requested, prompt.size - 1).toLong()
-                    if (values[1] < 0 || values[2] < 0 || values[3] < 0) {
-                        error("原生报的生成 token 数或耗时为负：${values.toList()}")
-                    }
-                    if (reused < 0 || reused > reuseCeiling) {
-                        error("原生报的复用数 $reused 超出这一轮请求的 $requested（上限 $reuseCeiling）")
-                    }
-                    if (read < 0 || read > values[0] - reused) {
-                        error("原生报的实读数 $read 不合理：整段 ${values[0]}、复用 $reused")
-                    }
-                    if (!stopped && reused + read != values[0]) {
-                        error("这一轮没有停止却没把提示读完：复用 $reused + 实读 $read ≠ 整段 ${values[0]}")
-                    }
-                    if (values[7] !in 0L..4L) {
-                        error("原生报的未复用原因码 ${values[7]} 不认识")
-                    }
-                    lastStats = GenerationStats(
-                        values[0], values[1], values[2], values[3], stopped, reused, read, values[7],
-                        hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos),
-                    )
+                    // 读数一律走同一套校验（正常路径与取消收尾共用）；任何一项不自洽都会抛错，
+                    // 坏读数不许被发布成有效测量（方案审 r2 必修 2）。
+                    val stats = requireNotNull(
+                        readingsOf(values, prompt, requested, parameters.maxTokens, hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos)),
+                    ) { "这一轮必须给出读数" }
+                    lastStats = stats
                     // Only a prompt that was read to its end is a cache entry the next round may
-                    // reuse. A round that was stopped while the prompt was still being read (or one
-                    // whose numbers do not add up) forgets the cache instead of carrying a half-read
-                    // prompt into the next one. A stop after the prompt was read is fine: the next
-                    // round trims back to the shared prefix anyway.
+                    // reuse. A round that was stopped while the prompt was still being read forgets the
+                    // cache instead of carrying a half-read prompt into the next one. A stop after the
+                    // prompt was read is fine: the next round trims back to the shared prefix anyway.
                     if (cacheKey != null) {
-                        if (reused >= 0 && reused + read == values[0]) {
+                        if (stats.reusedPromptTokens + stats.readPromptTokens == values[0]) {
                             cacheOwner = cacheKey
                             cachedPrompt = prompt
                         } else forgetCachedPrompt()
@@ -294,25 +337,27 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
-                    // 取消的是收集方，原生那一轮 worker 其实已经被 join 回来了：它交回的读数照样能用。
-                    // 有就用真实读数收尾；没有就把这一轮标成「读数不完整」，不把未知量写成 0
-                    // （方案审必修 6）。
+                    // 收尾统计：有可靠读数就用，读数不合格就当「没有读数」。这里绝不能因为解析出错
+                    // 而顶掉原来那个异常（方案审 r2 必修 2）。
                     val readings = lastNativeReadings
                     lastNativeReadings = null
-                    val values = readings?.second
+                    val stats = runCatching {
+                        readingsOf(
+                            readings?.second,
+                            readings?.first ?: IntArray(0),
+                            requested,
+                            parameters.maxTokens,
+                            hiddenTokens,
+                            hiddenMillis(firstTokenNanos, firstVisibleNanos),
+                        )
+                    }.getOrNull()
                     val cancelled = failure is kotlinx.coroutines.CancellationException
-                    lastStats = GenerationStats(
-                        promptTokens = values?.getOrNull(0) ?: 0L,
-                        generatedTokens = values?.getOrNull(1) ?: 0L,
-                        promptMillis = values?.getOrNull(2) ?: 0L,
-                        generationMillis = values?.getOrNull(3) ?: 0L,
-                        stopped = if (values != null) values[4] != 0L else cancelled,
-                        reusedPromptTokens = values?.getOrNull(5) ?: 0L,
-                        readPromptTokens = values?.getOrNull(6) ?: 0L,
-                        reuseFallbackReason = values?.getOrNull(7) ?: 0L,
+                    lastStats = stats ?: GenerationStats(
+                        0, 0, 0, 0,
+                        stopped = cancelled,
                         hiddenTokens = hiddenTokens,
                         hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
-                        nativeReadingsComplete = values != null,
+                        nativeReadingsComplete = false,
                     )
                     throw failure
                 }

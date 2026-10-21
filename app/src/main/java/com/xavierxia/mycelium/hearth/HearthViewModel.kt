@@ -265,8 +265,13 @@ class HearthViewModel @JvmOverloads constructor(
     private fun watchForVisibleText(token: Int) {
         visibleTextWatch?.cancel()
         visibleTextWatch = viewModelScope.launch {
+            // 从受理这一刻就开始等，但阈值只从「这一轮真的进入生成」起算：还没 busy 时界面显示的是
+            // 「发送」，那时候叫用户点「停止」是错的（方案审 r2 必修 3）。
+            while (token == generationToken && !visibleTextSeen && !mutable.value.busy) {
+                kotlinx.coroutines.delay(100)
+            }
             kotlinx.coroutines.delay(hiddenWaitHintMillis)
-            if (token == generationToken && !visibleTextSeen) {
+            if (token == generationToken && !visibleTextSeen && mutable.value.busy) {
                 mutable.update { it.copy(waitingForVisibleText = true) }
             }
         }
@@ -942,7 +947,12 @@ class HearthViewModel @JvmOverloads constructor(
                     return@launch
                 }
                 if (token != generationToken) return@launch
-                val prepared = withContext(Dispatchers.IO) { regeneration(character, current.mode, conversationId) } ?: return@launch
+                val prepared = withContext(Dispatchers.IO) { regeneration(character, current.mode, conversationId) }
+                    ?: run {
+                        // 备不出一轮来（人物/会话没了）：提示与计时都要撤掉，不能留在页面上。
+                        clearVisibleTextHint()
+                        return@launch
+                    }
                 val (question, window) = prepared
                 turn = Turn(character, current.mode, conversationId, question, chosen, cacheKeyFor(character, current.mode, conversationId, chosen))
                 activeTurn = turn
@@ -971,6 +981,7 @@ class HearthViewModel @JvmOverloads constructor(
                     mutable.update { it.copy(notice = failure.message ?: "生成失败") }
                 }
             } finally {
+                clearVisibleTextHint()
                 if (activeTurn === turn) activeTurn = null
                 if (token == generationToken) {
                     cloudModel = null
@@ -1104,10 +1115,16 @@ class HearthViewModel @JvmOverloads constructor(
                     // Marked before the delta reaches the screen or the buffer: from this point the turn
                     // has something to keep, which is what a stop is allowed to preserve.
                     turn.produced = true
-                    // 只有非空白的可显示正文才算「不再等」：光有隐藏段或空片段不算。
+                    // 只有非空白的可显示正文才算「不再等」：光有隐藏段或空片段不算。回调在 IO 线程
+                    // 上，所以状态更新回到主线程，并核对轮次身份——旧轮次不许撤掉新轮次的计时
+                    // （方案审 r2 必修 3）。
                     if (delta.isNotBlank()) {
-                        visibleTextSeen = true
-                        clearVisibleTextHint()
+                        withContext(Dispatchers.Main) {
+                            if (turn === activeTurn) {
+                                visibleTextSeen = true
+                                clearVisibleTextHint()
+                            }
+                        }
                     }
                     onDelta(delta)
                 }
@@ -1272,6 +1289,7 @@ class HearthViewModel @JvmOverloads constructor(
 
     private suspend fun replaceTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
         if (token != generationToken) return
+        clearVisibleTextHint()
         val wasStopped = stopped || turn.userStopped || (!turn.chosen.isCloud && engine.lastStats?.stopped == true)
         if (answer.isBlank()) {
             if (wasStopped) {

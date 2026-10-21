@@ -52,6 +52,9 @@ internal class ThinkingFilter(private var hidden: Boolean = false) {
                 if (!hidden) output.append(pending.substring(0, index))
                 pending = pending.substring(index + marker.length)
                 hidden = !hidden
+                // 进入隐藏状态的那个 token 也算隐藏（哪怕它在标签后面什么都没剩，比如单发的开标签），
+                // 闭标签同理由上一轮循环的 hidden 覆盖（方案审 r2 必修 4）。
+                if (hidden) sawHiddenText = true
             } else {
                 val retained = (1 until marker.length).lastOrNull { pending.endsWith(marker.take(it)) } ?: 0
                 if (!hidden) output.append(pending.dropLast(retained))
