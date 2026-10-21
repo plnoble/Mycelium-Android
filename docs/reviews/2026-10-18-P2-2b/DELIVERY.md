@@ -361,3 +361,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
 * check-all.ps1 -SkipLlamaPrepare：**PASS**，395 例 / 0 失败 / 0 错误 / 0 跳过；lint 0 错误 / 0 警告 / 0 hints；Kotlin 编译错误行 0。日志：p2-2-work\\final-gate4\\check-all.txt。
 * check-public.ps1 -Full：**退出码 0**，阻断项 0（user-path 0），阻断 0 / 323 条只列不拦；-SelfTest：**退出码 0**（37/37）。日志同目录。
 
+### 截图放哪、哪些不能入库
+
+截图全部留在仓库外 p2-2-work\\device-evidence\\update-flow-device\\（设备上 update-flow/ 里的同一批，已 pull 回来）：1-红点与卡片.png、3-下载中-进度.png、4a-未知来源说明.png、5-系统确认.png、6-校验失败.png、7-取消后.png，以及装成功后的 8-装成功后.png（在 p2-2-work\\device-evidence\\）。
+
+**注意**：device-evidence\\h1-系统确认.png 是这台手机的「个人热点」设置页（当时抓偏了），里面有热点名称与密码，**不要入库、也不要外发**；h2-系统确认.png 是系统安装界面，只有应用名与版本，可以给人看。按 §0.5「证据和日志入库前先脱敏」，本包**没有**把任何截图提交进仓库，只在这里记路径。
