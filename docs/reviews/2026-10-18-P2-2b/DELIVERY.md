@@ -348,5 +348,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-public.ps1 -Se
   * 下载中取消：连接数与缓存都不再长，`3-下载中.png`、`7-取消后.png`；
   * 整条走查：`1-红点与卡片.png`、`3-下载中-进度.png`、第一次的 `4a-未知来源说明.png`、`5-系统确认.png`。
 * 走到系统那一步的证据：会话记录 `installSessionPhase = Pending`、`installSessionId = 161908514`、`installSessionTargetVersionCode = 6`，系统界面 `com.android.packageinstaller/.PackageInstallerActivity` 在前台；这台 ROM 还要先勾「已了解该应用存在的风险」，「安装」按钮才会亮（截图 `h2-系统确认.png`）。
-* **2026-10-21 10:13 用户在系统界面上点了「安装」**；此后手机与电脑断开（`adb devices` 为空，重启 adb 后 90 秒仍未回来），**装完的核对（versionCode = 6、数据目录 `files/profileInstalled` 仍在）与「把正常调试包装回去」待手机接回后补做**。
+* **2026-10-21 10:13 用户在系统界面上点了「安装」（先勾了「已了解该应用存在的风险」）。核对结果：**
+  * 调试包 `com.xavierxia.mycelium.debug` 变成 **versionCode = 6**（`lastUpdateTime 2026-10-21 10:13:00`）——应用内下载→四项校验→系统确认→装上，整条通了；
+  * **数据目录没被清空**：`files/hearth`、`files/local-models`、`files/privacy`、`files/profileInstalled`、三份 P2-1/P2-2 记录都还在（升级保数据如实口径见第六节：v0.1.1 是阶段 0 外壳，这条只证明数据目录不被清空）；
+  * 装成功后的界面截图 `8-装成功后.png`（「我的」页版本行 0.4.0 (6)）；
+  * 走查完按 §1.3.2 要求把**本分支正常的调试包**装回去：`0.4.0 / code 5`（`INSTALL_FAILED_VERSION_DOWNGRADE` 用 `-d` 降级安装，数据保留），设备上删掉了走查用的 `files/update-flow-v6.apk`；
+  * 收尾再核一次正式版：仍是 `0.1.1` / code `2` / `lastUpdateTime 2026-10-10 05:23:04`。
+
+### 最终门禁（按 §1.2/§1.3 全部提交之后的尖端）
+
+* 全新 worktree p2-2b-gate-3（脚本先断言它确实是 git 检出）跑在 **164e8d**；git diff --name-only a164e8d..HEAD 实测之后只动 docs/reviews/2026-10-18-P2-2b/DELIVERY.md，所以这份门禁就是代码尖端的门禁。
+* check-all.ps1 -SkipLlamaPrepare：**PASS**，395 例 / 0 失败 / 0 错误 / 0 跳过；lint 0 错误 / 0 警告 / 0 hints；Kotlin 编译错误行 0。日志：p2-2-work\\final-gate4\\check-all.txt。
+* check-public.ps1 -Full：**退出码 0**，阻断项 0（user-path 0），阻断 0 / 323 条只列不拦；-SelfTest：**退出码 0**（37/37）。日志同目录。
 
