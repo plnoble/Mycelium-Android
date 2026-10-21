@@ -32,6 +32,19 @@ data class GenerationStats(
      * be rolled back that far. Only ever read for logs and the delivery report.
      */
     val reuseFallbackReason: Long = 0,
+    /**
+     * How many native tokens arrived while the answer was still inside a hidden reasoning span
+     * (P2-1c, step E). A token that opens or closes the span counts as hidden. Purely diagnostic:
+     * the body text and the generated-token count above are unchanged.
+     */
+    val hiddenTokens: Long = 0,
+    /**
+     * Milliseconds from the first native token to the first non-blank visible body text (P2-1c,
+     * step E). Zero when the answer started with visible text. It measures the generation phase only
+     * — prompt reading, template work and model loading are not inside it — so it must never be
+     * quoted as "time until the user sees the first character".
+     */
+    val hiddenMillis: Long = 0,
 ) {
     val tokensPerSecond: Double get() = generatedTokens * 1000.0 / generationMillis.coerceAtLeast(1)
 }
@@ -151,6 +164,17 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         return shared
     }
 
+    /**
+     * 隐藏段等了多久（P2-1c 的 E）：从这一轮的第一个原生 token 起，到第一段非空白正文出现为止。
+     * 没有 token、或者第一个 token 就是可见正文时为 0。**不含**读提示、模板与加载，所以它不是
+     * 「用户多久看到第一个字」。
+     */
+    private fun hiddenMillis(firstTokenNanos: Long, firstVisibleNanos: Long): Long {
+        if (firstTokenNanos == 0L) return 0
+        val visible = if (firstVisibleNanos == 0L) System.nanoTime() else firstVisibleNanos
+        return ((visible - firstTokenNanos) / 1_000_000).coerceAtLeast(0)
+    }
+
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
         val snapshot = messages.toList()
@@ -165,6 +189,10 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 val cacheKey = parameters.cacheKey
                 var filter = ThinkingFilter()
                 val utf8 = Utf8Stream()
+                // P2-1c 的 E：隐藏思考段用了多少 token、等了多久。只记账，不改生成内容。
+                var hiddenTokens = 0L
+                var firstTokenNanos = 0L
+                var firstVisibleNanos = 0L
                 try {
                     // A round without a key must not leave a cached prompt behind either: on this one
                     // native context such a round clears the KV and reads everything, so afterwards the
@@ -182,7 +210,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {
                                     if (!isActive) return false
+                                    // 归属在 push **之前**判定：开/闭标签的那个 token 至少有一部分是隐藏
+                                    // 的，所以算隐藏 token（口径写进交付报告）。生成内容与计数都不受影响。
+                                    val wasHidden = filter.isHidden
                                     val text = filter.push(utf8.push(bytes))
+                                    if (firstTokenNanos == 0L) firstTokenNanos = System.nanoTime()
+                                    if (wasHidden) hiddenTokens++
+                                    if (firstVisibleNanos == 0L && text.isNotBlank()) firstVisibleNanos = System.nanoTime()
                                     return text.isEmpty() || trySendBlocking(text).isSuccess
                                 }
                             })
@@ -204,6 +238,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     }
                     lastStats = GenerationStats(
                         values[0], values[1], values[2], values[3], values[4] != 0L, reused, read, values[7],
+                        hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos),
                     )
                     // Only a prompt that was read to its end is a cache entry the next round may
                     // reuse. A round that was stopped while the prompt was still being read (or one
@@ -224,6 +259,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
+                    // 这一轮没走到原生读数，但隐藏段已经产生的部分要留下来——最需要诊断的正是
+                    // 「长时间思考之后被停掉」那一态（方案审必修 8）。统计先提交，再继续传播取消/异常。
+                    lastStats = GenerationStats(
+                        promptTokens = 0, generatedTokens = 0, promptMillis = 0, generationMillis = 0,
+                        stopped = true, reuseFallbackReason = 0,
+                        hiddenTokens = hiddenTokens, hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
+                    )
                     throw failure
                 }
             }

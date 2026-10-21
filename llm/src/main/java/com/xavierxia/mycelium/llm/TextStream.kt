@@ -23,6 +23,14 @@ internal class Utf8Stream {
 /** Streaming tag filter: never exposes partial tags or unterminated reasoning. */
 internal class ThinkingFilter(private var hidden: Boolean = false) {
     private var pending = ""
+
+    /**
+     * Whether the next pushed text starts inside a hidden span (P2-1c, step E). The engine reads this
+     * *before* pushing a native token to attribute that token: a token that opens or closes the tag
+     * counts as hidden, because at least part of its text is. No generation is changed by this.
+     */
+    val isHidden: Boolean get() = hidden
+
     fun push(text: String): String {
         pending += text
         val output = StringBuilder()

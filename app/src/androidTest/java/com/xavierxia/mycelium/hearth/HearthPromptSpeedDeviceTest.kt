@@ -69,6 +69,7 @@ class HearthPromptSpeedDeviceTest {
                         "reused_tokens=${stats.reusedPromptTokens} read_tokens=${stats.readPromptTokens} " +
                         "prompt_ms=${stats.promptMillis} generated_tokens=${stats.generatedTokens} " +
                         "generation_ms=${stats.generationMillis} tokens_per_second=${stats.tokensPerSecond} " +
+                        "hidden_tokens=${stats.hiddenTokens} hidden_ms=${stats.hiddenMillis} " +
                         "reuse_fallback_reason=${stats.reuseFallbackReason} wall_ms=$wall answer_chars=${answer.length} " +
                         "stopped=${stats.stopped}\n",
                 )
