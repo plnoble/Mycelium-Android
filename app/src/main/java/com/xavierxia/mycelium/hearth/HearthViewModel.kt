@@ -981,9 +981,10 @@ class HearthViewModel @JvmOverloads constructor(
                     mutable.update { it.copy(notice = failure.message ?: "生成失败") }
                 }
             } finally {
-                clearVisibleTextHint()
                 if (activeTurn === turn) activeTurn = null
                 if (token == generationToken) {
+                    // 撤提示放在归属核对之内：旧重做延迟退出时不许撤掉新轮次的计时（第三轮审的残余项）。
+                    clearVisibleTextHint()
                     cloudModel = null
                     currentChosen = null
                     mutable.update { it.copy(busy = false, streaming = null, streamLabel = null) }
