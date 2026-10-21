@@ -130,18 +130,23 @@ assert_single_version_assignment() {
   [ "$codeCount" -eq 1 ] || abort "$file 里 versionCode 必须恰好一处赋值，实际 $codeCount 处：有歧义就不放行"
 }
 
+PINNED_BUILD_TOOLS="36.0.0"
+
 resolve_apksigner() {
   local root version candidate found
   if [ -n "$APKSIGNER" ]; then
     if [ -f "$APKSIGNER" ]; then printf '%s\n' "$APKSIGNER"; return 0; fi
     return 1
   fi
-  # Android SDK build-tools, newest version first; CI/Linux has "apksigner", Git for Windows only
-  # ships "apksigner.bat".
+  # Android SDK build-tools: the pinned version first (release.yml installs exactly this one and its
+  # --print-certs format is verified), then newest first. CI/Linux has "apksigner", Git for Windows
+  # only ships "apksigner.bat". Pinned because the runner image also carries build-tools 37, whose
+  # output this script could not read (2026-10-21 runs 39599697019, 39601747956); passing
+  # --apksigner from the workflow is refused in CI on purpose, so the pin lives here.
   for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "${LOCALAPPDATA:-}/Android/Sdk"; do
     [ -n "$root" ] || continue
     [ -d "$root/build-tools" ] || continue
-    for version in $(ls -1 "$root/build-tools" 2>/dev/null | sort -Vr); do
+    for version in "$PINNED_BUILD_TOOLS" $(ls -1 "$root/build-tools" 2>/dev/null | sort -Vr); do
       for candidate in "$root/build-tools/$version/apksigner" "$root/build-tools/$version/apksigner.bat"; do
         if [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
       done
