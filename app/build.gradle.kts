@@ -38,6 +38,11 @@ android {
         // 依赖升级要单独评估：本机连不上 Maven Central，所有构建都走 --offline，
         // 现有版本是配合 P0-7 选定的（SQLCipher 支持 FTS5）。这项由统筹在联网评估时再开。
         disable += "GradleDependency"
+        // 「有更新版本可用」类检查要联网查最新版本，结果随时间变：本机离线查不到所以一直绿，
+        // CI 联网后报「Gradle 9.8.2 可用」被当成错误（2026-10-21 run 39568585440）。版本是刻意固定的，
+        // 升级要单独评估，所以这两项也关掉，让门禁结果只取决于代码本身（统筹补改）。
+        disable += "AndroidGradlePluginVersion"
+        disable += "NewerVersionAvailable"
         // P2-2b 修复：本产品只发 arm64，ChromeOS 的 x86_64 要求不适用。
         disable += "ChromeOsAbiSupport"
     }
