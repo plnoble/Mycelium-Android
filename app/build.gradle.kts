@@ -15,8 +15,8 @@ android {
         // 版本号规则（P0-9 补充任务书一）：versionName 与标签（去掉 v）一致；每次发布 versionCode +1。
         // v0.1.0 = 改名为知衍的首个正式版。v0.1.1 只升版本号，用来验证应用内更新。
         // 0.2.0 = 圆桌空间骨架（P1-6）。0.3.0 = 圆桌单聊（P1-7）。正式发布由用户决定，这里只改版本号。
-        versionCode = 4
-        versionName = "0.3.0"
+        versionCode = 5
+        versionName = "0.4.0"
 
         buildConfigField("String", "GITHUB_OWNER", "\"plnoble\"")
         buildConfigField("String", "GITHUB_REPO", "\"Mycelium-Android\"")
@@ -38,6 +38,8 @@ android {
         // 依赖升级要单独评估：本机连不上 Maven Central，所有构建都走 --offline，
         // 现有版本是配合 P0-7 选定的（SQLCipher 支持 FTS5）。这项由统筹在联网评估时再开。
         disable += "GradleDependency"
+        // P2-2b 修复：本产品只发 arm64，ChromeOS 的 x86_64 要求不适用。
+        disable += "ChromeOsAbiSupport"
     }
 
     compileOptions {
@@ -77,6 +79,13 @@ android {
         }
         release {
             buildConfigField("Boolean", "ALLOW_CLEARTEXT_LOCALHOST", "false")
+            // P2-2b 步骤 7：正式包只带 arm64-v8a 的原生库。
+            // 本地模型引擎（:llm）本来就只编 arm64-v8a；SQLCipher 的 armeabi-v7a / x86 / x86_64
+            // 库在正式包里是纯浪费（约 13.58 MiB），正式包只给真机装。
+            // 只加在 release：debug 与 androidTest 包保持全 ABI，模拟器还要用。
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -188,4 +197,6 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-idling-resource:3.7.0")
     androidTestImplementation(project(":contract"))
     androidTestImplementation(project(":hearth"))
+    // 假服务 LocalHttp 从 :net 的生产源码集搬到了它的 testFixtures，测试专用、不进生产 jar。
+    androidTestImplementation(testFixtures(project(":net")))
 }

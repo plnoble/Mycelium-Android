@@ -16,6 +16,14 @@ data class AuditEntry(
     /** Token usage the service reported. Recorded only, never used to block a call. */
     val promptTokens: Int?,
     val completionTokens: Int?,
+    /**
+     * The domains actually contacted, in the order they were contacted. For a call that never left
+     * the phone (rejected by the whitelist before the first request) it is empty — an empty chain is
+     * the honest record. Entries written before this field exists fall back to `[host]`.
+     */
+    val hostPath: List<String> = listOf(host),
+    /** Bytes this call received/wrote. `null` for entries written before this field exists. */
+    val receivedBytes: Long? = null,
 )
 
 /**
@@ -72,6 +80,8 @@ private fun AuditEntry.toJson(): JSONObject = JSONObject()
     .put("succeeded", succeeded)
     .put("promptTokens", promptTokens ?: JSONObject.NULL)
     .put("completionTokens", completionTokens ?: JSONObject.NULL)
+    .put("hostPath", JSONArray(hostPath))
+    .put("receivedBytes", receivedBytes ?: JSONObject.NULL)
 
 private fun JSONObject.toEntry(): AuditEntry = AuditEntry(
     at = getString("at"),
@@ -83,6 +93,15 @@ private fun JSONObject.toEntry(): AuditEntry = AuditEntry(
     succeeded = getBoolean("succeeded"),
     promptTokens = intOrNull("promptTokens"),
     completionTokens = intOrNull("completionTokens"),
+    // Old files have no hostPath/receivedBytes. An entry written by the new code may legitimately
+    // carry an empty hostPath ("nothing left the phone"), so absent and empty must stay different.
+    hostPath = if (has("hostPath") && !isNull("hostPath")) {
+        val array = optJSONArray("hostPath")
+        if (array == null) listOf(getString("host")) else List(array.length()) { array.getString(it) }
+    } else {
+        listOf(getString("host"))
+    },
+    receivedBytes = if (has("receivedBytes") && !isNull("receivedBytes")) getLong("receivedBytes") else null,
 )
 
 private fun JSONObject.intOrNull(name: String): Int? = if (has(name) && !isNull(name)) getInt(name) else null

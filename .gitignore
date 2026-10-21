@@ -31,6 +31,10 @@ models/
 .env.*
 secrets.properties
 
+# Local-only material for scripts/check-public.ps1 (never committed: the denylist words are
+# exactly the strings that must not appear in the repository)
+.local/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -39,3 +43,5 @@ Thumbs.db
 llm/vendor/
 *.apk
 
+# Kotlin 构建会话目录（构建会生成，导致 check-public 认为工作区不干净）
+.kotlin/

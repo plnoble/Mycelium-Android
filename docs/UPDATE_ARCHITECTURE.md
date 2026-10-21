@@ -1,120 +1,95 @@
-# Mycelium（知衍）安卓版 Update Architecture
+# 知衍安卓版更新架构
 
-## Goal
+这一页写的是**实际怎么做**（P2-2b 定的做法），不是愿望清单。改这里的任何一条，都要同步改 App 里的 `update/` 包和发版闸门。
 
-After the first manual installation, Mycelium（知衍）安卓版 should minimize manual update work.
+应用更新和模型更新是**两套系统**：这一页只说应用（APK）。模型走「我的 → 模型」，见最后一节。
 
-Expected flow:
-
-```text
-Code pushed / release tag created
-        |
-GitHub Actions
-        |
-Build + test + sign APK
-        |
-GitHub Release
-        |
-Mycelium（知衍）安卓版 detects newer release
-        |
-Download APK
-        |
-Verify
-        |
-Launch Android package installer
-        |
-User confirms update
-```
-
-## Release source
-
-Primary source: GitHub Releases for this repository unless a separate public release repository becomes necessary later.
-
-Because this repository is currently public, the app can query public release metadata without embedding a private GitHub access token.
-
-## Versioning
-
-Semantic versions:
-
-- v0.1.0 — feature milestone
-- v0.1.1 — bug-fix release
-- v0.2.0 — next feature milestone
-- v1.0.0 — first stable release
-
-Android must also maintain monotonically increasing `versionCode`.
-
-## Release assets
-
-A release should eventually contain:
-
-- `mycelium-android-<version>.apk`
-- checksum metadata
-- release notes
-
-The application model files must not be bundled into routine APK updates.
-
-## App-side updater
-
-Planned package:
+## 一句话流程
 
 ```text
-update/
-├── UpdateManager
-├── GitHubReleaseClient
-├── VersionComparator
-├── ApkDownloader
-├── ApkVerifier
-└── PackageInstallerLauncher
+打开 App
+  └─ 该检查就检查（距上次 ≥ 24 小时、自动检查开着、不是调试包）
+       ├─ 没新版 → 什么都不做
+       └─ 有新版 → 「我的」红点 + 卡片（版本号 / 大小 / 中文更新说明）
+            ├─ 忽略这个版本 → 这一版不再提示
+            └─ 下载并安装
+                 ├─ 查可用空间
+                 ├─ 网关按流下载（逐跳白名单、可续传、可取消）
+                 ├─ 四项校验：sha256 / 包名 / 签名 / versionCode
+                 ├─ 交给系统安装器（PackageInstaller 会话）
+                 └─ 系统弹确认 → 用户点「安装」→ 数据都在
 ```
 
-Updater responsibilities:
+## 1. 出网：网关负责下载文件
 
-1. Query the latest stable release.
-2. Parse release version metadata.
-3. Compare against installed version.
-4. Download the correct APK.
-5. Verify checksum/digest where available.
-6. Verify package identity/signing expectations.
-7. Open the Android installer.
-8. Preserve all app data, models, memories, and settings during normal upgrades.
+更新和圆桌、炉边走同一个出网网关（`:net`），用途是 `Update`。
 
-## Check policy
+- **按流写文件**：响应边收边写进目标文件，不把整包读进内存（几十 MB 的 APK 不能整段读）。
+- **带进度、可取消**：每写一块回调一次进度；取消后已经写下的字节保留，下次能接着下。
+- **逐跳白名单**：解析出地址后，**每一跳**都重新过一遍白名单（用途不变），只允许 https，最多 5 跳；跳到白名单外照样拒绝，并记进审计。重定向的响应体不读。
+- **更新用途的域名白名单**：`api.github.com`、`github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`。最后一项来自 2026-10-18 的实测：`github.com` 上的下载地址 302 跳到 `release-assets.githubusercontent.com`（带签名的临时地址，约 60 分钟过期），整条链只有两跳。**没有实测到的域名不加**——宁可失败关闭，也不放宽出网面；真出现新域名时，错误提示里给「用浏览器打开发布页」的兜底。
+- **断点续传**：目标文件已有内容时带 `Range: bytes=<offset>-`。服务器回 **206** 就接着写（校验 `Content-Range` 起点一致）；回 **200**（不支持 Range）就截断从 0 重写；回 **416** 表示盘上的字节已经是整份内容，不再下载，直接进哈希校验。跳转后的临时地址会过期，所以续传时**从原始地址重新走一遍跳转**，不复用旧地址。
+- **审计**：每次下载记一条——时间、实际联系过的每一跳域名、用途、字节数、状态；**不记内容**。隐私记录页读得到；新加的字段对老的 `audit.json` 向后兼容，不会让旧记录读崩。
+- **通用**：这套按流下载是给 P2-5（模型下载）复用的，那边只需要加用途、白名单和前台服务。
 
-Default behavior:
+## 2. 发布信息：按名字找资产
 
-- check on app start only if enough time has passed since the last check
-- periodic background check at a low frequency
-- manual “Check for updates” button
-- optional automatic APK download
-- never repeatedly interrupt the user
+- 数据源：本仓库（公开仓库）的 GitHub Releases，不嵌 token。
+- 资产名由标签推出来：`mycelium-v<版本>.apk` 和 `mycelium-v<版本>.apk.sha256`；只按**忽略大小写的精确文件名**找，不做前缀/包含匹配（**不取「第一个 .apk」**，也不接受 `.apk.asc`、`.apk.sig`、`.apk.sha256.asc`、`.apk.backup.apk` 这类相近附件——它们只比目标名字长一点）。名字不完全一样就算这份发布缺了该附件。同时记下资产大小和发布说明（`body`）。
+- **缺资产**：缺 APK 或缺 `.sha256` 的发布，只显示「有新版本」和发布页链接，**不提供应用内安装**。
+- **错误说人话**：连不上、限流（403 / 429 →「检查太频繁，稍后再试」）、服务器出错、内容看不懂，各有中文文案；界面上不出现 `GitHub returned HTTP 403` 这类英文原文。
 
-## Signing
+## 3. 什么时候检查
 
-Every production APK must use the same signing key.
+- **打开 App 时**在后台查一次，不挡界面；**距上次检查不到 24 小时就不查**。手动「检查更新」按钮不受这个限制。用户把系统时间往回调也不会卡死（视为到期）。
+- 自动检查失败不打扰用户，错误只在手动检查时显示。
+- 「我的」里有「自动检查更新」开关（默认开）、一行「上次检查：……」，手动按钮保留。
+- **有新版时**：底栏「我的」出现小红点；「我的」页顶部出现卡片（版本号、大小、中文更新说明，太长可展开），两个按钮「下载并安装」「忽略这个版本」。**不弹窗**。
+- **忽略**：忽略某个版本后不再提示它；出了更新的版本再提示。
+- **不做**：后台定时检查、自动下载（安装包几十 MB，可能用的是流量）。
+- **存储**：上次检查时间和忽略的版本用普通偏好存储（不是个人数据，不放加密库）。
+- **调试包**（包名以 `.debug` 结尾）：不自动检查、不显示红点、不提供安装入口；手动检查仍可看有没有新版 + 发布页链接。原因是 GitHub 上的正式包和调试包包名不同，装上去会变成另一个 App。
 
-Signing material must never be committed to Git.
+## 4. 下载与四项校验
 
-Expected CI secrets later:
+- **目录与文件名**：`cacheDir/updates/`，文件名带标签（`mycelium-<标签>.apk`，下载中是 `.part`）。这样续传只可能续同一个版本，不会把 A 版本的半截文件续成 B 版本。
+- **空间**：下载前查可用空间，公式是「**剩余下载量 + 一份安装会话大小 + 余量预算**」——`PackageInstaller` 会把包再复制一份到会话目录，这一份躲不掉；余量取 `max(32 MiB, 包大小 / 4)`。**已经下到 `.part` 的字节不占新增空间**，所以只算剩余量（旧稿写成「已占用 + 剩余 + 会话副本 + 余量」，那会把续传误判成空间不够）。安装前再按「包大小 + 余量」复查一次。包大小未知时只用 **64 MiB** 做初始门槛，拿到真实长度后**再复查一次**（进度里第一次出现非空 `total` 就是复查时机），不够就取消这次下载。文案必须带差值：「需要 X MiB，可用只有 Y MiB，还差 Z MiB」。
+- **页面与生命周期**：离开页面下载继续（任务挂在 Activity 存活期内的 ViewModel 上）；App 被杀掉就停，下次接着下。**不用前台服务**。
+- **四项校验**（顺序 `sha256 → 包名 → 签名 → versionCode`），任何一项不过就**删掉文件**、用人话说明是哪一项、不安装：
+  1. **sha256**：期望哈希来自发布里的 `.sha256` 附件，取其中**第一个 64 位十六进制串**（本机 Git Bash 生成的校验文件是 `hash *路径` 形式，后面那串路径要忽略）；这次读取走**上限 4 KiB**、跟跳转、带取消句柄的通道，一次安装只取一次，结果写进本地边车文件 `mycelium-<标签>.apk.sha256`，**校验器不再联网**。下载器（`:net` 的 `FileDownloader`）边写盘边保留整包结果，下完做**整文件流式哈希**（分块读、不整包进内存、读盘时检查取消）；哈希不符就**删掉重下一次**（第二次不复用已有字节），第二次再不符才报 `ChecksumMismatch`。重试与续传只在这一层，app 的第 4 步不再包一层重试。
+  2. **包名**：安装包里的包名与当前 App 一致；
+  3. **签名证书**：与**当前装着的 App** 的签名证书**指纹**一致（不硬编码仓库里 CI 用的那份指纹——那份是防「发错包」用的；App 里再写一份，会在以后合法换签名时把用户挡死）。**签名一致只是必要条件，不等于一定装得上**：还要包名一致、versionCode 更高、签名数量正常，最后仍由系统确认界面决定。当前是**单签名政策**：包的签名者为空（读不出）或多于一个，都算不过——不会无条件只取第一个签名；「读不出签名」与「签名不一致」是两条文案，都**失败关闭**；
+  4. **versionCode**：比当前装着的版本大。
+- **重试**：网络类失败自动重试（最多 3 次，退避 2s / 5s / 10s），接着续传；退避用可取消的等待，点「取消」立刻中断。校验不过不重试，直接报错。
+- **取消与放弃是两件事**：下载中点「取消」**保留** `.part`（下次续传要用）；「放弃这个版本」/取消安装、以及校验不过，才删这一版的文件（`.apk` / `.part` / `.sha256`）。
+- **清理**：安装成功、用户取消或放弃后，清掉这一版的文件；启动时按年龄（默认 7 天）清 `updates/` 的 `.apk` / `.part` / `.sha256`，**当前 tag 的 `.part` 不动**（否则续传永远没用）；换 tag 时删掉别的 tag 的 `.part`。清理**不得删除正在被下载写入的文件**。
+- **失败关闭**：个别厂商 ROM 读不出安装包签名时，和「签名不一致」分成两种文案——前者提示「这台机器读不出安装包签名，请用浏览器下载安装」，**不放过**。
 
-- keystore material
-- keystore password
-- key alias
-- key password
+## 5. 安装
 
-## Android limitation
+- **方式**：用 `PackageInstaller` 会话安装（`ACTION_INSTALL_PACKAGE` 已弃用）。把校验过的 APK 按流写进会话（8 KiB 缓冲，**不**整包进内存），关闭写流**之前** `fsync`，关流之后才 `commit`；`SessionParams` 用 `MODE_FULL_INSTALL` + `setSize`，**不**调 `setAppPackageName`（`MODE_FULL_INSTALL` 不需要它）。
+- **结果回执**：`commit` 用**显式** `PendingIntent`（指定 component，`FLAG_MUTABLE`）+ 清单里注册的 `exported="false"` 接收器（`InstallResultReceiver`）。这不是可选路线：targetSdk 37 下用 immutable 的 `PendingIntent` 当 statusReceiver 会直接抛 `IllegalArgumentException`；动态注册的接收器在进程被回收后收不到结果，清单接收器能。
+- **会话状态落盘**：阶段 `Created → Written → Committed → Pending / Succeeded / Failed / Cancelled`、`sessionId`、目标 tag、包名、提交时的 versionCode 都写进普通偏好存储。回执按 `sessionId` **幂等**落库（迟到、重复回调不作数），界面只读落盘状态。
+- **等用户确认**：系统回「需要用户确认」时，接收器把系统确认界面拉起来；拉不起来（前台不在、进程刚被唤起）也不算失败。
+- **结果判定**：回到前台先读**当前装着的 `longVersionCode`**——比提交时记下的基线大就是装上了，这是**权威判定**，回执一次都没到也照样成立。落盘记录已经是终态时按终态收尾；会话不见了或超过 10 分钟窗口期只标记「待核实」，**不判取消、不删文件**（旧版本停着不等于用户取消）。成功安装会终结旧进程，所以清理与提示要能在**新进程**里完成：新进程启动时发现候选发布已经不比当前版本新，就按成功收尾。
+- **必须用户确认（限制）**：Android 不允许 App 静默升级。所以用户看到的实际是「点两下」——App 里的「下载并安装」一下，系统界面的「安装」一下。这一点在用户文档和发布说明里如实写，不夸大成全自动。
+- **「安装未知应用」**：还没允许时，先说明为什么需要（要把下载好的安装包交给系统安装器），再带用户去系统里本应用的设置页。**只带路，开不开由用户决定**；而且没允许时**不创建安装会话**。回来重新检查，允许了才继续安装，没允许就停在说明上。
+- **结果**：成功、失败、用户取消都有中文结果提示；空间不够、被设备策略阻止、版本冲突、包无效各有各的文案。成功后不自动重启 App，提示「更新完成，下次打开生效」，并清掉这一版的文件、重置上次检查时间、清掉忽略状态；用户取消时提示「已取消，安装包已清理」并删文件。会话清理只认本应用落盘的那条 `sessionId`。
+- **调试包**不暴露安装入口，也不做未知来源引导。
 
-For a normally sideloaded Android app, download and preparation can be automated, but Android generally still requires user confirmation to install an APK update.
-
-Fully silent installation requires device-management/system-level privileges and is outside the normal Mycelium（知衍）安卓版 application model.
-
-## Model updates
-
-Application updates and model updates are separate systems.
+## 6. 应用更新和模型更新分开
 
 ```text
-App update   -> APK / GitHub Releases
-Model update -> Model Manager
-Memory       -> persistent local database
+应用更新  → APK，走 GitHub Releases（这一页）
+模型更新  → 「我的 → 模型」，自己下载 GGUF，复用网关的按流下载
+人物/对话/记忆 → 手机上的本地数据库，升级 APK 不动它
 ```
 
-Updating the APK must not delete or re-download the LLM model under normal circumstances.
+- 升级 APK **不会**删掉或重新下载本地模型、人物、对话和密钥设置。
+- 模型文件**不打进 APK**：几十 MB 到几 GB，混进应用更新会费流量，也会让安装包大得离谱。
+
+## 7. 发版侧对应的那一半
+
+- GitHub Release 的正文就是仓库里的中文文件 `docs/releases/v<版本>.md`——也正是 App 更新卡片里显示的「更新说明」，两边同一份，不重复写。
+- 签名证书的 SHA-256 固定在 `docs/releases/signing-cert-sha256.txt`；CI 在签名之后比对，不一致不发。
+- `scripts/release-guard.sh` 的四项闸门（标签与 versionName、发布说明、versionCode 增长、签名指纹）和完整发版顺序见 `docs/RELEASING.md`。versionCode 增长这一项跟**本仓所有正式版本标签里最高的那个**比，取不到前序版本时**中止**，不跳过。

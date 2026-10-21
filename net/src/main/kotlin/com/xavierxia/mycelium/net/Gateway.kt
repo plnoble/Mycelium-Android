@@ -103,6 +103,20 @@ data class GatewayRequest(
     }
 }
 
+/**
+ * Bounded the way the platform needs it: a non-positive value means "wait forever" there, and an
+ * unbounded connect attempt is an unbounded wait for a stop that lands mid-connect. The gateway's
+ * own exchange and the file downloader both ask here, so the two paths cannot drift apart.
+ */
+internal fun boundedConnectTimeout(ms: Int): Int =
+    ms.takeIf { it > 0 }
+        ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
+        ?: GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS
+
+/** A per-read bound, the same way: 0 means "wait forever" on the platform. */
+internal fun boundedReadTimeout(ms: Int): Int =
+    ms.takeIf { it > 0 } ?: GatewayRequest.DEFAULT_READ_TIMEOUT_MS
+
 data class GatewayResponse(
     val status: Int,
     val body: String,
@@ -316,10 +330,10 @@ typealias GatewayAbort = GatewayCall
  * wait this design costs, so the lock is held only for the decision itself.
  */
 class OutboundGateway(
-    private val hosts: AllowedHosts,
-    private val audit: AuditLog,
-    private val clock: () -> String,
-    private val open: (URI) -> HttpURLConnection,
+    internal val hosts: HostPolicy,
+    internal val audit: AuditLog,
+    internal val clock: () -> String,
+    internal val open: (URI) -> HttpURLConnection,
 ) {
     fun send(request: GatewayRequest): GatewayResponse {
         val target = parse(request.url)
@@ -380,14 +394,10 @@ class OutboundGateway(
             // and an unbounded connect attempt is an unbounded wait for a stop that lands
             // mid-connect. This bounds that one TCP connect attempt; it is not a deadline for the
             // whole call, because the TLS handshake, the read and any further route attempt after a
-            // failure each carry their own wait.
-            connection.connectTimeout = request.connectTimeoutMs
-                .takeIf { it > 0 }
-                ?.coerceAtMost(GatewayRequest.MAX_CONNECT_TIMEOUT_MS)
-                ?: GatewayRequest.DEFAULT_CONNECT_TIMEOUT_MS
-            connection.readTimeout = request.readTimeoutMs
-                .takeIf { it > 0 }
-                ?: GatewayRequest.DEFAULT_READ_TIMEOUT_MS
+            // failure each carry their own wait. The file downloader asks for the same bound through
+            // the same two functions, so the two paths cannot drift apart.
+            connection.connectTimeout = boundedConnectTimeout(request.connectTimeoutMs)
+            connection.readTimeout = boundedReadTimeout(request.readTimeoutMs)
             connection.instanceFollowRedirects = false
             request.headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             // A stop that landed while the socket was being opened, or while the switch was being
@@ -421,7 +431,7 @@ class OutboundGateway(
         }
     }
 
-    private fun parse(url: String): URI {
+    internal fun parse(url: String): URI {
         val target = try {
             URI(url)
         } catch (failure: Exception) {
@@ -436,15 +446,24 @@ class OutboundGateway(
     private fun String.codePointCount(): Int = codePointCount(0, length)
 }
 
+/**
+ * Whether one address may be called for one purpose. The gateway only asks this; the rules live in
+ * [AllowedHosts], and the download path takes the same policy so a redirect hop is checked exactly
+ * like a first address.
+ */
+fun interface HostPolicy {
+    fun allows(target: URI, purpose: GatewayPurpose): Boolean
+}
+
 /** Hosts the gateway may call. Localhost is allowed only when the debug build asks for it. */
 class AllowedHosts(
     private val modelBaseUrls: List<String>,
     private val allowCleartextLocalhost: Boolean,
-) {
+) : HostPolicy {
     constructor(modelBaseUrl: String, allowCleartextLocalhost: Boolean) :
         this(listOf(modelBaseUrl), allowCleartextLocalhost)
 
-    fun allows(target: URI, purpose: GatewayPurpose): Boolean {
+    override fun allows(target: URI, purpose: GatewayPurpose): Boolean {
         val host = target.host.orEmpty().lowercase()
         val https = target.scheme == "https"
         return when (purpose) {
@@ -473,7 +492,17 @@ class AllowedHosts(
     }
 
     private companion object {
-        val UPDATE_HOSTS = setOf("api.github.com", "github.com", "objects.githubusercontent.com")
+        /**
+         * `release-assets.githubusercontent.com` is the host the GitHub release download really
+         * redirects to, measured on device; `github-releases.githubusercontent.com` is not added
+         * because it was never measured (fail closed).
+         */
+        val UPDATE_HOSTS = setOf(
+            "api.github.com",
+            "github.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com",
+        )
     }
 }
 

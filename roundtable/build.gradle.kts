@@ -33,6 +33,8 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
     testImplementation("org.xerial:sqlite-jdbc:3.53.0.0")
+    // 假服务 LocalHttp 从 :net 的生产源码集搬到了它的 testFixtures，测试专用、不进生产 jar。
+    testImplementation(testFixtures(project(":net")))
 }
 
 tasks.test {
