@@ -248,6 +248,18 @@ class UpdateCenter(
             install()
             return
         }
+        // 回前台时同一口径：这一版已经装上了就别再放着「可以安装」（§1.5 第 1 条）。
+        val alreadyInstalled = prefs.pendingVersionCode
+        if (alreadyInstalled > 0L && installedVersionCode() >= alreadyInstalled) {
+            val tag = current.release?.tagName ?: prefs.pendingReleaseTag
+            if (tag != null) {
+                finishInstalled(tag)
+            } else {
+                prefs.clearPending()
+                _state.value = current.copy(download = DownloadUiState.Idle)
+            }
+            return
+        }
         // 文件被系统清掉就不能再显示「可以安装」。
         val ready = current.download
         if (ready is DownloadUiState.Ready && !ready.file.isFile) {
@@ -611,8 +623,10 @@ class UpdateCenter(
             is VerifyOutcome.Verified -> {
                 prefs.pendingApkPath = target.path
                 downloadCall = null
-                // 包里读出来的版本号随会话一起落盘：进程重建后靠它判断「这一版是不是已经装了」（M7）。
+                // 包里读出来的版本号随会话一起落盘：进程重建后靠它判断「这一版是不是已经装了」（M7）；
+                // 再单独落一份 pendingVersionCode：装成功后会话记录会被清掉，只剩它能回答这个问题（§1.5 第 1 条）。
                 targetVersionCode = verdict.versionCode
+                prefs.pendingVersionCode = verdict.versionCode
                 if (!writeIfCurrent(generation) { it.copy(download = DownloadUiState.Ready(target, outcome.result.fileSize)) }) return
                 // 「下载并安装」是一次点击到底：四项校验一过就接着装，不再要求用户点第二个按钮（M2）。
                 // 没授权「安装未知应用」时 install() 只落到说明页，回前台会接着装；系统确认仍由用户完成。
@@ -671,6 +685,13 @@ class UpdateCenter(
         val stored = prefs.pendingReleaseJson
             ?.let(ReleaseJson::decode)
             ?.takeIf { it.tagName == tag }
+        // 版本号口径：已安装的 versionCode 一旦不小于待装包的，就说明这一版装上了（版本名可能没跟着变，
+        // 光比 versionName 会漏），按成功收尾——清 Ready、清待装记录、删 updates/ 里的文件（§1.5 第 1 条）。
+        val pendingCode = prefs.pendingVersionCode
+        if (stored != null && pendingCode > 0L && installedVersionCode() >= pendingCode) {
+            finishInstalled(stored.tagName)
+            return
+        }
         if (stored != null && !VersionComparator.isNewer(stored.versionName, currentVersionName)) {
             finishInstalled(stored.tagName)
             return

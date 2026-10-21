@@ -53,12 +53,24 @@ class UpdatePreferences(context: Context) : InstallSessionState {
         get() = prefs.getString(KEY_PENDING_APK, null)
         set(value) = prefs.edit { putString(KEY_PENDING_APK, value) }
 
+    /**
+     * 待装包自己的 versionCode（四项校验里读出来的那个）。
+     *
+     * 装成功以后进程会被系统终结；新进程里会话记录已经被清掉，光看 `installSessionTargetVersionCode`
+     * 就无从判断「这一版到底装上了没有」，于是会出现「已经装上还显示可以安装」。所以把它单独落盘一份，
+     * 由「已安装的 versionCode ≥ 待装包的 versionCode」这条**版本号口径**来收尾（§1.5 第 1 条）。
+     */
+    var pendingVersionCode: Long
+        get() = prefs.getLong(KEY_PENDING_VERSION_CODE, 0L)
+        set(value) = prefs.edit { putLong(KEY_PENDING_VERSION_CODE, value) }
+
     /** 丢掉候选发布（已是最新、已被忽略、恢复时对不上）。忽略的 tag 本身**不**清。 */
     fun clearPending() {
         prefs.edit {
             remove(KEY_PENDING_RELEASE)
             remove(KEY_PENDING_TAG)
             remove(KEY_PENDING_APK)
+            remove(KEY_PENDING_VERSION_CODE)
         }
     }
 
@@ -130,6 +142,7 @@ class UpdatePreferences(context: Context) : InstallSessionState {
         const val KEY_PENDING_RELEASE = "pendingReleaseJson"
         const val KEY_PENDING_TAG = "pendingReleaseTag"
         const val KEY_PENDING_APK = "pendingApkPath"
+        const val KEY_PENDING_VERSION_CODE = "pendingVersionCode"
 
         const val NO_SESSION = -1
         const val KEY_SESSION_ID = "installSessionId"
