@@ -41,11 +41,14 @@ class LocalModelEngineTest {
             } finally { active = false; exited.countDown() }
         }
         override fun unload() { check(!active) { "freed during native operation" }; unloads++ }
-        override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, callback: TokenCallback): LongArray {
+        /** 这个桥的提示固定是 2 个 token（见下面回的读数），够本用例用。 */
+        override fun tokenize(messages: ByteArray): IntArray = intArrayOf(1, 2)
+        override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray {
             callback.onStart(false)
             for (byte in "你<think>隐藏</think>好🌿".toByteArray()) callback.onToken(byteArrayOf(byte))
             if (blockingGeneration) waitForStop()
-            return longArrayOf(2, 5, 1, 10, if (stopped.get()) 1 else 0)
+            // 第 6、7 项是 P2-1c 的读数：这一轮没有复用，整段 2 个 token 都读了；第 8 项是没复用的原因。
+            return longArrayOf(2, 5, 1, 10, if (stopped.get()) 1 else 0, 0, 2, 1)
         }
     }
     private val model = ModelInfo("test", "test.gguf", ModelLocation.LOCAL)
@@ -68,10 +71,13 @@ class LocalModelEngineTest {
             while (!stopped.get() && System.nanoTime() < deadline) Thread.sleep(1)
         }
         override fun unload() { unloads.incrementAndGet() }
-        override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, callback: TokenCallback): LongArray {
+        /** 这个桥的提示固定是 1 个 token（见下面的读数）。 */
+        override fun tokenize(messages: ByteArray): IntArray = intArrayOf(1)
+        override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray {
             generates.incrementAndGet()
             callback.onStart(false)
-            return longArrayOf(1, 0, 0, 1, 0)
+            // 第 6、7 项是 P2-1c 的读数：没有复用，那唯一的 token 被读了；第 8 项是没复用的原因。
+            return longArrayOf(1, 0, 0, 1, 0, 0, 1, 1)
         }
     }
 
