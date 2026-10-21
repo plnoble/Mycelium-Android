@@ -50,9 +50,14 @@ class UpdateRealNetworkDeviceTest {
         if (target.exists()) target.delete()
 
         val checksumStarted = System.currentTimeMillis()
-        val expected = transport.fetchChecksumText(sha256Url, call).trim().lowercase()
+        val rawChecksum = transport.fetchChecksumText(sha256Url, call)
         val checksumMs = System.currentTimeMillis() - checksumStarted
-        assertEquals("校验文件只有一行 64 位十六进制", 64, expected.length)
+        // 真发布里的 .sha256 是 `sha256sum` 那种「64 位十六进制 + 两个空格 + 文件名」，不是光秃秃一行，
+        // 所以按生产用的同一个解析器取第一个 64 位十六进制（ApkDownloader 也是这么取的）。
+        val expected = requireNotNull(ChecksumText.parseFirstSha256(rawChecksum)) {
+            "校验文件里取不出 64 位十六进制（原文 ${rawChecksum.trim().length} 字符）"
+        }
+        assertEquals("校验文件原文 ${rawChecksum.trim().length} 字符，应当能取出一行 64 位十六进制", 64, expected.length)
 
         var lastWritten = 0L
         val downloadStarted = System.currentTimeMillis()
