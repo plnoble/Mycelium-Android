@@ -86,6 +86,7 @@ import com.xavierxia.mycelium.update.LocalApkVerifier
 import com.xavierxia.mycelium.update.PackageManagerApkFactsReader
 import com.xavierxia.mycelium.update.ReleaseInfo
 import com.xavierxia.mycelium.update.UpdateCenter
+import com.xavierxia.mycelium.update.plainReleaseNotes
 import com.xavierxia.mycelium.update.UpdateError
 import com.xavierxia.mycelium.update.UpdateFiles
 import com.xavierxia.mycelium.update.UpdateFormat
@@ -696,13 +697,14 @@ private fun downloadFailureText(reason: DownloadFailureReason, message: String?)
     DownloadFailureReason.Installation -> "安装没成功。"
 }
 
-/** 更新说明是纯文本（不渲染 Markdown），超过几行折起来，给一个展开入口。 */
+/** 更新说明是纯文本（不渲染 Markdown），显示前先去掉标记符号；超过几行折起来，给一个展开入口。 */
 @Composable
 private fun UpdateNotes(notes: String) {
     var expanded by remember { mutableStateOf(false) }
-    val foldable = notes.length > NOTES_FOLD_LENGTH
+    val text = remember(notes) { plainReleaseNotes(notes) }
+    val foldable = text.length > NOTES_FOLD_LENGTH
     Text(
-        text = notes,
+        text = text,
         maxLines = if (foldable && !expanded) NOTES_COLLAPSED_LINES else Int.MAX_VALUE,
         overflow = TextOverflow.Ellipsis,
     )
