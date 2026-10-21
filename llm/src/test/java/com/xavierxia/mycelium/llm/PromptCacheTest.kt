@@ -212,4 +212,69 @@ class PromptCacheTest {
         engine.round(grown, "c1")
         assertEquals("无键的一轮之后，同一个键也得重新建缓存", 0, bridge.reuses[2])
     }
+
+    @Test
+    fun aDifferentCacheKeyStartsFromScratch() = runBlocking {
+        val bridge = FakeBridge()
+        val engine = engineWith(bridge)
+        val messages = listOf(ChatMessage(ChatRole.USER, "换键的一问"))
+
+        engine.round(messages, "c1")
+        engine.round(messages, "c2")
+
+        // 提示一模一样，只是键换了：这就是「换人物/换会话」那一类，必须整段重读。
+        assertEquals(0, bridge.reuses[1])
+        assertTrue("公共前缀本来是存在的，是键把它挡住了", sharedPrefix(bridge.prompts[0], bridge.prompts[1]) > 0)
+        assertEquals(
+            "整段都读",
+            bridge.prompts[1].size.toLong(),
+            checkNotNull(engine.lastStats).readPromptTokens,
+        )
+    }
+
+    @Test
+    fun aReloadStartsFromScratch() = runBlocking {
+        val bridge = FakeBridge()
+        val engine = engineWith(bridge)
+        val messages = listOf(ChatMessage(ChatRole.USER, "重载的一问"))
+        engine.round(messages, "c1")
+
+        engine.load(model.copy(id = "another-model"), EngineOptions()) { Descriptor() }
+        engine.round(messages, "c1")
+
+        assertEquals("重新 load 之后不许再复用上一个模型的缓存", 0, bridge.reuses[1])
+    }
+
+    @Test
+    fun anUnloadStartsFromScratch() = runBlocking {
+        val bridge = FakeBridge()
+        val engine = engineWith(bridge)
+        val messages = listOf(ChatMessage(ChatRole.USER, "卸载的一问"))
+        engine.round(messages, "c1")
+
+        engine.unload()
+        engine.load(model, EngineOptions()) { Descriptor() }
+        engine.round(messages, "c1")
+
+        assertEquals("卸载过之后不许再复用", 0, bridge.reuses[1])
+    }
+
+    @Test
+    fun aTruncatedPromptReusesOnlyTheUnchangedPrefix() = runBlocking {
+        val bridge = FakeBridge()
+        val engine = engineWith(bridge)
+        val sheet = ChatMessage(ChatRole.SYSTEM, "人物设定：这一段永远在最前面。")
+        val first = ChatMessage(ChatRole.USER, "第一问")
+        val answer = ChatMessage(ChatRole.ASSISTANT, "第一答")
+        val second = ChatMessage(ChatRole.USER, "第二问")
+
+        engine.round(listOf(sheet, first, answer, second), "c1")
+        // 历史从最老的轮次开始丢：设定那段仍在最前，后面的重读。
+        engine.round(listOf(sheet, second), "c1")
+
+        val expected = sharedPrefix(bridge.prompts[0], bridge.prompts[1])
+        assertEquals("截断后只能复用真正没变的那一段", expected, bridge.reuses[1])
+        assertTrue("设定那一段应当还在公共前缀里", expected > 0)
+        assertTrue("但必须短于上一轮的整段提示", expected < bridge.prompts[0].size)
+    }
 }
