@@ -20,18 +20,29 @@ class HearthStopBeforeGenerateTest : HearthJvmTestCase() {
     @Test
     fun aStopThatLandsBeforeAnAlreadyLoadedModelGeneratesKeepsTheTurnFromProducingAnything() {
         val character = newCharacter("已加载模型停止复验")
+        // 先放一条历史：空会话的 window() 根本不读 messages（conversationId 为 null 直接给空列表），
+        // 闸门会一直等不到。有了这一条，打开页面时会落在这段对话上，下一轮拼窗口必读这条 SQL，
+        // 而且这次读取发生在「问模型之前」的检查之前。
+        log.append(
+            character.id, null, "停止复验：原来的问题", "停止复验：原来的回答", "本机 · 测试", minutesAgo(2),
+        )
         engine.preload(registeredModel)
         openReady(character)
         engine.tokens = listOf("不该出现的回答")
 
+        // 确认卡住以后再停止，再放行。以前是 send() 之后直接 stop()，中间没有卡点。模型已经预加载，
+        // 窗口的读取在后台线程上，机器快的时候后台线程会在 stop() 落下之前就过了那次检查、调用
+        // generate()。「activeTurn 在 send() 里就记好了」只保证停止记在这一轮上，不保证它早于生成边界。
+        val held = gates.holdRead("SELECT role, text, model FROM messages")
         model.send("停止复验：这句不该有回答")
-        // activeTurn 在 send() 里就记好了，所以这一下必然落在这一轮上。
+        waitFor(what = "窗口的历史读取被停住") { held.reached() }
         model.stop()
+        held.letGo()
         settle(1_000)
 
         assertEquals("已经加载好的模型也必须受这一轮停止状态约束", 0, engine.generates.get())
         assertEquals("停止之后问题应该回到输入框", "停止复验：这句不该有回答", model.state.value.pendingQuestion)
-        assertTrue("停在没有输出之前，一个字都不该入库", log.conversations(character.id).isEmpty())
+        assertEquals("停在没有输出之前，库里只该有预先放进去的那一轮", 2, log.messages(model.state.value.openConversation!!).size)
         assertTrue("不该有回答上屏", model.state.value.messages.none { it.text.contains("不该出现的回答") })
         assertFalse("停止之后不该还显示生成中", model.state.value.busy)
     }
