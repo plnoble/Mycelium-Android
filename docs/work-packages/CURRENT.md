@@ -1,6 +1,6 @@
 # 统一任务书（开发 agent 只照这一份做）
 
-- 维护：统筹。更新：2026-10-21（P2-2b 已合并；现在做第 3 节 P2-1c，第 5 节 P2-5 的依赖已满足）。
+- 维护：统筹。更新：2026-10-21（**现在最优先：第 2.2 节把 CI 修绿**；做完再回第 3 节 P2-1c）。
 - **这份文件替代以前在对话里分批发的所有指令。** 以后统筹只改这份文件，在对话里只说一句「任务书更新了，看第 X 节」。
 - 每个包的细节仍以各自的任务书为准（`docs/work-packages/<编号>-*.md`）。这里写的是：顺序、统筹已经做的裁定、常驻规则。两者冲突时，以这份为准。
 
@@ -159,6 +159,30 @@
 5. 尽快发 0.4.1（可以只是小修），走一遍真正的应用内升级，作为这套更新的最终验收。
 
 这一步你不推送、不打标签。CI 失败的话，统筹会写进本文件让你修。
+
+### 2.1 进度（2026-10-21）
+- `main` 已推送到 GitHub（用户同意）。
+- 第一次 CI（run 39547560836）失败：P2-2b 的 Robolectric 测试要 Java 21，流程里写的是 17。统筹补改 `3212ce4`，两个流程都改成 Java 21，已推送。
+- 第二次 CI（run 39552518444，Linux + Temurin 21.0.12）失败在 `:net:test`，2 个测例失败；`:app` 的测试、lint、打包都还没轮到跑。
+
+### 2.2 现在最优先：把 CI 修绿（先于 P2-1c）
+从 main 拉 `wp/ci-green`。每条单独提交。修完报给统筹，统筹审过、用户同意后推送，然后看 CI。
+
+1. **`RedirectCredentialsTest.aRedirectWithinTheSameHostKeepsCredentialHeaders`**
+   - CI 报错：「同域跳转要保留 Proxy-Authorization」，期望 `Basic eA==`，实际是 null。
+   - 先查清楚：JDK 21 的 `HttpURLConnection` 在没走代理时，是不是不让调用方发 `Proxy-Authorization`。本机是 JBR 25，行为可能不同。
+   - 如果是平台限制：同域保留这条正例，改用平台一定会发出的凭据头（`Authorization`、`Cookie`）来断言。`Proxy-Authorization` 只保留在「跨域被摘掉」的反例里。
+   - 产品代码不要为了测例改。在测例注释里写明原因。
+2. **`AuditByteAccountingTest.aHalfReadMetadataBodyIsRecordedWithTheBytesThatActuallyArrived`**
+   - CI 上「内容没读完」的那次调用成功了，读到 100 个字节，测例期望失败。
+   - 查清楚：假服务是怎么制造「没读完」的？声明的 `Content-Length` 比实际发的大，然后断开？在 Linux 上客户端为什么没把它当成提前结束？
+   - 修成在 Windows 和 Linux 上都确定失败的造法。比如声明长度明确大于实际写出的字节，写完立刻用 `shutdownOutput` 或关闭 socket，并确认客户端真的读到了 EOF。
+   - 产品代码的「读到一半要失败」如果确实有漏洞（客户端没核对 `Content-Length`），就修产品代码，并单独提交。
+3. **门禁一次报出所有失败**：`check-all.ps1` 和 `check-all.sh` 给 Gradle 加 `--continue`，一个模块的测试失败以后，其他模块照样跑完；退出码仍然非零，汇总表照常列出所有失败。加一条自测。这样 CI 一次就能暴露全部问题，不用一轮一轮试。
+4. **在本机复现 JDK 21**：本机只有 JBR 25。如果要下载一个便携版 JDK 21（比如 Temurin 21 的 zip，解压到 `D:\Development\` 下，不安装、不改系统设置）来复现，先在对话里问用户同意，说明文件名、来源、大小。用户不同意，就只靠 CI 的报告来修。
+5. 修完：在全新 worktree（JBR 25）跑 `check-all.ps1`。有 JDK 21 的话，再用 JDK 21 跑一遍。然后报给统筹。
+
+`:app` 的测试在 CI 上还没在 Java 21 下跑过，修完这两条以后可能还会冒出别的问题。所以第 3 条的 `--continue` 要和这两条一起交。
 
 ---
 
