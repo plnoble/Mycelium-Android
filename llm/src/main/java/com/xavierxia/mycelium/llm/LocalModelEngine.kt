@@ -267,6 +267,25 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         return ((visible - firstTokenNanos) / 1_000_000).coerceAtLeast(0)
     }
 
+    /**
+     * 把一段消息按模型自带的聊天模板编成 token 序列（P2-1d）。
+     *
+     * 检查点要存在「位置不超过公共前缀」的地方，所以本侧必须先能拿到某一轮提示的 token 序列，
+     * 再和上一轮的比较、算出分叉点。用的格式与 [generate] 完全一致（同一个 payload、同一个原生
+     * `tokenize`），否则比较出来的前缀没有意义。
+     */
+    suspend fun promptTokenIds(messages: List<ChatMessage>): IntArray {
+        val snapshot = messages.toList()
+        require(snapshot.isNotEmpty() && snapshot.sumOf { it.content.length.toLong() } <= 1_000_000) { "消息为空或过长" }
+        val json = JSONArray()
+        snapshot.forEach { json.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content)) }
+        val payload = json.toString().toByteArray(Charsets.UTF_8)
+        return gate.withLock {
+            checkNotNull(loaded.value) { "请先加载模型" }
+            runNative { native.tokenize(payload) }
+        }
+    }
+
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
         val snapshot = messages.toList()
