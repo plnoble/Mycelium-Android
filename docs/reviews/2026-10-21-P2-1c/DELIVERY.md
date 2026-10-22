@@ -63,17 +63,43 @@
 门禁日志：仓库外 `logs\p2-1c-gate{,2,3,4}.txt`，报告在各自 worktree 的 `build\check-all\summary.md`。
 APK：app-debug 59.8 MiB（已签名）、app-debug-androidTest 2.8 MiB（已签名）、app-release-unsigned 39.0 MiB。
 
-## 5. 真机待办（白天，要手机；今晚只编译到 androidTest）
+## 5. 真机数据（2026-10-22 上午，已跑；第 4 条截图没跑成）
 
-`app/src/androidTest/java/com/xavierxia/mycelium/hearth/HearthPromptSpeedDeviceTest.kt`：
+设备：NX809J / Android 16，模型 `Qwen3.5-4B-Q4_K_M.gguf`（2.55 GiB，SHA256 `00fe7986…ef11a4`，SAF 直读）。
+调试包 `com.xavierxia.mycelium.debug`（正式版 0.4.0 未动）。`am instrument` 两条例全过（395.7 s）。
 
-- 真实多轮对话（每轮约 1500 token）三轮的 `used/read/prompt_ms/generation_ms/reuse_fallback_reason`；
-- 同一提示、温度 0 的三次运行（整段读 / 复用 / 无键清空后）**逐字相同**；
-- E 的三个数：隐藏段 token 数、等待毫秒、以及正文里不出现思考内容；
-- 结果写 `p2-1c-speed.txt` / `p2-1c-zero.txt`，截图放 Windows 仓库 `.omx/development/reviews/<日期>-android-P2-1c/`。
+**① 三轮 1500 token 对话（`files/p2-1c-speed.txt`，`load_ms=606`）**
 
-**必须如实记录的一条**：目标模型上预期 `reused == 0` 且 `reuse_fallback_reason == 3`（整段重读）。如果真机上
-出现 `reused > 0` 而答案与整段重读不同，说明还有我们没看懂的路径，要立刻回报。
+| 轮 | prompt_tokens | reused | read | prompt_ms | generated | generation_ms | tok/s | reason |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1290 | **0** | 1290 | 65289 | 103 | 10505 | 9.80 | 1 |
+| 2 | 1420 | **0** | 1420 | 91411 | 97 | 10113 | 9.59 | **3** |
+| 3 | 1544 | **0** | 1544 | 94886 | 97 | 11404 | 8.51 | **3** |
+
+**与预期完全一致**：`reused == 0`，第 2、3 轮 `reuse_fallback_reason == 3`（引擎拒绝只丢掉一段尾巴），
+每轮整段重读。**没有出现「reused > 0 但答案不同」的危险情况**，不需要按第 5 节那条立刻回报。
+反面也说明：目标模型上确实拿不到提速（读提示 65→91→95 s，随历史增长）。
+
+**② 温度 0 逐字一致（`files/p2-1c-zero.txt`）**：612 token 的提示跑三遍（整段读 / 同键复用 / 无键清空），
+`generated=128` 三遍相同，三段 `first_answer` / `reused_answer` / `cleared_answer` **逐字相同**
+（复用那遍 `reused` 也是 0，所以实际是三遍整段重读——一致性与预期吻合）。
+
+**③ 隐藏段三个数（`files/p2-1c-hidden.txt`）**
+
+| thinking | prompt_tokens | hidden_tokens | hidden_ms | generated | 正文预算剩余 | 答案字数 |
+|---|---|---|---|---|---|---|
+| false（默认） | 446 | **0** | 0 | 60 | 7746 | 83 |
+| true | 444 | **256** | **28488** | 256 | 7492 | **0** |
+
+结论：`enable_thinking=false` **被 Qwen3.5 的模板认了**（关掉时隐藏段为 0，正文直接从第一个 token 开始）；
+打开思考后 256 个 token 全部落在隐藏段（28.5 s），生成长度 256 被隐藏段吃光、**正文一个字都没剩**——
+这正是 D 那条 20 秒提示存在的理由，也说明默认关思考是必要的。
+
+**④ 超时提示截图：没跑成。** 测例 `HearthHiddenHintDeviceTest` 已写好（真实界面：建人物 → 打开思考 →
+把提示阈值调到 8 s → 发一句 → 等提示出现 → `uiAutomation.takeScreenshot()` 存 `files/p2-1c-hint.png`），
+但**设备在跑到这一条之前掉线了**（`adb devices` 空、重启 adb 与等待后仍未恢复），所以没有截图，也没有
+界面级证据。它编译通过、随调试包一起装上了，但**没有运行**。下一次借到手机要补跑这一条。
+
 
 ## 6. 已记录的口径与偏差
 
@@ -91,12 +117,18 @@ APK：app-debug 59.8 MiB（已签名）、app-debug-androidTest 2.8 MiB（已签
 
 - D 的**重做路径**只补了代码收尾（空准备结果、空白答案、finally、轮次核对），没有对应的 JVM 专测；
   已有三条 D 测例只覆盖发送路径的「无正文→提示→出正文撤掉／马上出正文不提示／停止与换页撤掉」。
-- 混合模型「每轮整段重读」这个结论来自源码推导 + 静态审，**没有在真机上验证过**。
-- 温度 0 逐字一致、真实 JNI 运行、隐藏段耗时数值都还没有真机数据（见第 5 节）。
+- ~~混合模型「每轮整段重读」这个结论来自源码推导 + 静态审，没有在真机上验证过。~~ **2026-10-22 上午已真机验证**：
+  三轮 `reused == 0`、第 2/3 轮 `reason == 3`，与推导一致（见第 5 节 ①）。
+- ~~温度 0 逐字一致、真实 JNI 运行、隐藏段耗时数值都还没有真机数据。~~ **已真机跑过**：温度 0 三遍逐字相同；
+  隐藏段在 `enable_thinking=false` 时为 0、打开后 256 token / 28.5 s 且正文为 0（见第 5 节 ②③）。
+- **仍未验证**：超时提示的界面截图（设备中途掉线，测例已写好但没跑成，见第 5 节 ④）；以及「纯注意力模型上
+  reused > 0」这条提速证明——目标模型是混合状态模型，本来就拿不到。
 
 ## 8. 证据位置
 
 - 方案：`docs/reviews/2026-10-19-P2-1c/PLAN.md`（第 0 节是两轮整改的逐条映射）。
 - 全量审报告：仓库外 `logs\P2-1c-REVIEW.md`（第一轮）、`P2-1c-REVIEW-r2.md`（第二轮）、`P2-1c-REVIEW-r3.md`（第三轮）。
-- 门禁日志：仓库外 `logs\p2-1c-gate{,2,3,4}.txt`。
-- 真机测例：`app/src/androidTest/java/com/xavierxia/mycelium/hearth/HearthPromptSpeedDeviceTest.kt`。
+- 门禁日志：仓库外 `logs\p2-1c-gate{,2,3,4}.txt`、`p2-1c-gate-tip.txt`（分支尖端）。
+- 真机测例：`app/src/androidTest/java/com/xavierxia/mycelium/hearth/HearthPromptSpeedDeviceTest.kt`（三组读数）
+  与 `HearthHiddenHintDeviceTest.kt`（超时提示 + 截图，未跑成）。
+- 真机原始输出：设备 `files/p2-1c-speed.txt`、`files/p2-1c-zero.txt`、`files/p2-1c-hidden.txt`（内容已抄进第 5 节）。
