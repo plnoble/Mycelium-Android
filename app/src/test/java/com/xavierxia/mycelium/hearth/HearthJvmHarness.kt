@@ -330,6 +330,9 @@ internal class FakeLocalEngine : LocalEngine {
     val stops = AtomicInteger()
     val loadStarted = CountDownLatch(1)
 
+    /** 每一轮收到的缓存键，按调用顺序（P2-1c：炉边该带键，圆桌不该带）。 */
+    val cacheKeys = mutableListOf<String?>()
+
     /** 收集方把这一轮生成立刻拆掉（协程被取消）的次数。 */
     val cancelled = AtomicInteger()
 
@@ -371,10 +374,13 @@ internal class FakeLocalEngine : LocalEngine {
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> = flow {
         generates.incrementAndGet()
+        cacheKeys += parameters.cacheKey
         val gate = generationGate
-        generationGate = null
         try {
-            gate?.await()
+            // 不在这里把闸门置空：置空会让「放行」与「捕获闸门」之间出现竞态，releaseGeneration()
+            // 可能正好落在两者之间而被丢掉，这一轮就永远卡住。complete() 是幂等的，复用同一个
+            // deferred 即可；下一次 holdNextGeneration() 会换成新的。
+            generationGate?.await()
             tokens.forEach { emit(it) }
             completed.incrementAndGet()
         } catch (teardown: CancellationException) {

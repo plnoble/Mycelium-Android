@@ -21,8 +21,15 @@ struct Engine {
     FILE * file = nullptr;
     llama_model * model = nullptr;
     llama_context * context = nullptr;
+    // The tokens of the last prompt that was read to its end (P2-1c). The KV cache holds that prompt,
+    // so a later round whose prompt starts with the same tokens can keep them and read only the new
+    // tail. Kept next to the context so that anything which frees the context forgets it too.
+    std::vector<llama_token> cachedPrompt;
+    // 默认关思考（与之前写死的 false 一致）；只有真机测例会改它，用来对比模板认不认 enable_thinking。
+    bool thinking = false;
     ~Engine() { clear(); }
     void clear() {
+        cachedPrompt.clear();
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (file) fclose(file);
@@ -61,7 +68,7 @@ std::string prompt(const std::string & messages) {
     auto variables = common_json::object();
     variables["messages"] = common_json::parse(messages);
     variables["add_generation_prompt"] = true;
-    variables["enable_thinking"] = false;
+    variables["enable_thinking"] = engine.thinking;
     variables["bos_token"] = piece(vocab, llama_vocab_bos(vocab), true);
     variables["eos_token"] = piece(vocab, llama_vocab_eos(vocab), true);
     jinja::lexer lexer;
@@ -71,10 +78,44 @@ std::string prompt(const std::string & messages) {
     jinja::runtime runtime(context);
     return jinja::runtime::gather_string_parts(runtime.execute(program))->as_string().str();
 }
+// The tokens of a formatted prompt. Both the JVM-side cache decision and the decoding below go
+// through this one function, so the two always describe the same sequence.
+std::vector<llama_token> prompt_tokens(const std::string & formatted) {
+    const auto * vocab = llama_model_get_vocab(engine.model);
+    const int count = -llama_tokenize(vocab, formatted.data(), formatted.size(), nullptr, 0, true, true);
+    if (count <= 0) throw std::runtime_error("Tokenization failed");
+    std::vector<llama_token> tokens(count);
+    if (llama_tokenize(vocab, formatted.data(), formatted.size(), tokens.data(), count, true, true) != count)
+        throw std::runtime_error("Tokenization failed");
+    return tokens;
+}
+// How many leading tokens the two sequences share. This is the only thing that may be kept: the KV
+// entries of a token that is not identical would be wrong state, and a wrong state answers wrongly.
+int shared_prefix(const std::vector<llama_token> & a, const std::vector<llama_token> & b) {
+    const int limit = static_cast<int>(std::min(a.size(), b.size()));
+    int shared = 0;
+    while (shared < limit && a[shared] == b[shared]) shared++;
+    return shared;
+}
+// 除非拥有它的那一轮把原生读数交回调用方，否则把记住的提示丢掉，并把原生内存一起清掉：只在
+// token 向量上作废、把内存留给下一轮，等于让下一轮去复用一份没人担保的状态（全量审必修 3）。
+struct PromptGuard {
+    bool committed = false;
+    ~PromptGuard() {
+        if (committed) return;
+        engine.cachedPrompt.clear();
+        if (engine.context) llama_memory_clear(llama_get_memory(engine.context), true);
+    }
+};
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_begin(JNIEnv *, jobject) { cancelled.store(false); }
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setThinking(JNIEnv *, jobject, jboolean thinking) {
+    // 只给真机测例用（P2-1c 的隐藏段三项）：默认关思考，测例要对比时才打开。
+    engine.thinking = thinking;
+}
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_stop(JNIEnv *, jobject) { cancelled.store(true); }
 extern "C" JNIEXPORT void JNICALL
@@ -104,6 +145,14 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         cp.n_threads_batch = threads;
         cp.n_batch = 128;
         cp.n_ubatch = 128;
+        // 不请求循环状态回退快照（`n_rs_seq`，P2-1c 全量审阻断 1、2）：
+        //  - `llama-batch.cpp` 里 `split_equal()` 断言 `n_ubatch > n_rs_seq + 1`，按窗口配批次会直接 abort；
+        //  - 更要紧的是：这个版本的快照按 ubatch 写，而生成阶段每次只解一个 token，较老的槽不会随
+        //    已生成的 token 整体后移；`seq_rm()` 只核对回退距离是否超过窗口，核不出槽里的状态是否对应
+        //    那个位置。也就是说窗口内的「成功回退」也可能恢复到位置不对的循环状态，而错误状态会答错。
+        // 所以这里保持 0：纯注意力模型仍能按位置精确裁剪 KV（复用照常提速），混合状态模型（qwen35
+        // 这类）的循环侧会让 seq_rm 返回 false，于是整段重读——正确但拿不到提速，交统筹决定是否单开
+        // 一个工作包做「按位置可恢复的检查点」。
         cp.offload_kqv = false;
         cp.op_offload = false;
         cp.abort_callback = abort_decode;
@@ -117,13 +166,32 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
     }
 }
 
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_tokenize(JNIEnv * env, jobject, jbyteArray messages) {
+    try {
+        if (!engine.context) throw std::runtime_error("Load a model first");
+        // Same formatting as generate() below: the caller compares this sequence with the one it
+        // held, so a different formatting here would make the comparison mean nothing.
+        auto tokens = prompt_tokens(prompt(bytes(env, messages)));
+        auto result = env->NewIntArray(static_cast<jsize>(tokens.size()));
+        if (!result) return nullptr;
+        env->SetIntArrayRegion(result, 0, static_cast<jsize>(tokens.size()),
+            reinterpret_cast<const jint *>(tokens.data()));
+        return result;
+    } catch (const std::exception &) {
+        fail(env, "Tokenization failed; check the model chat template and context");
+    } catch (...) { fail(env, "Native tokenization failed"); }
+    return nullptr;
+}
+
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
     JNIEnv * env, jobject, jbyteArray messages, jint maximum, jfloat temperature,
-    jfloat top_p, jint seed, jobject callback) {
+    jfloat top_p, jint seed, jint reuseTokens, jobject callback) {
     try {
         if (!engine.context) throw std::runtime_error("Load a model first");
         if (maximum < 1 || maximum > 8192) throw std::runtime_error("Invalid token limit");
+        PromptGuard guard;
         auto formatted = prompt(bytes(env, messages));
         auto callback_class = env->GetObjectClass(callback);
         auto on_start = env->GetMethodID(callback_class, "onStart", "(Z)V");
@@ -135,23 +203,51 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         env->CallVoidMethod(callback, on_start, thinking);
         if (env->ExceptionCheck()) return nullptr;
         const auto * vocab = llama_model_get_vocab(engine.model);
-        int count = -llama_tokenize(vocab, formatted.data(), formatted.size(), nullptr, 0, true, true);
-        if (count <= 0 || static_cast<uint64_t>(count) + maximum > llama_n_ctx(engine.context))
+        auto tokens = prompt_tokens(formatted);
+        const int count = static_cast<int>(tokens.size());
+        if (static_cast<uint64_t>(count) + maximum > llama_n_ctx(engine.context))
             throw std::runtime_error("Messages and token limit exceed context length");
-        std::vector<llama_token> tokens(count);
-        if (llama_tokenize(vocab, formatted.data(), formatted.size(), tokens.data(), count, true, true) != count)
-            throw std::runtime_error("Tokenization failed");
-        llama_memory_clear(llama_get_memory(engine.context), true);
+        // Keep as much of the leading run as the caller asked for AND the engine itself still holds:
+        // the second half is what makes a wrong number from the caller unable to read KV state that
+        // belongs to different tokens. A round always reads at least one token.
+        // The clamp the plan review asked to pin down: never negative, never past the end of the
+        // prompt, never past what the engine itself still holds (its own prefix is the only state
+        // that may be reused), and always at least one token to read.
+        const int requested = reuseTokens < 0 ? 0 : reuseTokens;
+        int reuse = std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
+        if (reuse > count - 1) reuse = count - 1;
+        if (reuse < 0) reuse = 0;
+        // Reported to the caller so "why did this round still read everything?" has an answer:
+        // 1 = nothing was asked for, 2 = nothing shareable was held, 3 = this build refused to drop
+        // only a suffix (the model's state cannot be rolled back that far).
+        jlong fallback = 0;
+        auto * memory = llama_get_memory(engine.context);
+        bool trimmed = false;
+        if (reuse > 0) trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
+        if (!trimmed) {
+            // Nothing to reuse, or this build cannot drop only a suffix: read the whole prompt, which
+            // is what every round did before this cache existed.
+            llama_memory_clear(memory, true);
+            fallback = requested == 0 ? 1 : (reuse == 0 ? 2 : 3);
+            reuse = 0;
+        }
         auto start = Clock::now();
-        for (int pos = 0; pos < count && !cancelled; pos += 128) {
+        int read = 0;
+        for (int pos = reuse; pos < count && !cancelled; pos += 128) {
             const int length = std::min(128, count - pos);
             auto batch = llama_batch_get_one(tokens.data() + pos, length);
             if (llama_decode(engine.context, batch) != 0) {
                 if (cancelled) break;
+                engine.cachedPrompt.clear();
                 throw std::runtime_error("Prompt evaluation failed");
             }
+            read += length;
         }
         long prompt_ms = elapsed(start);
+        // Only a prompt that was read to its end may be kept: a half-read prompt is not the state the
+        // next round would think it is.
+        if (read == count - reuse) engine.cachedPrompt = tokens;
+        else engine.cachedPrompt.clear();
         auto params = llama_sampler_chain_default_params();
         std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> sampler(
             llama_sampler_chain_init(params), llama_sampler_free);
@@ -178,20 +274,30 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             // Decode the final token as well, so timing includes every generated token.
             auto batch = llama_batch_get_one(&token, 1);
             if (llama_decode(engine.context, batch) != 0) {
-                if (cancelled) break;
+                // 生成中途 decode 失败：状态不明，这一轮必须以失败收场——若把它当成正常读数交回去，
+                // Kotlin 会因为「提示已读完」把它登记成可复用的缓存（方案审 r2 必修 1）。
                 throw std::runtime_error("Generation failed");
             }
         }
-        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0};
-        auto result = env->NewLongArray(5);
-        if (result) env->SetLongArrayRegion(result, 0, 5, values);
+        // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,
+        //  tokens reused from the cache, tokens actually read, why a reuse did not happen}
+        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback};
+        auto result = env->NewLongArray(8);
+        if (!result) return nullptr;                       // 读数没回去：guard 清缓存与内存
+        env->SetLongArrayRegion(result, 0, 8, values);
+        if (env->ExceptionCheck()) return nullptr;         // 同上
+        // 读数真的交到调用方手里了，这一轮的缓存才算数。
+        guard.committed = true;
         return result;
     } catch (const std::exception & e) {
+        // A failed round leaves a prompt that may be half read: forget it instead of letting the next
+        // round reuse a state nobody can vouch for.
+        engine.cachedPrompt.clear();
         // Deliberately exclude template/message excerpts from error output.
         const std::string message = e.what();
         fail(env, message == "Messages and token limit exceed context length" ? message.c_str() :
             "Generation failed; check the model chat template and context");
-    } catch (...) { fail(env, "Native generation failed"); }
+    } catch (...) { engine.cachedPrompt.clear(); fail(env, "Native generation failed"); }
     return nullptr;
 }
 

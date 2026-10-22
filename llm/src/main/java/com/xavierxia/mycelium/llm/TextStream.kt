@@ -23,16 +23,38 @@ internal class Utf8Stream {
 /** Streaming tag filter: never exposes partial tags or unterminated reasoning. */
 internal class ThinkingFilter(private var hidden: Boolean = false) {
     private var pending = ""
+
+    /**
+ * Whether the next pushed text starts inside a hidden span (P2-1c, step E). The engine reads this
+ * *before* pushing a native token to attribute that token.
+ */
+    val isHidden: Boolean get() = hidden
+
+    /**
+     * Whether **any** part of the text pushed last was inside a hidden span (P2-1c, step E). This is
+     * the attribution the engine records: a token that opens the span, one that closes it, and a
+     * token that carries a whole hidden segment between the tags all count, because at least part of
+     * their text was hidden. Set by every [push]; no generation is changed by it.
+     */
+    var sawHiddenText: Boolean = false
+        private set
+
     fun push(text: String): String {
+        sawHiddenText = hidden
         pending += text
         val output = StringBuilder()
         while (pending.isNotEmpty()) {
+            // 这一轮循环消耗/保留的文本只要处在隐藏状态里，这个 token 就算隐藏（E 的口径）。
+            sawHiddenText = sawHiddenText || hidden
             val marker = if (hidden) "</think>" else "<think>"
             val index = pending.indexOf(marker)
             if (index >= 0) {
                 if (!hidden) output.append(pending.substring(0, index))
                 pending = pending.substring(index + marker.length)
                 hidden = !hidden
+                // 进入隐藏状态的那个 token 也算隐藏（哪怕它在标签后面什么都没剩，比如单发的开标签），
+                // 闭标签同理由上一轮循环的 hidden 覆盖（方案审 r2 必修 4）。
+                if (hidden) sawHiddenText = true
             } else {
                 val retained = (1 until marker.length).lastOrNull { pending.endsWith(marker.take(it)) } ?: 0
                 if (!hidden) output.append(pending.dropLast(retained))

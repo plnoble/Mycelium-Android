@@ -48,7 +48,10 @@ verifyOfflineDependencies 对 :llm / :model-api 的传递运行时依赖采用�
 本地实现为 LocalModelEngine.shared，同一进程仅一个模型，互斥覆盖加载、生成、取消后的收尾和卸载。
 取消通过原子标志接入 llama CPU abort callback；停止后等待 JNI 返回才允许卸载，防止使用已释放的内存。
 加载和推理在 Dispatchers.IO；JNI 的模型和 FILE*、Kotlin 的描述符均在卸载时释放。
-默认 6 线程、8192 上下文、n_gpu_layers=0。每次生成先清空 KV/循环状态。
+默认 6 线程、8192 上下文、n_gpu_layers=0。生成前不再无条件清空 KV/循环状态：同一段对话里，上一轮
+完整读完的那段提示会被保留，这一轮只按最长公共前缀裁剪、读剩下的新 token（P2-1c）。调用方在
+`GenerationParameters.cacheKey` 里给出「这段提示属于哪个人物的哪段对话」；不传键（默认 `null`）时
+行为与从前完全一样——每轮整段重读，Kotlin 侧也不读、也不写缓存归属。
 
 聊天模板来自 GGUF tokenizer.chat_template，用同版本 Jinja 渲染 system/user/assistant。
 模板缺失或不支持时明确失败，不使用硬编码厂商格式。传 enable_thinking=false；
