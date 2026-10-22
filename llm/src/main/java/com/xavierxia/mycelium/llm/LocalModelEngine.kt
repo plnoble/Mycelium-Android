@@ -76,6 +76,8 @@ internal interface EngineBridge {
 internal class NativeBridge : EngineBridge {
     init { System.loadLibrary("mycelium_llm") }
     external override fun begin()
+    /** 只给真机测例用：打开后模板按「思考」渲染，默认关。 */
+    external fun setThinking(thinking: Boolean)
     external override fun stop()
     external override fun load(fd: Int, threads: Int, context: Int)
     external override fun unload()
@@ -123,6 +125,14 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     @Volatile override var lastStats: GenerationStats? = null
         private set
     override fun stop() { stopRequested.set(true); if (nativeDelegate.isInitialized()) native.stop() }
+
+    /**
+     * 只给真机测例用（P2-1c 隐藏段三项）：打开后模板按「思考」渲染。默认关，与之前写死的行为一致；
+     * 测例跑完必须关回去。
+     */
+    suspend fun setThinking(thinking: Boolean) = gate.withLock {
+        (native as? NativeBridge)?.setThinking(thinking)
+    }
 
     /** Opening and loading happen off the UI thread. The descriptor stays open until unload. */
     override suspend fun load(model: ModelInfo, options: EngineOptions, open: () -> ModelFile) {

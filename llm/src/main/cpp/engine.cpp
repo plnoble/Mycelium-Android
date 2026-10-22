@@ -25,6 +25,8 @@ struct Engine {
     // so a later round whose prompt starts with the same tokens can keep them and read only the new
     // tail. Kept next to the context so that anything which frees the context forgets it too.
     std::vector<llama_token> cachedPrompt;
+    // 默认关思考（与之前写死的 false 一致）；只有真机测例会改它，用来对比模板认不认 enable_thinking。
+    bool thinking = false;
     ~Engine() { clear(); }
     void clear() {
         cachedPrompt.clear();
@@ -66,7 +68,7 @@ std::string prompt(const std::string & messages) {
     auto variables = common_json::object();
     variables["messages"] = common_json::parse(messages);
     variables["add_generation_prompt"] = true;
-    variables["enable_thinking"] = false;
+    variables["enable_thinking"] = engine.thinking;
     variables["bos_token"] = piece(vocab, llama_vocab_bos(vocab), true);
     variables["eos_token"] = piece(vocab, llama_vocab_eos(vocab), true);
     jinja::lexer lexer;
@@ -109,6 +111,11 @@ struct PromptGuard {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_begin(JNIEnv *, jobject) { cancelled.store(false); }
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setThinking(JNIEnv *, jobject, jboolean thinking) {
+    // 只给真机测例用（P2-1c 的隐藏段三项）：默认关思考，测例要对比时才打开。
+    engine.thinking = thinking;
+}
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_stop(JNIEnv *, jobject) { cancelled.store(true); }
 extern "C" JNIEXPORT void JNICALL

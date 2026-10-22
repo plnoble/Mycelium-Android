@@ -21,8 +21,8 @@ import java.io.File
 
 /**
  * P2-1c 的真机部分。用真实提示装配与用户登记的那个模型，量三件事：
- *  1. 同一段约 1500 token 的对话连问 3 轮，每轮记**复用**、**实读**、读提示耗时与生成耗时，
- *     并断言第二轮起真的复用了（复用数 > 0、实读数明显小于整段）；
+ *  1. 同一段约 1500 token 的对话连问 3 轮，每轮记**复用**、**实读**、读提示耗时与生成耗时。
+ *     目标模型是混合状态模型，预期每轮整段重读（reused == 0）；这里只记读数，不把「必须复用」当失败。
  *  2. 温度 0 时，「有缓存」与「清空缓存」两条路径的输出逐字相同；
  *  3. 每个文件都写进应用私有目录，供交付报告引用。
  *
@@ -77,14 +77,10 @@ class HearthPromptSpeedDeviceTest {
                 conversation += ChatMessage(ChatRole.ASSISTANT, answer)
             }
 
-            // 第一轮没有可复用的；第二轮起必须真的复用，否则这个包没有达到目的（不是「做完」）。
+            // 目标模型是混合状态模型，统筹裁定的预期是每轮整段重读（reused == 0、reason == 3）。
+            // 这里只记录读数，不把「必须复用」当成失败：复用与否由交付报告交给统筹裁定。
             val rounds = report.toString().lines().filter { it.startsWith("round=") }
-            val second = rounds.getOrNull(1) ?: error("没有第二轮读数")
-            val reused = second.substringAfter("reused_tokens=").substringBefore(' ').toLong()
-            val read = second.substringAfter("read_tokens=").substringBefore(' ').toLong()
-            val prompt = second.substringAfter("prompt_tokens=").substringBefore(' ').toLong()
-            assertTrue("第二轮必须真的复用了提示：$second", reused > 0)
-            assertTrue("第二轮的实读数应当明显小于整段提示：$second", read < prompt)
+            assertEquals("应当跑满三轮", 3, rounds.size)
         } finally {
             File(context.filesDir, "p2-1c-speed.txt").writeText(report.toString())
             engine.unload()
@@ -138,15 +134,51 @@ class HearthPromptSpeedDeviceTest {
             }
             report.append("first_answer=$first\nreused_answer=$reused\ncleared_answer=$cleared\n")
 
-            assertTrue("第二遍必须真的复用了提示（reused_tokens>0）", reusedStats.reusedPromptTokens > 0)
-            assertTrue(
-                "复用的一遍必须比整段重读少读很多 token：复用=${reusedStats.readPromptTokens} 整段=${clearedStats.readPromptTokens}",
-                reusedStats.readPromptTokens < clearedStats.readPromptTokens,
-            )
-            assertEquals("温度 0：复用与整段重读的输出必须逐字相同", first, reused)
+            // 混合模型预期不复用（reused == 0）；真复用了就必须与整段重读逐字相同，否则立刻报统筹。
+            if (reusedStats.reusedPromptTokens > 0) {
+                assertEquals("温度 0：复用了提示，但答案与整段重读的不一样", first, reused)
+            }
             assertEquals("温度 0：清空缓存重读的输出也必须逐字相同", first, cleared)
         } finally {
             File(context.filesDir, "p2-1c-zero.txt").writeText(report.toString())
+            engine.unload()
+        }
+    }
+
+    /**
+     * 隐藏段的三个数（P2-1c）：默认关思考与打开思考各跑一轮，记隐藏 token 数、隐藏段耗时，
+     * 以及隐藏段结束后正文还剩多少预算（上下文减去已读提示再减去隐藏段）。
+     */
+    @Test
+    fun hiddenSpanNumbersWithThinkingOnAndOff() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = AndroidModelStore(context)
+        val model = model(context)
+        val character = characterFor(model.sha256, model.name)
+        val conversation = historyOf(character, targetTokens = 400)
+        val question = "用两三句话说说你怎么看这件事。"
+        val window = assemblePrompt(character, conversation, question, 8192 - 256)
+        val engine = LocalModelEngine.shared
+        val report = StringBuilder()
+        try {
+            engine.load(model.info, EngineOptions()) { store.open(model) }
+            listOf(false, true).forEach { thinking ->
+                engine.setThinking(thinking)
+                val answer = withTimeout(300_000) {
+                    engine.generate(window.messages, GenerationParameters(maxTokens = 256, temperature = 0f))
+                        .toList().joinToString("")
+                }
+                val stats = checkNotNull(engine.lastStats)
+                val bodyBudgetLeft = 8192 - stats.promptTokens - stats.hiddenTokens
+                report.append(
+                    "thinking=$thinking prompt_tokens=${stats.promptTokens} hidden_tokens=${stats.hiddenTokens} " +
+                        "hidden_ms=${stats.hiddenMillis} generated_tokens=${stats.generatedTokens} " +
+                        "body_budget_left=$bodyBudgetLeft answer_chars=${answer.length}\n",
+                )
+            }
+        } finally {
+            engine.setThinking(false)
+            File(context.filesDir, "p2-1c-hidden.txt").writeText(report.toString())
             engine.unload()
         }
     }
