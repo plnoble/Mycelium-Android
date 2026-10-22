@@ -76,10 +76,19 @@ class HearthHiddenHintDeviceTest {
             vm.hiddenWaitHintMillis = 8_000L
 
             compose.onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("帮我理一理这件事 $tag")
+            // 收起输入法再发：截图是交付证据，键盘挡住半屏就没法用。BACK 先关输入法（这一步一定
+            // 还在，刚输入过），不会退出页面。
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(
+                android.view.KeyEvent.KEYCODE_BACK,
+            )
+            compose.waitForIdle()
             compose.onNodeWithText("发送").performClick()
 
             val hint = "这一轮到现在还没有可显示的内容"
             compose.waitUntil(90_000) { compose.onAllNodesWithText(hint, substring = true).fetchSemanticsNodes().isNotEmpty() }
+            // 让提示与「停止」按钮稳定下来再截，避免截到过渡中的一帧。
+            compose.waitForIdle()
+            Thread.sleep(600)
 
             val bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
             FileOutputStream(File(context.filesDir, "p2-1c-hint.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
