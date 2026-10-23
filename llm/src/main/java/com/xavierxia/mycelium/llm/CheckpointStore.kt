@@ -1,16 +1,19 @@
 package com.xavierxia.mycelium.llm
 
 /**
- * 一份检查点（P2-1d）：原生在「用户这一轮结束、助手角色头之前」那一刻存下来的**循环层状态**。
+ * 一份检查点（P2-1d）：原生在「用户这一轮结束、助手角色头之前」那一刻存下来的**整份状态**。
  *
- * 只保存字节，不持有任何原生指针——卸载模型以后它不会悬空；要到恢复时才交给原生。
+ * 从 2026-10-23 夜起，**字节归原生**（`NativeBridge.takeCheckpointHandle()` 交回的句柄），这里只留
+ * 元数据：位置、句柄、字节数、插入序号。这样交给 Kotlin 时不必再拷一份几十 MB 的 `ByteArray`，
+ * 托管堆峰值少一份；恢复时原生直接从那块内存装回，也不再有一次反向拷贝。
  *
  * [pos] 是这份检查点对应的 token 位置（提示里第几个 token）。恢复时只能用「位置不超过本轮公共前缀」
  * 的那一份，否则恢复出来的状态对应的是别的位置，模型会答非所问。
  */
 internal class Checkpoint(
     val pos: Int,
-    val bytes: ByteArray,
+    val handle: Int,
+    val bytes: Long,
     /** 同一位置可能被重复存（比如同一轮被重跑）；插入序号用来在淘汰时区分先后。 */
     val sequence: Long,
 )
@@ -24,12 +27,16 @@ internal class Checkpoint(
  *  3. **作废**：换人物 / 换会话 / 换模型 / 卸载 / 停止 / 出错，调用方按键作废或整个清空。
  *  4. **记账**：当前总占用、份数，给统计与真机日志用。
  *
+ * **谁释放原生内存**：字节归原生以后，「从仓库里移除」必须同时 `releaseCheckpointHandle()`，否则那块
+ * 内存永远回不去。所以每条移除路径都会调 [onDrop]——仓库自己不碰原生，由引擎注入回调。
+ *
  * **并发**：只由持有引擎那一把 `gate` 锁的代码调用（本来每一轮就是 single-flight），所以这里不再
  * 自己加锁；别在锁外调用它。这一点写在这里是因为检查点跨轮次存活，很容易误以为它是线程安全的。
  */
 internal class CheckpointStore(
     private val maxPerKey: Int = MAX_PER_KEY,
     private val maxTotalBytes: Long = MAX_TOTAL_BYTES,
+    private val onDrop: (Int) -> Unit = {},
 ) {
     private val byKey = LinkedHashMap<String, MutableList<Checkpoint>>()
     private var nextSequence = 0L
@@ -40,7 +47,7 @@ internal class CheckpointStore(
     }
 
     /** 当前总占用（字节）。 */
-    val totalBytes: Long get() = byKey.values.sumOf { list -> list.sumOf { it.bytes.size.toLong() } }
+    val totalBytes: Long get() = byKey.values.sumOf { list -> list.sumOf { it.bytes } }
 
     /** 当前份数（所有键加起来）。 */
     val size: Int get() = byKey.values.sumOf { it.size }
@@ -49,23 +56,24 @@ internal class CheckpointStore(
     fun countFor(key: String): Int = byKey[key]?.size ?: 0
 
     /**
-     * 存一份。返回是否真的存下了：单份就超过总上限时**不存**（返回 false），交给调用方记日志——
-     * 直接拒绝比先塞进去再淘汰自己更清楚。
+     * 存一份。返回是否真的存下了：单份就超过总上限时**不存**（返回 false），交给调用方记日志并
+     * **释放它自己那份句柄**——直接拒绝比先塞进去再淘汰自己更清楚。
      *
-     * **先腾空间、再拷贝**（方案审必修项 6）：第一版是「先 `copyOf()` 再淘汰」，于是淘汰旧那份之前
-     * 堆里同时有旧+新两份（原生缓冲与 JNI 数组另算），峰值比 `totalBytes` 高得多。现在先用要存的
-     * 字节数腾地方，腾不出来就不拷。
+     * 顺序是「先腾空间、再记账」：`incoming` 来自原生（`checkpointHandleBytes`），调用方在交进来之前
+     * 已经知道大小，因此这里不需要为了算大小去碰那句内存。
      */
-    fun put(key: String, pos: Int, bytes: ByteArray): Boolean {
+    fun put(key: String, pos: Int, handle: Int, bytes: Long): Boolean {
         require(pos >= 0) { "检查点位置不能为负" }
-        if (bytes.isEmpty()) return false
-        val incoming = bytes.size.toLong()
-        if (incoming > maxTotalBytes) return false
-        // 全量审 R2（非阻断退化）：**先把当前键腾到位再算全局**。第一版先全局淘汰再处理本键，
-        // 于是「同一键再存一份」时旧的那份还被算在总量里，预算不够就把别的键挤掉了（实测
-        // A:40、B:40、B:40、预算 100 ⇒ A 被无必要地删掉）。顺序反过来就没有这个假淘汰。
+        // 零字节/负字节不是「太大」而是「不可用」：按拒收处理（返回 false），不抛异常——调用方要能
+        // 把它当成「这份没存成」继续跑，而不是让生成失败。
+        if (bytes <= 0) return false
+        if (bytes > maxTotalBytes) return false
+        val incoming = bytes
+        // 全量审 R2（非阻断退化）：**先把当前键腾到位再算全局**。先全局淘汰再处理本键的话，
+        // 「同一键再存一份」时旧的那份还被算在总量里，预算不够就把别的键挤掉了
+        // （实测 A:40、B:40、B:40、预算 100 ⇒ A 被无必要地删掉）。
         byKey[key]?.let { existing ->
-            while (existing.size >= maxPerKey) existing.removeAt(0)
+            while (existing.size >= maxPerKey) drop(existing.removeAt(0))
             if (existing.isEmpty()) byKey.remove(key)
         }
         // 再按总量全局淘汰（跨键，淘汰最旧的），腾到「再放一份也放得下」。
@@ -74,14 +82,45 @@ internal class CheckpointStore(
                 .filter { it.value.isNotEmpty() }
                 .minByOrNull { entry -> entry.value.minOf { it.sequence } }
                 ?: break
-            oldestKey.value.removeAt(0)
+            drop(oldestKey.value.removeAt(0))
             if (oldestKey.value.isEmpty()) byKey.remove(oldestKey.key)
         }
         if (totalBytes + incoming > maxTotalBytes) return false
         // 全量审必修项 9：淘汰完**重新**拿当前键的 list（它可能在上面被整个 remove 掉了）。
         val list = byKey.getOrPut(key) { mutableListOf() }
-        list += Checkpoint(pos, bytes.copyOf(), ++nextSequence)
+        list += Checkpoint(pos, handle, bytes, ++nextSequence)
         return true
+    }
+
+    /**
+     * 把 [from] 名下的检查点**原样改挂**到 [to]（P2-1d，2026-10-23 夜）。
+     *
+     * 为什么需要它：新会话第一轮还没有正式编号，缓存键里暂时用「临时会话」顶替；这一轮存进仓库之后
+     * 会话才拿到正式编号，于是第二轮的键变了——仓库按「换了键就是换了一段提示」处理，把第一轮那份
+     * 当分叉作废掉，第二轮的检查点就永远用不上（真机读数：第 2 轮 `reason=5`，第 3 轮才恢复正常）。
+     * 这里让调用方在**拿到正式编号的那一刻**把缓存与检查点一起改挂过去，第二轮就接上了。
+     *
+     * 合并规则与 [put] 一致：每个键最多 [maxPerKey] 份（保留位置最大、同位置较新的），总量超上限时
+     * 按插入序号淘汰最旧的。`from == to` 或 `from` 没有内容时是空操作。
+     */
+    fun rekey(from: String, to: String) {
+        if (from == to) return
+        val moving = byKey.remove(from) ?: return
+        if (moving.isEmpty()) return
+        val target = byKey.getOrPut(to) { mutableListOf() }
+        // 交过来的那几份是「更早存的」，但内容与位置都是对的：按插入顺序排序后再限量。
+        target += moving
+        target.sortBy { it.sequence }
+        while (target.size > maxPerKey) drop(target.removeAt(0))
+        if (target.isEmpty()) byKey.remove(to)
+        while (totalBytes > maxTotalBytes && byKey.isNotEmpty()) {
+            val oldestKey = byKey.entries
+                .filter { it.value.isNotEmpty() }
+                .minByOrNull { entry -> entry.value.minOf { it.sequence } }
+                ?: break
+            drop(oldestKey.value.removeAt(0))
+            if (oldestKey.value.isEmpty()) byKey.remove(oldestKey.key)
+        }
     }
 
     /**
@@ -95,7 +134,10 @@ internal class CheckpointStore(
      */
     fun invalidateBeyond(key: String, validPrefix: Int) {
         val list = byKey[key] ?: return
-        list.removeAll { it.pos > validPrefix }
+        val kept = list.filter { it.pos <= validPrefix }
+        list.filter { it.pos > validPrefix }.forEach { drop(it) }
+        list.clear()
+        list += kept
         if (list.isEmpty()) byKey.remove(key)
     }
 
@@ -111,26 +153,29 @@ internal class CheckpointStore(
 
     /** 作废一个键（换人物 / 换会话 / 换模型 / 停止 / 出错）。 */
     fun invalidate(key: String) {
-        byKey.remove(key)
+        byKey.remove(key)?.forEach { drop(it) }
     }
 
     /** 全部作废（卸载模型、引擎清理）。 */
     fun clear() {
+        byKey.values.forEach { list -> list.forEach { drop(it) } }
         byKey.clear()
+    }
+
+    private fun drop(checkpoint: Checkpoint) {
+        onDrop(checkpoint.handle)
     }
 
     companion object {
         /**
-         * 每个缓存键最多留几份（2026-10-23 统筹裁定 + Codex R2 必修项 4）：
-         * 设为 1。对话只前进，同一会话里旧检查点直接覆盖；换会话整批作废（与 P2-1c cacheOwner 一致）。
+         * 每个缓存键只留**最新一份**：真机实测整份状态 54–68 MB（1412 token 时 94 MB），留多份在手机上
+         * 没有意义——下一轮能用上的永远是最新那份，旧的只会在分叉时被作废。
          */
         const val MAX_PER_KEY = 1
 
         /**
-         * 所有检查点加起来的上限：300 **MiB**（2026-10-23 统筹裁定实测整份约 94.4 MiB 后的上限）。
-         *
-         * 约可保留 2~3 份快照。主动预算检查是防 OOM 的主防线（Codex R2 必修项 1/2：Android 16 起
-         * onTrimMemory RUNNING_* 级别不再下发，不能靠回调兜底）。
+         * 全部键加起来的上限 300 MiB：按实测单份约 55–65 MB，能放下 4 份左右（4 个不同会话），
+         * 再多就按插入顺序淘汰最旧的。这是「放内存」这条路的硬边界（统筹裁定 2026-10-23 第 2 条）。
          */
         const val MAX_TOTAL_BYTES = 300L * 1024 * 1024
     }

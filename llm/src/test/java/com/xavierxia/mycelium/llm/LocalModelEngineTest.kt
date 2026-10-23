@@ -27,7 +27,8 @@ class LocalModelEngineTest {
         override fun begin() { stopped.set(false) }
         override fun stop() { stopped.set(true) }
         override fun load(fd: Int, threads: Int, context: Int) {
-            assertEquals(6, threads)
+            // 默认线程数在 2026-10-23 夜改成 8（真机扫描：8 线程首字最快）；这里同时钉住「默认值真的交到原生」。
+        assertEquals(EngineOptions().clampedThreads(), threads)
             assertEquals(8192, context)
             if (blockingLoad) waitForStop()
         }

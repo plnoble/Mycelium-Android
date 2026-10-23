@@ -31,12 +31,13 @@ class CheckpointFlowTest {
      * 假原生桥：记录每一次检查点相关的调用，并按规定回答。
      *
      * @param checkpointable `canCheckpoint()` 的回答（混合/循环 = true）。
-     * @param saveBytes 跨过落点时交回来的字节；null = 存不下来。
+     * @param saveBytes 跨过落点时交回来的字节数；null = 存不下来。
      * @param restoreOk `restoreCheckpoint()` 的回答。
      */
     private open class Recorder(
         private val checkpointable: Boolean = true,
-        private val saveBytes: ByteArray? = ByteArray(16) { 3 },
+        /** 这一轮「存下来」的大小；null 表示没存成。字节本体留在原生，测例只模拟句柄。 */
+        private val saveBytes: Long? = 16L,
         private val restoreOk: Boolean = true,
         /** 这一轮是否以「被停止」收场（原生正常返回 stopped=1）。 */
         private val stopped: Boolean = false,
@@ -45,7 +46,10 @@ class CheckpointFlowTest {
         var saveAtSeen: Int = -1
         var restorePos: Int = -1
         var lastReuse: Int = -1
-        private var pending: ByteArray? = null
+        private var pending: Long? = null
+        private val handles = mutableMapOf<Int, Long>()
+        private var nextHandle = 100
+        val released = mutableListOf<Int>()
         private var pendingPos: Int = -1
 
         override fun begin() {}
@@ -59,17 +63,28 @@ class CheckpointFlowTest {
             return checkpointable
         }
 
-        override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean {
+        override fun restoreCheckpointHandle(handle: Int, pos: Int): Boolean {
             calls += "restore@$pos"
             restorePos = pos
+            if (handles[handle] == null) return false
             return restoreOk
         }
 
-        override fun takeCheckpoint(): ByteArray? {
+        override fun takeCheckpointHandle(): Int {
             calls += "take"
-            val out = pending
+            val size = pending ?: return -1
             pending = null
-            return out
+            val handle = nextHandle++
+            handles[handle] = size
+            return handle
+        }
+
+        override fun checkpointHandleBytes(handle: Int): Long = handles[handle] ?: -1L
+
+        override fun releaseCheckpointHandle(handle: Int) {
+            calls += "release"
+            released += handle
+            handles.remove(handle)
         }
 
         override fun takeCheckpointPos(): Int {
@@ -414,13 +429,52 @@ class CheckpointFlowTest {
         assertEquals("取消收尾也要如实报原因 6", 6L, engine.lastStats?.reuseFallbackReason)
     }
 
+    // ---- 改挂（2026-10-23 夜，任务书第一段第 2 条）------------------------------------------
+
+    @Test
+    fun rekeyingMakesTheSecondRoundReuseTheFirstRound() {
+        // 真机根因：新会话第一轮用临时编号做键，落库后换成正式编号，第二轮的检查点因此用不上
+        //（read=160/160，reason=5）。改挂之后第二轮必须真的复用第一轮的落点。
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine, cacheKey = "temp-1")
+            val (count, _) = engine.checkpointUsage()
+            assertEquals("第一轮应当存下一份", 1, count)
+            engine.rekeyCheckpoints("temp-1", "conv-1")
+            bridge.calls.clear()
+            round(engine, cacheKey = "conv-1")
+        }
+
+        assertEquals("改挂之后第二轮不该回退", 0L, engine.checkpointFallbackReason)
+        assertTrue("第二轮应当从第一轮的落点续读：${bridge.calls}", bridge.calls.any { it.startsWith("restore") })
+    }
+
+    @Test
+    fun rekeyingAnEmptyOrIdenticalKeyIsANoOp() {
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            engine.rekeyCheckpoints("nothing", "conv-1")
+            round(engine, cacheKey = "conv-1")
+            val (count, _) = engine.checkpointUsage()
+            assertEquals("空键改挂不该变出检查点", 1, count)
+            engine.rekeyCheckpoints("conv-1", "conv-1")
+            assertEquals("同键改挂是空操作", 1, engine.checkpointUsage().first)
+        }
+    }
+
     /** 只在测例里用：占用读数现在是 suspend（走引擎锁）。 */
     private fun LocalModelEngine.checkpointUsageSuspendForTest(): Int = runBlocking { checkpointUsage().first }
 
     @Test
     fun whenTheHeapIsTightTheRoundSkipsSavingButStillGenerates() {
         // R2 必修项 2（P1）：托管堆余量不够时**跳过这次优化**，绝不让生成因为存检查点而失败。
-        val bridge = Recorder(saveBytes = ByteArray(1024) { 7 })
+        val bridge = Recorder(saveBytes = 1024L)
         val engine = engineWith(bridge)
         engine.checkpointEnabled = true
         engine.heapHeadroomProbe = { 1L } // 只剩 1 字节余量：任何一份都放不下

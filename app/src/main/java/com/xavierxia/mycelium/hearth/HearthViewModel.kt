@@ -1298,6 +1298,16 @@ class HearthViewModel @JvmOverloads constructor(
                 stillCommittable(turn, token) && owned
             }
         }
+        // P2-1d：新会话第一轮用的是「临时会话」当缓存键，落库之后才拿到正式编号。第二轮开始键变了，
+        // 引擎本来会把上一轮的缓存与检查点当分叉作废（真机读数：第 2 轮 reason=5、整段重读）。
+        // 这里在拿到正式编号的这一刻把两者一起改挂过去，第 2 轮就能接上。
+        // 测试模式（无痕）没有正式编号，`turn.conversationId` 与 `conversationId` 都是 null，不会走到这里。
+        if (turn.conversationId == null && conversationId != null && turn.cacheKey != null && !turn.chosen.isCloud) {
+            val rekeyed = cacheKeyFor(turn.character, turn.mode, conversationId, turn.chosen)
+            rekeyed?.let { after ->
+                runCatching { engine.rekeyCheckpoints(turn.cacheKey, after) }
+            }
+        }
         if (conversationId == null) {
             // Test mode (or a turn that was abandoned while the write waited): the turn lives on this
             // screen only, and only while it is still this turn.

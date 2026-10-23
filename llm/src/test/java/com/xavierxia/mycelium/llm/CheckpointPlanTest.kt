@@ -17,7 +17,8 @@ class CheckpointPlanTest {
 
     private fun store(vararg entries: Triple<String, Int, Int>): CheckpointStore {
         val store = CheckpointStore()
-        entries.forEach { (key, pos, fill) -> store.put(key, pos, ByteArray(fill) { 1 }) }
+        var handle = 1
+        entries.forEach { (key, pos, size) -> store.put(key, pos, handle++, size.toLong()) }
         return store
     }
 

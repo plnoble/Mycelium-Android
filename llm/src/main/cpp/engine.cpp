@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <map>
 #include <array>
 #include <algorithm>
 #include "llama.h"
@@ -32,6 +33,11 @@ struct Engine {
     // 状态只能前进，读过去就回不去，所以**必须在 prefill 循环里**存，而不是生成结束再补。
     std::vector<uint8_t> pendingCheckpoint;
     int pendingCheckpointPos = -1;
+    // P2-1d（2026-10-23 夜，任务书第一段第 2 条）：检查点的字节**归原生**，Kotlin 只拿句柄与元数据。
+    // 好处：不必为了交给 Kotlin 再拷一份 JByteArray（真机实测那次拷贝 13-31 ms，而且让托管堆峰值
+    // 多出一份几十 MB）；恢复时也直接从原生内存装回，省掉反向拷贝与 Kotlin 侧那一份分配。
+    std::map<int, std::vector<uint8_t>> checkpointStates;
+    int nextCheckpointHandle = 1;
     // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
     // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
     long timing[5] = {0, 0, 0, 0, 0};
@@ -44,6 +50,7 @@ struct Engine {
         // 全量审必修项 3：clear() 必须彻底释放 vector 容量，不能只把 size 变 0 却保留几十 MB 原生内存。
         std::vector<uint8_t>().swap(pendingCheckpoint);
         pendingCheckpointPos = -1;
+        checkpointStates.clear();
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (file) fclose(file);
@@ -409,15 +416,15 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_saveCheckpoint(JNIEnv * env, jobjec
  * 任何一步失败都返回 false，调用方据此清理不可信状态、从 0 重读并报原因 6。
  */
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
-    JNIEnv * env, jobject, jbyteArray data, jint pos) {
+Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpointHandle(
+    JNIEnv *, jobject, jint handle, jint pos) {
     try {
-        if (!engine.context || !data || pos < 0) return JNI_FALSE;
-        const jsize size = env->GetArrayLength(data);
-        if (size <= 0) return JNI_FALSE;
-        std::vector<uint8_t> buffer(static_cast<size_t>(size));
-        env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte *>(buffer.data()));
-        if (env->ExceptionCheck()) return JNI_FALSE;
+        if (!engine.context || pos < 0) return JNI_FALSE;
+        const auto found = engine.checkpointStates.find(handle);
+        if (found == engine.checkpointStates.end()) return JNI_FALSE;
+        // 直接读原生里那一份，不再从 Kotlin 拷一份 ByteArray 进来。
+        const auto & buffer = found->second;
+        if (buffer.empty()) return JNI_FALSE;
         auto * memory = llama_get_memory(engine.context);
         // 统筹裁定的三步恢复（2026-10-23；取代第 7 节「禁止先删」那条旧指令）：
         // 1) 整段清空序列 0 —— 不留任何尾巴，绕开循环层「rollback >= 1」的限制；失败就不许往下装。
@@ -448,33 +455,36 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_canCheckpoint(JNIEnv *, jobject) {
         ? JNI_TRUE : JNI_FALSE;
 }
 
-/*
- * P2-1d 的 S2：把刚才那一轮在「跨过 checkpointPos」时存下的检查点取走（取走后清空）。
+/**
+ * P2-1d：把刚才那一轮存下的检查点**留在原生内存**里，返回一个句柄（取不到给 -1）。
  *
- * 存的动作发生在 prefill 循环里（状态只能前进，读过去就回不去了），所以字节先放在引擎里，
- * 由 Kotlin 在这轮结束后取走并记进检查点仓库；取不到给 null。
+ * 与旧版 `takeCheckpoint()` 的区别：不再新建 JByteArray，字节直接进 `checkpointStates`，Kotlin 只
+ * 拿这个整数。这样既省掉一次几十 MB 的拷贝，也让托管堆峰值少一份（任务书第一段第 2 条）。
+ * 句柄由 Kotlin 的检查点仓库保管，作废/淘汰时必须调 `releaseCheckpointHandle()` 释放。
  */
-extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobject) {
-    if (engine.pendingCheckpoint.empty()) return nullptr;
-    const auto size = static_cast<jsize>(engine.pendingCheckpoint.size());
-    auto out = env->NewByteArray(size);
-    if (!out) {
-        // 全量审 R2 必修项 2：分配 JByteArray 失败时**也必须释放原生缓冲**，否则这份几十 MB 的
-        // vector 会一直挂着（仓库里查不到、内存里却占着）。
-        std::vector<uint8_t>().swap(engine.pendingCheckpoint);
-        engine.pendingCheckpointPos = -1;
-        return nullptr;
-    }
-    const auto t_copy = Clock::now();
-    env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
-    engine.timing[4] = elapsed(t_copy);
-    // 字节取走，位置也一起作废：下一次没存就是「没有待取的」。
-    // 全量审必修项 3：取走后彻底释放 vector 内存，不让几十 MB 留在原生堆上。
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointHandle(JNIEnv *, jobject) {
+    if (engine.pendingCheckpoint.empty()) return -1;
+    const int handle = engine.nextCheckpointHandle++;
+    engine.checkpointStates[handle] = std::move(engine.pendingCheckpoint);
+    // move 之后 pending 的内容已归新那份，这里只把容量还回去，避免留下空壳占着内存。
     std::vector<uint8_t>().swap(engine.pendingCheckpoint);
     engine.pendingCheckpointPos = -1;
-    if (env->ExceptionCheck()) return nullptr;
-    return out;
+    return handle;
+}
+
+/** 某个句柄现在占多少字节（元数据用；句柄不存在给 -1）。 */
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_checkpointHandleBytes(JNIEnv *, jobject, jint handle) {
+    const auto found = engine.checkpointStates.find(handle);
+    if (found == engine.checkpointStates.end()) return -1;
+    return static_cast<jlong>(found->second.size());
+}
+
+/** 释放一个句柄占的原生内存（作废、淘汰、卸载都要调）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, jobject, jint handle) {
+    engine.checkpointStates.erase(handle);
 }
 
 /**
