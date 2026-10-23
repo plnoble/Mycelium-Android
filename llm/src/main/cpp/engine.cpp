@@ -72,13 +72,13 @@ std::string piece(const llama_vocab * vocab, llama_token token, bool special) {
     if (n < 0) throw std::runtime_error("Token conversion failed");
     return std::string(buffer.data(), n);
 }
-std::string prompt(const std::string & messages) {
+std::string prompt(const std::string & messages, bool add_generation_prompt = true) {
     const char * source = llama_model_chat_template(engine.model, nullptr);
     if (!source || !*source) throw std::runtime_error("The model has no chat template");
     const auto * vocab = llama_model_get_vocab(engine.model);
     auto variables = common_json::object();
     variables["messages"] = common_json::parse(messages);
-    variables["add_generation_prompt"] = true;
+    variables["add_generation_prompt"] = add_generation_prompt;
     variables["enable_thinking"] = engine.thinking;
     variables["bos_token"] = piece(vocab, llama_vocab_bos(vocab), true);
     variables["eos_token"] = piece(vocab, llama_vocab_eos(vocab), true);
@@ -480,6 +480,29 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_discardCheckpoint(JNIEnv *, jobject
 extern "C" JNIEXPORT jint JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject) {
     return engine.pendingCheckpointPos;
+}
+
+/*
+ * P2-1d 的落点计算（方案 2.1）：返回 [带 generation prompt 的 token 数, 不带 generation prompt 的 token 数]。
+ *
+ * 两者之差就是模板给助手头加的那几个 token。落点 = **不带**的那个数：状态停在「用户这一轮结束、
+ * 生成脚手架之前」，正好与下一轮的真实公共前缀对齐。**不写死常数**，换模型/换模板都对。
+ */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_tokenizeBoundary(
+    JNIEnv * env, jobject, jbyteArray messages) {
+    try {
+        if (!engine.model) throw std::runtime_error("Load a model first");
+        const auto payload = bytes(env, messages);
+        const int withGeneration = static_cast<int>(prompt_tokens(prompt(payload, true)).size());
+        const int withoutGeneration = static_cast<int>(prompt_tokens(prompt(payload, false)).size());
+        const jlong values[] = {withGeneration, withoutGeneration};
+        auto result = env->NewLongArray(2);
+        if (!result) return nullptr;
+        env->SetLongArrayRegion(result, 0, 2, values);
+        if (env->ExceptionCheck()) return nullptr;
+        return result;
+    } catch (...) { return nullptr; }
 }
 
 /** 上一次恢复失败在哪一步：0 成功、1 `set_data_ext` 短读、2 `seq_rm` 返回 false、-1 没试过。 */

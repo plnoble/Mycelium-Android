@@ -98,6 +98,13 @@ internal interface EngineBridge {
      */
     fun discardCheckpoint() {}
 
+    /**
+     * 落点计算：返回 [带 generation prompt 的 token 数, 不带的]；null = 这台实现不给（旧桥/假桥）。
+     *
+     * 两者之差就是模板给助手头加的 token 数，**不写死常数**（方案 2.1）：换模型、换模板都对。
+     */
+    fun tokenizeBoundary(messages: ByteArray): LongArray? = null
+
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean = false
 
@@ -134,6 +141,8 @@ internal class NativeBridge : EngineBridge {
     external override fun takeCheckpointPos(): Int
     /** 丢掉待取的检查点：不分配、不抛（清理路径专用）。 */
     external override fun discardCheckpoint()
+    /** 落点计算：返 [带 generation prompt 的 token 数, 不带的]（方案 2.1）。 */
+    external override fun tokenizeBoundary(messages: ByteArray): LongArray?
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     external override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
@@ -447,6 +456,33 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
 
     /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
     fun lastRestoreStep(): Int = native.lastRestoreStep()
+
+    /**
+     * 这一轮该把检查点存在哪个 token 位置（P2-1d 方案 2.1）。
+     *
+     * = 「不带 generation prompt 的 token 数」：状态正好停在**用户这一轮结束、助手头之前**，与下一轮的
+     * 真实公共前缀对齐。长度由模板自己除以两次 tokenize，**不写死常数**。算不出来就返回 -1（不存）。
+     *
+     * 只加了两轮 tokenize 的开销（不建上下文、不读 KV），相对几秒的提示读取可以忽略。
+     */
+    suspend fun checkpointPositionFor(messages: List<ChatMessage>): Int {
+        val snapshot = messages.toList()
+        if (snapshot.isEmpty()) return -1
+        val json = JSONArray()
+        snapshot.forEach { json.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content)) }
+        val payload = json.toString().toByteArray(Charsets.UTF_8)
+        return gate.withLock {
+            if (loaded.value == null) return@withLock -1
+            runNative {
+                val bounds = native.tokenizeBoundary(payload) ?: return@runNative -1
+                if (bounds.size != 2) return@runNative -1
+                val withGeneration = bounds[0].toInt()
+                val withoutGeneration = bounds[1].toInt()
+                // 落点必须严格小于整段长度（至少留一个 token 给生成脚手架，否则原生没有可读的尾巴）。
+                if (withoutGeneration in 1 until withGeneration) withoutGeneration else -1
+            }
+        }
+    }
 
     /**
      * 第 0 步测量探针（见 [EngineBridge.measureCheckpoints]）。

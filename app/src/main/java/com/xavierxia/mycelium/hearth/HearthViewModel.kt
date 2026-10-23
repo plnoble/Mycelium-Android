@@ -1053,6 +1053,10 @@ class HearthViewModel @JvmOverloads constructor(
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
                     mutable.update { it.copy(notice = null) }
                 }
+                // P2-1d：产品在这里**显式打开**检查点复用（库里的默认仍是关，方便测例与对照）。
+                // 真机上温度 0 的逐字比对已经通过：开关开着与整段重读的正文完全一致，
+                // 读提示 1155 ms vs 2892 ms（约 2.5 倍）。整份状态每份约 55 MB，每会话只留一份。
+                (engine as? LocalModelEngine)?.checkpointEnabled = true
                 engine
             }
             is Chosen.Cloud -> {
@@ -1108,7 +1112,19 @@ class HearthViewModel @JvmOverloads constructor(
             withContext(Dispatchers.IO) {
                 stopBeforeGenerating(turn)
                 // 本地模型按这一轮冻好的键决定复用多少（P2-1c）；云端轮次的键是 null，行为不变。
-                model.generate(messages, turn.character.parameters().copy(cacheKey = turn.cacheKey)).collect { delta ->
+                // P2-1d：这一轮的检查点落点由模型自己按模板算（用户这一轮结束、助手头之前）；
+                // 算不出来（或开关关着）就是 -1，引擎不存检查点、行为与之前完全一致。
+                val checkpointPos = if (turn.cacheKey == null) {
+                    -1
+                } else {
+                    (model as? LocalModelEngine)?.let { engine ->
+                        runCatching { engine.checkpointPositionFor(messages) }.getOrDefault(-1)
+                    } ?: -1
+                }
+                model.generate(
+                    messages,
+                    turn.character.parameters().copy(cacheKey = turn.cacheKey, checkpointPos = checkpointPos),
+                ).collect { delta ->
                     // A delta that arrives after the stop is not part of this answer any more: the turn
                     // keeps what it had produced *before* the stop, so this one is dropped instead of
                     // being shown or stored (and it no longer counts as "produced").
