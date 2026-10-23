@@ -1125,6 +1125,16 @@ class HearthViewModel @JvmOverloads constructor(
                     } ?: -1
                 }
                 val parameters = turn.character.parameters().copy(cacheKey = turn.cacheKey, checkpointPos = checkpointPos)
+                // 诊断（P2-1d）：把每轮提示的头 8 个 token 记下来。若两轮开头就不同，说明系统提示
+                // 每轮在变，公共前缀从源头断掉，检查点永远用不上；若开头相同、后面才分叉，那是历史拼装的问题。
+                runCatching {
+                    val local = model as? LocalModelEngine
+                    if (local != null && turn.cacheKey != null) {
+                        val ids = local.promptTokenIds(messages)
+                        java.io.File(getApplication<android.app.Application>().filesDir, "p2-1d-rounds.txt")
+                            .appendText("prompt-head: n=${ids.size} head=${ids.take(8).joinToString(",")} cacheKeyLen=${turn.cacheKey.length}\n")
+                    }
+                }
                 model.generate(messages, parameters).collect { delta ->
                     // A delta that arrives after the stop is not part of this answer any more: the turn
                     // keeps what it had produced *before* the stop, so this one is dropped instead of
