@@ -213,4 +213,17 @@ class CheckpointStoreTest {
         assertEquals("新 a 必须查得到（不能因为旧 a 被清而丢掉）", 30, store.find("a", maxPos = 100)?.pos)
         assertEquals("b 还在", 20, store.find("b", maxPos = 100)?.pos)
     }
+
+    @Test
+    fun replacingAKeyDoesNotEvictOtherKeysFirst() {
+        // R2 非阻断退化回归：maxPerKey=1、预算 100，写 A:40、B:40、B:40（同键覆盖）。
+        // 第一版先算全局再处理本键，旧 B 还算在总量里 ⇒ 80+40>100 把 A 挤掉了。A 不该被删。
+        val store = CheckpointStore(maxPerKey = 1, maxTotalBytes = 100)
+        store.put("A", 10, bytes(40))
+        store.put("B", 20, bytes(40))
+        assertTrue("同键覆盖要成功", store.put("B", 30, bytes(40)))
+
+        assertEquals("B 换成新的那份", 30, store.find("B", maxPos = 100)?.pos)
+        assertEquals("A 不该被同键覆盖牵连删除", 10, store.find("A", maxPos = 100)?.pos)
+    }
 }

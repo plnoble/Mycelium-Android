@@ -38,6 +38,8 @@ class CheckpointFlowTest {
         private val checkpointable: Boolean = true,
         private val saveBytes: ByteArray? = ByteArray(16) { 3 },
         private val restoreOk: Boolean = true,
+        /** 这一轮是否以「被停止」收场（原生正常返回 stopped=1）。 */
+        private val stopped: Boolean = false,
     ) : EngineBridge {
         val calls = mutableListOf<String>()
         var saveAtSeen: Int = -1
@@ -100,7 +102,9 @@ class CheckpointFlowTest {
             callback.onToken("好".toByteArray())
             // 原生契约：没请求复用就必须报原因 1（说「复用成功」而复用数为 0 是自相矛盾）。
             val reason = if (reuseTokens == 0) 1L else 0L
-            return longArrayOf(20, 1, 1, 1, 0, reuseTokens.toLong(), (20 - reuseTokens).toLong(), reason)
+            return longArrayOf(
+                20, 1, 1, 1, if (stopped) 1 else 0, reuseTokens.toLong(), (20 - reuseTokens).toLong(), reason,
+            )
         }
     }
 
@@ -336,5 +340,97 @@ class CheckpointFlowTest {
         assertEquals("恢复失败后必须从 0 读（复用数为 0）", 0, bridge.lastReuse)
         assertEquals("统计里的复用数也必须是 0", 0L, engine.lastStats?.reusedPromptTokens)
         assertEquals("统计里的原因必须是 6", 6L, engine.lastStats?.reuseFallbackReason)
+    }
+
+    // ---- 全量审 R2 必修项 1 / 3 回归 -----------------------------------------------------
+
+    @Test
+    fun aForkThatHappensWhileTheSwitchIsOffStillInvalidatesTheOldCheckpoint() {
+        // R2 必修项 1（P1）：分叉作废不能受「这一轮要不要存」控制。
+        // 场景：存了 15 → 关掉开关、同键编辑（真实公共前缀只剩 5）→ 再打开 ⇒ 不许恢复 15。
+        val bridge = object : Recorder() {
+            var round = 0
+            override fun tokenize(messages: ByteArray): IntArray {
+                round++
+                return if (round == 1) IntArray(20) { 1 } else IntArray(20) { if (it < 5) 1 else 2 }
+            }
+        }
+        val engine = engineWith(bridge)
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            engine.checkpointEnabled = true
+            round(engine, checkpointPos = 15)          // 第 1 轮：存下 15
+            engine.checkpointEnabled = false
+            round(engine, checkpointPos = 15)          // 第 2 轮：关着开关，但会话被编辑了
+            engine.checkpointEnabled = true
+            bridge.calls.clear()
+            round(engine, checkpointPos = 15)          // 第 3 轮：再打开
+        }
+
+        assertTrue("关着的那一轮也必须作废旧分支：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
+        assertEquals("没有可用检查点 ⇒ 原因 5", 5L, engine.checkpointFallbackReason)
+    }
+
+    @Test
+    fun aRoundThatWasStoppedNeverLeavesACheckpointBehind() {
+        // R2 必修项 3（P1）：stop() 会让原生正常返回 stopped=1，这一轮**不许**入库检查点，
+        // 而且要把它作废——否则下一轮会恢复到一个「提示没读完」的位置。
+        val bridge = Recorder(stopped = true)
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)
+        }
+
+        assertTrue("停下的一轮不许存检查点：${bridge.calls}", bridge.calls.none { it == "take" })
+        assertEquals("停下的轮次不该留下任何检查点", 0, engine.checkpointUsageSuspendForTest())
+    }
+
+    @Test
+    fun aCancelledRoundKeepsTheReasonSixItHad() {
+        // R2 必修项 4（P2）：恢复失败后紧接着被取消，收尾统计里的原因仍要是 6，
+        // 不能被 forgetCheckpoints() 清成原生那个旧码（1）。
+        val bridge = object : Recorder(restoreOk = false) {
+            var round = 0
+            override fun generate(
+                messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int,
+                reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback,
+            ): LongArray {
+                round++
+                if (round == 1) return super.generate(messages, maximum, temperature, topP, seed, reuseTokens, saveCheckpointAt, restoredTo, callback)
+                callback.onStart(false)
+                throw kotlinx.coroutines.CancellationException("用户取消")
+            }
+        }
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)                        // 存
+            runCatching { round(engine) }         // 恢复失败 + 取消
+        }
+
+        assertEquals("取消收尾也要如实报原因 6", 6L, engine.lastStats?.reuseFallbackReason)
+    }
+
+    /** 只在测例里用：占用读数现在是 suspend（走引擎锁）。 */
+    private fun LocalModelEngine.checkpointUsageSuspendForTest(): Int = runBlocking { checkpointUsage().first }
+
+    @Test
+    fun whenTheHeapIsTightTheRoundSkipsSavingButStillGenerates() {
+        // R2 必修项 2（P1）：托管堆余量不够时**跳过这次优化**，绝不让生成因为存检查点而失败。
+        val bridge = Recorder(saveBytes = ByteArray(1024) { 7 })
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        engine.heapHeadroomProbe = { 1L } // 只剩 1 字节余量：任何一份都放不下
+        val text = runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)
+        }
+
+        assertEquals("生成必须照常完成", "好", text.joinToString(""))
+        assertTrue("应当记下「因为内存跳过」", engine.checkpointSkippedForMemory)
+        assertEquals("不许入库", 0, engine.checkpointUsageSuspendForTest())
     }
 }

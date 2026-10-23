@@ -442,7 +442,13 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
     if (engine.pendingCheckpoint.empty()) return nullptr;
     const auto size = static_cast<jsize>(engine.pendingCheckpoint.size());
     auto out = env->NewByteArray(size);
-    if (!out) return nullptr;
+    if (!out) {
+        // 全量审 R2 必修项 2：分配 JByteArray 失败时**也必须释放原生缓冲**，否则这份几十 MB 的
+        // vector 会一直挂着（仓库里查不到、内存里却占着）。
+        std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+        engine.pendingCheckpointPos = -1;
+        return nullptr;
+    }
     env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
     // 字节取走，位置也一起作废：下一次没存就是「没有待取的」。
     // 全量审必修项 3：取走后彻底释放 vector 内存，不让几十 MB 留在原生堆上。
@@ -450,6 +456,18 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
     engine.pendingCheckpointPos = -1;
     if (env->ExceptionCheck()) return nullptr;
     return out;
+}
+
+/**
+ * 丢掉待取的检查点（全量审 R2 必修项 2）。
+ *
+ * 与 `takeCheckpoint()` 的区别：**不新建 JByteArray、不抛异常**。清理路径（异常收尾、低内存丢弃）
+ * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
+ */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_discardCheckpoint(JNIEnv *, jobject) {
+    std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+    engine.pendingCheckpointPos = -1;
 }
 
 /**

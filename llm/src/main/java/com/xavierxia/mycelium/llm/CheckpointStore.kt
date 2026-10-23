@@ -61,9 +61,14 @@ internal class CheckpointStore(
         if (bytes.isEmpty()) return false
         val incoming = bytes.size.toLong()
         if (incoming > maxTotalBytes) return false
-        // 全量审必修项 9：全局淘汰先做，**淘汰完再拿当前键的 list**。
-        // 如果先拿 list 再全局淘汰，当前键若正好是最旧的被 remove(key)，追加就会打到
-        // 脱离 byKey 映射的悬空 list 上，造成「返回 true 实际查不到」的假成功。
+        // 全量审 R2（非阻断退化）：**先把当前键腾到位再算全局**。第一版先全局淘汰再处理本键，
+        // 于是「同一键再存一份」时旧的那份还被算在总量里，预算不够就把别的键挤掉了（实测
+        // A:40、B:40、B:40、预算 100 ⇒ A 被无必要地删掉）。顺序反过来就没有这个假淘汰。
+        byKey[key]?.let { existing ->
+            while (existing.size >= maxPerKey) existing.removeAt(0)
+            if (existing.isEmpty()) byKey.remove(key)
+        }
+        // 再按总量全局淘汰（跨键，淘汰最旧的），腾到「再放一份也放得下」。
         while (totalBytes + incoming > maxTotalBytes) {
             val oldestKey = byKey.entries
                 .filter { it.value.isNotEmpty() }
@@ -73,8 +78,8 @@ internal class CheckpointStore(
             if (oldestKey.value.isEmpty()) byKey.remove(oldestKey.key)
         }
         if (totalBytes + incoming > maxTotalBytes) return false
+        // 全量审必修项 9：淘汰完**重新**拿当前键的 list（它可能在上面被整个 remove 掉了）。
         val list = byKey.getOrPut(key) { mutableListOf() }
-        while (list.size >= maxPerKey) list.removeAt(0)
         list += Checkpoint(pos, bytes.copyOf(), ++nextSequence)
         return true
     }

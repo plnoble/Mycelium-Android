@@ -90,6 +90,14 @@ internal interface EngineBridge {
     /** 待取的检查点对应哪个位置；没有就是 -1。 */
     fun takeCheckpointPos(): Int = -1
 
+    /**
+     * 丢掉待取的检查点：**不分配、不抛**（全量审 R2 必修项 2）。
+     *
+     * 清理路径必须用它而不是 [takeCheckpoint]——后者要新建 JByteArray，在异常收尾时可能把原来的
+     * 异常替换成 OOM。默认实现是空操作（假桥没有原生缓冲）。
+     */
+    fun discardCheckpoint() {}
+
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean = false
 
@@ -124,6 +132,8 @@ internal class NativeBridge : EngineBridge {
     external override fun takeCheckpoint(): ByteArray?
     /** 待取的检查点对应哪个位置；没有就是 -1。 */
     external override fun takeCheckpointPos(): Int
+    /** 丢掉待取的检查点：不分配、不抛（清理路径专用）。 */
+    external override fun discardCheckpoint()
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     external override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
@@ -428,8 +438,16 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
     fun lastRestoreStep(): Int = native.lastRestoreStep()
 
-    /** 第 0 步测量探针（见 [EngineBridge.measureCheckpoints]）。 */
-    fun measureCheckpoints(): LongArray? = native.measureCheckpoints()
+    /**
+     * 第 0 步测量探针（见 [EngineBridge.measureCheckpoints]）。
+     *
+     * **必须拿 `gate`**（全量审 R2 必修项 6）：它会 set_data_ext 把原生状态装回去，与生成、卸载并发
+     * 就是数据竞争。第一版直接在锁外调，真机跑一次就可能把另一轮的生成状态搅乱。
+     */
+    suspend fun measureCheckpoints(): LongArray? = gate.withLock {
+        checkNotNull(loaded.value) { "请先加载模型" }
+        runNative { native.measureCheckpoints() }
+    }
 
     /**
      * 系统内存紧张时整批丢掉检查点（Codex R2 必修项 1/2）。
@@ -451,8 +469,27 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     @Volatile var lastTakeDiagnosis: String = ""
         private set
 
-    /** 检查点仓库现在的占用（份数与字节），只给真机读数与日志用。 */
-    fun checkpointUsage(): Pair<Int, Long> = checkpoints.size to checkpoints.totalBytes
+    /** 这一轮因为托管堆余量不足而**跳过**了存检查点（只做诊断，不影响生成）。 */
+    @Volatile var checkpointSkippedForMemory: Boolean = false
+        private set
+
+    /** 托管堆还能再分配多少字节（不含原生内存）。准入判据用；测例可以替换它。 */
+    internal var heapHeadroomProbe: () -> Long = {
+        val runtime = Runtime.getRuntime()
+        runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+    }
+
+    private fun heapHeadroom(): Long = heapHeadroomProbe()
+
+    /**
+     * 检查点仓库现在的占用（份数与字节），只给真机读数与日志用。
+     *
+     * **也要拿 `gate`**（全量审 R2 必修项 6）：仓库约定只在锁内访问，第一版在锁外遍历，
+     * 与正在写仓库的那一轮撞上就是并发修改。它不该被界面高频调用——只给读数用。
+     */
+    suspend fun checkpointUsage(): Pair<Int, Long> = gate.withLock {
+        checkpoints.size to checkpoints.totalBytes
+    }
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
@@ -474,6 +511,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 // 界面与日志读到的就是别人的结论。
                 checkpointRestoredFrom = -1
                 checkpointFallbackReason = 0L
+                checkpointSkippedForMemory = false
                 // 这一轮实际请求复用的 token 数：收尾校验要用，所以声明在 try 之外。
                 var requested = 0
                 var filter = ThinkingFilter()
@@ -514,9 +552,12 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         // 就会挑中 15 的旧快照，把另一条分支的状态恢复出来。
                         val shared = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
                         requested = shared
+                        // 全量审 R2 必修项 1（P1）：**只要这一轮有缓存键，就按真实公共前缀作废旧快照**，
+                        // 不能受「这一轮要不要存检查点」控制。否则关闭开关期间分叉的旧快照会留着，
+                        // 之后重新打开时又被选中——那是另一条分支的状态。注销与恢复都在这里做，
+                        // 让「作废」成为有键轮次的既定动作，而不是优化路径的副作用。
+                        if (cacheKey != null) checkpoints.invalidateBeyond(cacheKey, shared)
                         if (checkpointWanted) {
-                            // 先作废超出真实公共前缀的检查点（分叉处理，全量审必修项 1/4）
-                            checkpoints.invalidateBeyond(cacheKey, shared)
                             when (val plan = planPrefix(
                                 store = checkpoints,
                                 key = cacheKey,
@@ -585,22 +626,46 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // P2-1d 的 S2：把这一轮在「跨过 checkpointPos」时存下的检查点取回来记进仓库。
                     // 位置与字节都由原生交回来，本侧不猜；取不到（没到落点、存失败、或模型不适用）
                     // 就什么也不记——不许拿别的位置顶替。
-                    if (checkpointAt > 0 && cacheKey != null) {
+                    //
+                    // 全量审 R2 必修项 3（P1）：**正常停止的轮次不许保存检查点**。`stop()` 会让原生
+                    // 正常返回（stopped=1），提示可能没读完，那一刻的状态不能当下一轮的起点。第一版
+                    // 只判「要不要存」，停止后仍入库，下一轮就恢复到那个半截位置。
+                    val stoppedThisRound = values[4] != 0L
+                    if (!stoppedThisRound && checkpointAt > 0 && cacheKey != null) {
                         // **先问位置、再取字节**：原生的 takeCheckpoint() 会把位置一起作废，顺序反了就
                         // 永远拿到 -1（第一版就是这么错的：字节 52 MB 都取到了，位置却一直是 -1，
                         // 检查点因此永远进不了仓库）。
                         val savedPos = native.takeCheckpointPos()
                         val saved = native.takeCheckpoint()
                         lastTakeDiagnosis = "take=${saved?.size ?: -1}/pos=$savedPos/at=$checkpointAt"
-                        if (saved != null && savedPos > 0) {
-                            checkpoints.put(cacheKey, savedPos, saved)
+                        // 全量审 R2 必修项 5（P2）：生成**期间**收到「内存告急」时，这一份不许入库。
+                        // 第一版只在轮次入口消费标记，于是「拿到标记的那一轮照样存了一份」——正是最不该
+                        // 存的时候。这里再判一次，并顺手把已有的清掉。
+                        if (trimRequested.get()) {
+                            // 整批清掉，并把标记消费掉；saved 这份直接不引用（交给 GC），不入库。
+                            trimRequested.set(false)
+                            forgetCheckpoints()
+                        } else if (saved != null && savedPos > 0) {
+                            // 全量审 R2 必修项 2（P1）：**托管堆余量准入**。入库时堆里会同时存在这份
+                            // JNI 数组与仓库里的副本，余量不够就跳过这次优化——绝不为了省几秒提示时间
+                            // 把整轮生成拖进 OOM。
+                            if (heapHeadroom() >= saved.size * 2L) {
+                                checkpoints.put(cacheKey, savedPos, saved)
+                            } else {
+                                checkpoints.invalidate(cacheKey)
+                                checkpointSkippedForMemory = true
+                            }
                         } else {
                             // 没存成：把上一轮留下的、位置可能已经不对的检查点作废，别让下轮选中它。
                             checkpoints.invalidateBeyond(cacheKey, checkpointAt)
                         }
                     } else {
-                        native.takeCheckpoint()
-                        native.takeCheckpointPos()
+                        // 不存（或这一轮被停了）：把在途缓冲丢掉，别占着原生内存。
+                        native.discardCheckpoint()
+                        if (stoppedThisRound && cacheKey != null) {
+                            // 停止 ⇒ 这一轮的检查点与缓存一起作废（与 P2-1c 的「停止就不复用」一致）。
+                            checkpoints.invalidate(cacheKey)
+                        }
                     }
                     // Only a prompt that was read to its end is a cache entry the next round may
                     // reuse. A round that was stopped while the prompt was still being read forgets the
@@ -617,14 +682,18 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         if (tail.isNotEmpty()) send(tail)
                     }
                 } catch (failure: Throwable) {
+                    // 全量审 R2 必修项 4（P2）：**先把这一轮的回退原因存下来**再清理，否则
+                    // forgetCheckpoints() 会把 6 清成 0，收尾统计就变成原生那个旧码（1），
+                    // 「恢复失败」这件事在读数里彻底消失。
+                    val checkpointReason = checkpointFallbackReason
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
-                    // 全量审必修项 4：异常与取消时，检查点必须跟着作废，不能保留不可信的状态；
-                    // 在途的原生缓冲也必须取走丢掉，不占用原生内存（必修项 3）。
+                    // 全量审必修项 4：异常与取消时，检查点必须跟着作废，不能保留不可信的状态。
                     forgetCheckpoints()
-                    native.takeCheckpoint()
-                    native.takeCheckpointPos()
+                    // 全量审必修项 2（P1）：**丢弃在途缓冲不能走 takeCheckpoint()**——那个会新建
+                    // JByteArray，分配失败时可能把「原本的异常」替换成 OOM。用不分配、不抛的接口。
+                    native.discardCheckpoint()
                     // 收尾统计：有可靠读数就用，读数不合格就当「没有读数」。这里绝不能因为解析出错
                     // 而顶掉原来那个异常（方案审 r2 必修 2）。
                     val readings = lastNativeReadings
@@ -640,14 +709,15 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         )
                     }.getOrNull()
                     val cancelled = failure is kotlinx.coroutines.CancellationException
-                    lastStats = stats ?: GenerationStats(
+                    // 正常结束与取消收尾共用同一口径：检查点路径的原因优先于原生旧码。
+                    lastStats = (stats ?: GenerationStats(
                         0, 0, 0, 0,
                         stopped = cancelled,
-                        // 取消收尾也要带上检查点回退原因（同一套口径）。
-                        reuseFallbackReason = checkpointFallbackReason,
                         hiddenTokens = hiddenTokens,
                         hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
                         nativeReadingsComplete = false,
+                    )).copy(
+                        reuseFallbackReason = if (checkpointReason != 0L) checkpointReason else (stats?.reuseFallbackReason ?: 0L),
                     )
                     throw failure
                 }
