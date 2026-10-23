@@ -129,7 +129,11 @@ internal interface EngineBridge {
     fun measureCheckpoints(): LongArray? = null
 }
 internal class NativeBridge : EngineBridge {
-    init { System.loadLibrary("mycelium_llm") }
+    // P2-1d：按 CPU 特性在「基线 / 快变体」之间挑一份加载（两份都在 APK 里）。
+    // 直接在 init 里加载，保证任何用到引擎的路径都不会漏掉。
+    init { NativeLibraryVariant.load() }
+    /** 编译这份库时用的 `-march`（真机验收靠它确认到底加载了哪一份变体）。 */
+    external fun archVariant(): String
     external override fun begin()
     /** 只给真机测例用：打开后模板按「思考」渲染，默认关。 */
     external fun setThinking(thinking: Boolean)

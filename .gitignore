@@ -45,3 +45,6 @@ llm/vendor/
 
 # Kotlin 构建会话目录（构建会生成，导致 check-public 认为工作区不干净）
 .kotlin/
+
+# P2-1d：快变体的原生库是构建产物（由 llm/build.gradle.kts 的 buildFastNative 编出来）
+llm/src/main/jniLibs/arm64-v8a/libmycelium_llm_fast.so

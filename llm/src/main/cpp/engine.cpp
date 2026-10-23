@@ -483,6 +483,12 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
  * 与 `takeCheckpoint()` 的区别：**不新建 JByteArray、不抛异常**。清理路径（异常收尾、低内存丢弃）
  * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
  */
+/** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_archVariant(JNIEnv * env, jobject) {
+    return env->NewStringUTF(MYCELIUM_ARCH_VARIANT);
+}
+
 /** P2-1d 诊断：返回 [清空序列 ms, set_data_ext ms, get_size_ext ms, get_data_ext ms, 取字节 JNI 拷贝 ms]。 */
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_checkpointTimings(JNIEnv * env, jobject) {
