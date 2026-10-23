@@ -24,7 +24,10 @@ class LocalModelsViewModel(application: Application) : AndroidViewModel(applicat
     private val store = AndroidModelStore(application)
     val engine = LocalModelEngine.shared
     private val prefs = application.getSharedPreferences("local-model-options", 0)
-    val options = EngineOptions(prefs.getInt("threads", 6).coerceIn(1, 16), prefs.getInt("context", 8192).coerceIn(512, 32768))
+    // 默认线程数 8：真机扫描（234 token 提示、32 token 生成、armv9.2 + dotprod/i8mm）实测
+//   4 线程 25-33 ms/token、6 线程 22 ms/token 但生成 12.1 tok/s、8 线程 17 ms/token（首字最快）。
+// 聊天看「按下发送到第一个字」，所以默认取 8；用户仍可在界面上改。
+    val options = EngineOptions(prefs.getInt("threads", 8).coerceIn(1, 16), prefs.getInt("context", 8192).coerceIn(512, 32768))
     private val mutable = MutableStateFlow(LocalModelsState())
     val state = mutable.asStateFlow()
     private var operation: Job? = null
