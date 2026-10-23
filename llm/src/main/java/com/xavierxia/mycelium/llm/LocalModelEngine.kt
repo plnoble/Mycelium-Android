@@ -78,7 +78,7 @@ internal interface EngineBridge {
      * leading tokens that are already in the engine's cache.
      */
     fun tokenize(messages: ByteArray): IntArray
-    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, callback: TokenCallback): LongArray
+    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback): LongArray
 
     /**
      * P2-1d 的 S2：把刚才那一轮在跨过 [saveCheckpointAt] 时存下的检查点取走（取完清空）；没有给 null。
@@ -111,7 +111,7 @@ internal class NativeBridge : EngineBridge {
     external override fun load(fd: Int, threads: Int, context: Int)
     external override fun unload()
     external override fun tokenize(messages: ByteArray): IntArray
-    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, callback: TokenCallback): LongArray
+    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback): LongArray
     /** P2-1d 的 S2：把刚才那一轮在跨过 checkpointPos 时存下的检查点取走（取完清空）；没有给 null。 */
     external override fun takeCheckpoint(): ByteArray?
     /** 待取的检查点对应哪个位置；没有就是 -1。 */
@@ -431,6 +431,9 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 var firstVisibleNanos = 0L
                 // P2-1d：这一轮要存检查点的落点（声明在 try 之外：收尾取字节时也要用它）。
                 var checkpointAt = -1
+                // P2-1d：这一轮的状态是否刚从检查点恢复好（>= 0 即恢复位置）。原生据此**直接**从
+                // 那里读，不再走「共享前缀 + 自己裁」那条判断——那条对混合模型会失败并整段重读。
+                var restoredTo = -1
                 try {
                     // A round without a key must not leave a cached prompt behind either: on this one
                     // native context such a round clears the KV and reads everything, so afterwards the
@@ -464,6 +467,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                                     // 恢复失败 ⇒ 原因 6，整段重读（方案 2.2）。
                                     if (native.restoreCheckpoint(plan.checkpoint.bytes, plan.checkpoint.pos)) {
                                         checkpointRestoredFrom = plan.checkpoint.pos
+                                        restoredTo = plan.checkpoint.pos
                                         // 恢复后从 cp 接着读：这一轮的「复用数」就是 cp。
                                         requested = plan.checkpoint.pos
                                         cacheOwner = cacheKey
@@ -480,7 +484,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         // 读数在原生回来的那一刻就存下来：收集方被取消时 `runNative` 会抛，但它其实
                         // 还是等到了 worker 退出，这份读数照样能用（方案审必修 6）。
                         (tokens to native.generate(payload, parameters.maxTokens,
-                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt,
+                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt, restoredTo,
                             object : TokenCallback {
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {

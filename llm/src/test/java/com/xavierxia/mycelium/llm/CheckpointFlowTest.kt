@@ -85,6 +85,7 @@ class CheckpointFlowTest {
             seed: Int,
             reuseTokens: Int,
             saveCheckpointAt: Int,
+            restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {
             calls += "generate@reuse=$reuseTokens@save=$saveCheckpointAt"

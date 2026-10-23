@@ -197,7 +197,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_tokenize(JNIEnv * env, jobject, jby
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
     JNIEnv * env, jobject, jbyteArray messages, jint maximum, jfloat temperature,
-    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jobject callback) {
+    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jint restoredTo, jobject callback) {
+    // 恢复位置本轮不参与读取决策（见下面 reuse 的计算）：保留参数是为了让「恢复与否」在原生这一侧
+    // 有据可查，也为了将来连注意力 KV 一起存之后可以直接接上。
+    (void) restoredTo;
     try {
         if (!engine.context) throw std::runtime_error("Load a model first");
         if (maximum < 1 || maximum > 8192) throw std::runtime_error("Invalid token limit");
@@ -224,6 +227,11 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         // prompt, never past what the engine itself still holds (its own prefix is the only state
         // that may be reused), and always at least one token to read.
         const int requested = reuseTokens < 0 ? 0 : reuseTokens;
+        // P2-1d：恢复过检查点（restoredTo >= 0）时**仍然整段重读**。
+        // 真机实测（2026-10-23）：直接跳过读取会让生成结果与整段重读不一致（温度 0 贪心下
+        // 「想听你讲个故事。」vs「想静静地看着你。」）——因为 PARTIAL_ONLY 只恢复了循环层，
+        // 普通注意力那半边的 KV 还是上一轮的旧内容，位置对了、内容不对。所以恢复只当验证，
+        // 不改读取起点。要真提速必须连注意力 KV 一起存（体积与时间都要重算，见方案 §7 必修项 2）。
         int reuse = std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
         if (reuse > count - 1) reuse = count - 1;
         if (reuse < 0) reuse = 0;
@@ -233,7 +241,9 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         jlong fallback = 0;
         auto * memory = llama_get_memory(engine.context);
         bool trimmed = false;
-        if (reuse > 0) trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
+        if (reuse > 0) {
+            trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
+        }
         if (!trimmed) {
             // Nothing to reuse, or this build cannot drop only a suffix: read the whole prompt, which
             // is what every round did before this cache existed.
@@ -382,14 +392,15 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
             engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
         if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
         auto * memory = llama_get_memory(engine.context);
-        // 恢复之后序列里剩下的状态应该正好停在 `pos - 1`。此时「裁掉 [pos, 末尾)」其实无事可做，
-        // 而循环层的 seq_rm 在 rollback == 0 时会返回 false（llama-memory-recurrent.cpp 的分支要求
-        // rollback >= 1）——那不是失败。所以先问这个序列现在的最小位置：已经在 pos 之前就跳过裁剪。
-        const llama_pos min_pos = llama_memory_seq_pos_min(memory, 0);
-        if (min_pos >= pos) {
-            if (!llama_memory_seq_rm(memory, 0, pos, -1)) { engine.lastRestoreStep = 2; return JNI_FALSE; }
+        // 裁掉 [pos, 末尾)：循环层那半边在「状态已经回到 pos-1」时会返回 false（llama-memory-recurrent
+        // 的分支要求 rollback >= 1），那不是失败——真正要清的是注意力那半边的旧尾巴，它由这一步
+        // 顺手清掉、并会被接下来从 pos 起的 prefill 覆盖。所以这里**记录返回值但不据此判失败**
+        // （真机实测：set_data_ext 全部吃下后 seq_rm 返回 false，而状态位置其实已经正确）。
+        if (!llama_memory_seq_rm(memory, 0, pos, -1)) {
+            engine.lastRestoreStep = 3;   // 3 = seq_rm 返回 false 但按「无需裁剪」继续
+        } else {
+            engine.lastRestoreStep = 0;
         }
-        engine.lastRestoreStep = 0;
         return JNI_TRUE;
     } catch (...) { return JNI_FALSE; }
 }

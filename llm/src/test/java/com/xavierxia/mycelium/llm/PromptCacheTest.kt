@@ -84,6 +84,7 @@ class PromptCacheTest {
             seed: Int,
             reuseTokens: Int,
             saveCheckpointAt: Int,
+            restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {
             if (failNext) {

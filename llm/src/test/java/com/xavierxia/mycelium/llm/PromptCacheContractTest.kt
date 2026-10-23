@@ -48,6 +48,7 @@ class PromptCacheContractTest {
             seed: Int,
             reuseTokens: Int,
             saveCheckpointAt: Int,
+            restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {
             requested += reuseTokens
