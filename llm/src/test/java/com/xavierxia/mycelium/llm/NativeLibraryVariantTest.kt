@@ -26,14 +26,25 @@ class NativeLibraryVariantTest {
     @Test
     fun `a phone without i8mm falls back to baseline`() {
         // 只有 dotprod（asimddp）、没有 i8mm：快变体里的 i8mm 内核照样会 SIGILL。
-        val features = "fp asimd evtstrm aes pmull sha1 sha2 crc32 asimddp"
+        val features = "fp asimd evtstrm aes pmull sha1 sha2 crc32 asimddp fphp"
         assertEquals(NativeLibraryVariant.BASELINE, NativeLibraryVariant.pick(features))
     }
 
     @Test
     fun `a phone without dotprod falls back to baseline`() {
-        val features = "fp asimd evtstrm aes pmull sha1 sha2 crc32 i8mm"
+        val features = "fp asimd evtstrm aes pmull sha1 sha2 crc32 i8mm fphp"
         assertEquals(NativeLibraryVariant.BASELINE, NativeLibraryVariant.pick(features))
+    }
+
+    @Test
+    fun `a phone without fp16 arithmetic falls back to baseline`() {
+        // 全量审 P1-2：快变体的编译参数含 +fp16，快库里确实有 fmla v*.8h。缺 FP16 时不会在 dlopen
+        // 阶段炸，而是在推理时 SIGILL —— 那种崩法外面的 runCatching 兜不住，所以必须在挑选时就挡住。
+        val features = "fp asimd evtstrm aes pmull sha1 sha2 crc32 asimddp i8mm"
+        assertEquals(NativeLibraryVariant.BASELINE, NativeLibraryVariant.pick(features))
+        // 这两种写法都算有 FP16（不同内核/不同 Android 版本写法不同）。
+        assertEquals(NativeLibraryVariant.FAST, NativeLibraryVariant.pick("asimddp i8mm fphp"))
+        assertEquals(NativeLibraryVariant.FAST, NativeLibraryVariant.pick("asimddp i8mm asimdhp"))
     }
 
     @Test

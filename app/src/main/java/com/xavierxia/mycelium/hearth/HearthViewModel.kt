@@ -215,8 +215,10 @@ class HearthViewModel @JvmOverloads constructor(
     private val store = AndroidModelStore(application)
     private val cloudSettings = CloudSettingsStore(application, KeystoreSecretBox("mycelium-cloud"))
     private val prefs = application.getSharedPreferences("local-model-options", 0)
+    // 全量审 P2-12：缺省线程数必须与模型页一致（都是 8）。之前这里是 6，于是「新用户直接进炉边聊天」
+    // 走的还是旧的 6 线程，本次宣称的默认值实际没生效。用户已保存的设置仍然优先，核数上限在引擎入口夹。
     private val options = EngineOptions(
-        prefs.getInt("threads", 6).coerceIn(1, 16),
+        prefs.getInt("threads", 8).coerceIn(1, 16),
         prefs.getInt("context", 8192).coerceIn(512, 32768),
     )
     private val mutable = MutableStateFlow(HearthState())

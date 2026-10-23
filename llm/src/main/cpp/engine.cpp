@@ -305,15 +305,28 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
                 // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
                 const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
                 if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
-                    std::vector<uint8_t> buffer(size);
-                    const auto t_data = Clock::now();
-                    const size_t written = llama_state_seq_get_data_ext(
-                        engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
-                    engine.timing[3] = elapsed(t_data);
-                    // 方案审必修项 2：判「等于」，不是判非零。
-                    if (written == size) {
-                        engine.pendingCheckpoint = std::move(buffer);
-                        engine.pendingCheckpointPos = saveCheckpointAt;
+                    // 全量审 P1-4：**保存快照失败只是跳过优化，绝不能把生成拖垮**。原来直接
+                    // `std::vector<uint8_t> buffer(size)`：几十 MB 的分配一旦抛 bad_alloc，就会被当成
+                    // 整轮生成的失败抛出 JNI 边界（Android 明确要求 C++ 异常不得越界）。这里单独接住。
+                    std::vector<uint8_t> buffer;
+                    bool allocated = true;
+                    try {
+                        buffer.resize(size);
+                    } catch (...) {
+                        allocated = false;
+                    }
+                    if (!allocated) {
+                        engine.pendingCheckpointPos = -1;
+                    } else {
+                        const auto t_data = Clock::now();
+                        const size_t written = llama_state_seq_get_data_ext(
+                            engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                        engine.timing[3] = elapsed(t_data);
+                        // 方案审必修项 2：判「等于」，不是判非零。
+                        if (written == size) {
+                            engine.pendingCheckpoint = std::move(buffer);
+                            engine.pendingCheckpointPos = saveCheckpointAt;
+                        }
                     }
                 }
             }
@@ -466,7 +479,15 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointHandle(JNIEnv *, jobject) {
     if (engine.pendingCheckpoint.empty()) return -1;
     const int handle = engine.nextCheckpointHandle++;
-    engine.checkpointStates[handle] = std::move(engine.pendingCheckpoint);
+    // 全量审 P1-4：登记句柄要建 map 节点，也可能抛 bad_alloc。异常绝不能越过 JNI 边界，所以这里接住：
+    // 登记失败就当「这一轮没存下」，把在途缓冲丢掉，生成照常继续。
+    try {
+        engine.checkpointStates[handle] = std::move(engine.pendingCheckpoint);
+    } catch (...) {
+        std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+        engine.pendingCheckpointPos = -1;
+        return -1;
+    }
     // move 之后 pending 的内容已归新那份，这里只把容量还回去，避免留下空壳占着内存。
     std::vector<uint8_t>().swap(engine.pendingCheckpoint);
     engine.pendingCheckpointPos = -1;

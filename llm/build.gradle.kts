@@ -74,10 +74,23 @@ fun androidSdkDirectory(): File {
 
 val nativeNdkVersion = "30.0.16248370"
 
-val cmakeExecutable = providers.provider {
-    val fromSdk = File(androidSdkDirectory(), "cmake/3.22.1/bin/cmake.exe")
-    if (fromSdk.exists()) fromSdk.absolutePath else "cmake"
+/**
+ * SDK 里的 CMake / Ninja 可执行文件（全量审 P1-1）。
+ *
+ * 之前写死 `cmake.exe`，Linux 上回退成 `"cmake"` 之后又用字符串拼出 `cmake\ninja.exe` —— 不是有效路径，
+ * 而打包必经这个任务，等于**直接卡死 Ubuntu CI 与发布流程**（`.github/workflows/android-ci.yml`、
+ * `release.yml` 都跑在 Ubuntu 上）。这里按宿主平台取可执行名，并用 `File` 拼路径。
+ */
+val isWindowsHost = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+
+fun sdkCmakeBinary(name: String): String {
+    val directory = File(androidSdkDirectory(), "cmake/3.22.1/bin")
+    val candidate = File(directory, if (isWindowsHost) "$name.exe" else name)
+    return if (candidate.exists()) candidate.absolutePath else name
 }
+
+val cmakeExecutable = providers.provider { sdkCmakeBinary("cmake") }
+val ninjaExecutable = providers.provider { sdkCmakeBinary("ninja") }
 
 val configureFastNative by tasks.registering(Exec::class) {
     val ndk = File(androidSdkDirectory(), "ndk/$nativeNdkVersion")
@@ -90,8 +103,10 @@ val configureFastNative by tasks.registering(Exec::class) {
         "-S", source.absolutePath,
         "-B", buildDir.absolutePath,
         // 显式指定 Ninja：Windows 上 CMake 默认挑 MSBuild，配 Android 工具链会直接失败。
+        // 路径由上面的 sdkCmakeBinary 按宿主平台给出（全量审 P1-1：原来手拼 `cmake\ninja.exe`，
+        // Linux 上直接是坏路径）。
         "-G", "Ninja",
-        "-DCMAKE_MAKE_PROGRAM=" + cmakeExecutable.get().substringBeforeLast('\\') + "\\ninja.exe",
+        "-DCMAKE_MAKE_PROGRAM=${ninjaExecutable.get()}",
         "-DCMAKE_TOOLCHAIN_FILE=${File(ndk, "build/cmake/android.toolchain.cmake").absolutePath}",
         "-DANDROID_NDK=${ndk.absolutePath}",
         "-DANDROID_ABI=$fastVariantAbi",
@@ -113,6 +128,11 @@ val buildFastNative by tasks.registering(Exec::class) {
     val buildDir = layout.buildDirectory.dir("cmake-fast").get().asFile
     val outDir = fastVariantOutput.get()
     inputs.dir(file("src/main/cpp"))
+    // 全量审 P2-5：增量输入要完整。只声明源码目录时，改了 march / NDK / 工具链，configure 会重跑，
+    // 但 build 仍判定 up-to-date，Ninja 拿不到机会，于是继续打包**旧库**。这里把这几项也算进来。
+    inputs.property("march", fastVariantMarch)
+    inputs.property("ndk", File(androidSdkDirectory(), "ndk/$nativeNdkVersion").absolutePath)
+    inputs.property("cmake", cmakeExecutable.get())
     outputs.file(File(outDir, "lib$fastVariantName.so"))
     commandLine(
         cmakeExecutable.get(),

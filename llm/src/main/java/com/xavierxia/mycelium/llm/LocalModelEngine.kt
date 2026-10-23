@@ -755,33 +755,42 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         val savedPos = native.takeCheckpointPos()
                         // 字节留在原生，只拿句柄；大小向原生问一次（不再拷一份 ByteArray 过来）。
                         val saved = native.takeCheckpointHandle()
-                        val savedBytes = if (saved > 0) native.checkpointHandleBytes(saved) else -1L
-                        lastTakeDiagnosis = "take=$savedBytes/pos=$savedPos/at=$checkpointAt"
-                        // 全量审 R2 必修项 5（P2）：生成**期间**收到「内存告急」时，这一份不许入库。
-                        // 第一版只在轮次入口消费标记，于是「拿到标记的那一轮照样存了一份」——正是最不该
-                        // 存的时候。这里再判一次，并顺手把已有的清掉。
-                        if (trimRequested.get()) {
-                            // 整批清掉，并把标记消费掉；这一份句柄也要释放，不入库。
-                            trimRequested.set(false)
-                            if (saved > 0) native.releaseCheckpointHandle(saved)
-                            forgetCheckpoints()
-                        } else if (saved > 0 && savedPos > 0) {
-                            // 托管堆余量准入（全量审 R2 必修项 2，改为句柄后重新算过）：字节现在归原生，
-                            // 不再有「JNI 数组 + 仓库副本」两份托管堆占用，所以只需为句柄释放与抖动留
-                            // 一点余量；余量不足就丢掉这份、跳过优化，绝不把生成拖进 OOM。
-                            if (heapHeadroom() >= CHECKPOINT_COPY_SLACK_BYTES) {
-                                if (!checkpoints.put(cacheKey, savedPos, saved, savedBytes)) {
-                                    // 仓库拒收（单份就超过总上限）：句柄必须由我们释放。
-                                    native.releaseCheckpointHandle(saved)
+                        // 全量审 P1-3：句柄一旦交出来就**必须有人负责释放**。取回到入库之间还要查大小、
+                        // 拼诊断串、判断余量——任何一步抛异常，外层只会清已入库的句柄与在途缓冲，
+                        // 这一份就成了「仓库里查不到、原生里还占着」的孤儿。所以从拿到开始就交给
+                        // try/finally，只有仓库真的接管了才移交责任。
+                        var adopted = false
+                        try {
+                            val savedBytes = if (saved > 0) native.checkpointHandleBytes(saved) else -1L
+                            lastTakeDiagnosis = "take=$savedBytes/pos=$savedPos/at=$checkpointAt"
+                            // 全量审 R2 必修项 5（P2）：生成**期间**收到「内存告急」时，这一份不许入库。
+                            // 第一版只在轮次入口消费标记，于是「拿到标记的那一轮照样存了一份」——正是最
+                            // 不该存的时候。这里再判一次，并顺手把已有的清掉。
+                            if (trimRequested.get()) {
+                                // 整批清掉，并把标记消费掉；这一份句柄由 finally 释放，不入库。
+                                trimRequested.set(false)
+                                forgetCheckpoints()
+                            } else if (saved > 0 && savedPos > 0) {
+                                // 托管堆余量准入（全量审 R2 必修项 2，改为句柄后重新算过）：字节现在归
+                                // 原生，不再有「JNI 数组 + 仓库副本」两份托管堆占用，所以只需为句柄释放
+                                // 与抖动留一点余量；余量不足就跳过优化，绝不把生成拖进 OOM。
+                                if (heapHeadroom() >= CHECKPOINT_COPY_SLACK_BYTES) {
+                                    // 仓库拒收（单份就超过总上限）时 adopted 保持 false，由 finally 释放。
+                                    adopted = checkpoints.put(cacheKey, savedPos, saved, savedBytes)
+                                    if (!adopted) {
+                                        // 仓库不收：把这一键上位置可能已经不对的旧检查点作废。
+                                        checkpoints.invalidateBeyond(cacheKey, checkpointAt)
+                                    }
+                                } else {
+                                    checkpoints.invalidate(cacheKey)
+                                    checkpointSkippedForMemory = true
                                 }
                             } else {
-                                native.releaseCheckpointHandle(saved)
-                                checkpoints.invalidate(cacheKey)
-                                checkpointSkippedForMemory = true
+                                // 没存成：把上一轮留下的、位置可能已经不对的检查点作废，别让下轮选中它。
+                                checkpoints.invalidateBeyond(cacheKey, checkpointAt)
                             }
-                        } else {
-                            // 没存成：把上一轮留下的、位置可能已经不对的检查点作废，别让下轮选中它。
-                            checkpoints.invalidateBeyond(cacheKey, checkpointAt)
+                        } finally {
+                            if (saved > 0 && !adopted) native.releaseCheckpointHandle(saved)
                         }
                     } else {
                         // 不存（或这一轮被停了）：把在途缓冲丢掉，别占着原生内存。

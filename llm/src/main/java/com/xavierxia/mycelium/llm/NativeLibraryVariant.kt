@@ -30,8 +30,13 @@ object NativeLibraryVariant {
     fun pick(features: String, forceBaseline: Boolean = false): String {
         if (forceBaseline) return BASELINE
         val tokens = features.split(' ', '\t', '\n').filter { it.isNotBlank() }.toSet()
-        // 两条都必须有：只有 dotprod 没有 i8mm 的设备上，快变体里 i8mm 的内核照样会 SIGILL。
-        return if ("asimddp" in tokens && "i8mm" in tokens) FAST else BASELINE
+        // 三条都必须有，缺任何一条都会在老设备上 SIGILL（全量审 P1-2）：
+        //  - `asimddp` = dotprod（编译参数里的 +dotprod）；
+        //  - `i8mm`    = 整数矩阵乘；
+        //  - `fphp` / `asimdhp` = FP16 向量算术（编译参数里的 +fp16）。**这条以前漏了**：快库的
+        //    `ggml_vec_dot_f16` 里确实有 `fmla v*.8h`，缺 FP16 时会在推理时炸，而不是在 dlopen 时炸。
+        val hasFp16 = "fphp" in tokens || "asimdhp" in tokens
+        return if ("asimddp" in tokens && "i8mm" in tokens && hasFp16) FAST else BASELINE
     }
 
     /** 读这台设备 CPU 的特性行；读不到（或不是 Linux）就当空串，也就是基线。 */
