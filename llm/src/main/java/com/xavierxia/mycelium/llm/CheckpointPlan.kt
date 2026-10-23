@@ -33,18 +33,30 @@ internal sealed interface PrefixPlan {
     /**
      * 整段重读，行为等于 P2-1c。
      *
-     * [reason] 为 null 表示「这条路本来就不适用」（纯注意力模型），**不该**为它编一个新原因码：
-     * 那些码的含义是「本该用检查点却没用到」，硬套会把之后的真机读数解释错。
+     * [reason] 为 null 表示「这条路本来就不适用」，**不该**为它编一个新原因码：那些码的含义是
+     * 「本该用检查点却没用到」，硬套会把之后的真机读数解释错。
      */
     data class FullReread(val reason: CheckpointFallback?, val note: String) : PrefixPlan
+
+    /**
+     * **走 P2-1c 的既有路径**（方案审必修项 4）。
+     *
+     * 纯注意力模型**不是**「强制全量重读」：P2-1c 会正常复用、裁剪注意力 KV。把它塞进
+     * [FullReread] 会让人误以为这条路被禁用了，所以单独给一个结果。
+     */
+    data object LegacyPrefixCache : PrefixPlan
 }
 
 /**
- * 决定这一轮用不用检查点。顺序即优先级，别调换：
- *  1. 开关关着 ⇒ 原因 7（**先看开关**：关着的时候不该去翻仓库，翻到了也不会用）；
- *  2. 模型不是混合/循环 ⇒ 整段重读，且不带新原因码（路径与 P2-1c 完全一致）；
+ * 决定这一轮用不用检查点。**顺序即优先级，别调换**（方案审必修项 4）：
+ *
+ *  1. **先按模型适用性分流**：不是混合/循环模型 ⇒ 走 P2-1c 既有路径（[PrefixPlan.LegacyPrefixCache]），
+ *     这里**不碰开关、不碰仓库、不占新原因码**——它压根不是「本该用却没用到」；
+ *  2. 开关关着 ⇒ 原因 7（纯注意力模型早就走开了，剩下这些才受开关管）；
  *  3. 仓库里没有「位置不超过 [maxPos]」的检查点 ⇒ 原因 5；
  *  4. 否则用位置最大的那一份（同位置取较新的，由仓库负责）。
+ *
+ * 第一版把开关放在最前面，于是「纯注意力 + 开关关着」会返回 7，与「不占新码」的口径冲突。
  *
  * @param maxPos 这一轮的公共前缀长度：只能用位置不超过它的检查点。
  * @param enabled 用户的总开关。
@@ -57,11 +69,9 @@ internal fun planPrefix(
     enabled: Boolean,
     checkpointable: Boolean,
 ): PrefixPlan {
+    if (!checkpointable) return PrefixPlan.LegacyPrefixCache
     if (!enabled) {
         return PrefixPlan.FullReread(CheckpointFallback.SwitchedOff, CheckpointFallback.SwitchedOff.note)
-    }
-    if (!checkpointable) {
-        return PrefixPlan.FullReread(null, "纯注意力模型：与 P2-1c 一样整段重读")
     }
     val checkpoint = store.find(key, maxPos)
         ?: return PrefixPlan.FullReread(CheckpointFallback.NoUsableCheckpoint, CheckpointFallback.NoUsableCheckpoint.note)

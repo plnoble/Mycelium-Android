@@ -59,15 +59,25 @@ class CheckpointPlanTest {
     }
 
     @Test
-    fun aPureAttentionModelNeverUsesACheckpointAndDoesNotBorrowANewReasonCode() {
-        // 纯注意力模型：路径与 P2-1c 完全一致。它不该占用 5/6/7——那些码的含义是「本该用却没用到」。
+    fun aPureAttentionModelGoesBackToTheLegacyPathWhateverTheSwitchSays() {
+        // 纯注意力模型：**先按适用性分流**，之后才看开关。所以开关开着、关着都走 P2-1c 既有路径，
+        // 而且都不该占用 5/6/7（方案审必修项 4：第一版把开关放在最前面，于是「纯注意力 + 开关关着」
+        // 会返回 7，与「不占新码」的口径冲突）。
+        listOf(true, false).forEach { enabled ->
+            val plan = planPrefix(store(Triple(key, 1116, 32)), key, maxPos = 1200, enabled = enabled, checkpointable = false)
+
+            assertTrue("开关=$enabled 时也必须是既有路径，实际 $plan", plan is PrefixPlan.LegacyPrefixCache)
+        }
+    }
+
+    @Test
+    fun theLegacyPathIsNotTheSameAsBeingForcedToRereadEverything() {
+        // 方案审必修项 4 的另一半：纯注意力走 P2-1c，而 P2-1c 会**正常复用、裁剪注意力 KV**。
+        // 所以它既不是「强制全量重读」（FullReread），也不该被解释成禁用前缀缓存。
         val plan = planPrefix(store(Triple(key, 1116, 32)), key, maxPos = 1200, enabled = true, checkpointable = false)
 
-        assertTrue("纯注意力模型不许走检查点，实际 $plan", plan is PrefixPlan.FullReread)
-        val fallback = plan as PrefixPlan.FullReread
-        assertNull("这条路本来就不适用，不该编一个新原因码：${fallback.note}", fallback.reason)
-        assertTrue("但要说清是为什么：${fallback.note}", fallback.note.contains("纯注意力"))
-        assertTrue("并且要说明与 P2-1c 一致：${fallback.note}", fallback.note.contains("P2-1c"))
+        assertTrue("纯注意力路径必须是 LegacyPrefixCache，实际 $plan", plan is PrefixPlan.LegacyPrefixCache)
+        assertTrue("它不该是「强制重读」", plan !is PrefixPlan.FullReread)
     }
 
     @Test
