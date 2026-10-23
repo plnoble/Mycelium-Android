@@ -227,12 +227,13 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         // prompt, never past what the engine itself still holds (its own prefix is the only state
         // that may be reused), and always at least one token to read.
         const int requested = reuseTokens < 0 ? 0 : reuseTokens;
-        // P2-1d：恢复过检查点（restoredTo >= 0）时**仍然整段重读**。
-        // 真机实测（2026-10-23）：直接跳过读取会让生成结果与整段重读不一致（温度 0 贪心下
-        // 「想听你讲个故事。」vs「想静静地看着你。」）——因为 PARTIAL_ONLY 只恢复了循环层，
-        // 普通注意力那半边的 KV 还是上一轮的旧内容，位置对了、内容不对。所以恢复只当验证，
-        // 不改读取起点。要真提速必须连注意力 KV 一起存（体积与时间都要重算，见方案 §7 必修项 2）。
-        int reuse = std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
+        // P2-1d（2026-10-23 统筹裁定）：这一轮如果已经从**整份状态**恢复好了（restoredTo >= 0），就直接
+        // 从那里接着读：状态里既有注意力 KV 也有循环层，内容与位置都对，跳过 P2-1c 的「共享前缀 + 裁尾」
+        // 那条路（它会因为混合模型退不回去而整段重读，把刚恢复好的状态白丢）。
+        // 只存循环层的时候这么干会答错（注意力那半边是旧内容），所以旧路径已废止。
+        int reuse = restoredTo >= 0
+            ? std::min(restoredTo, count - 1)
+            : std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
         if (reuse > count - 1) reuse = count - 1;
         if (reuse < 0) reuse = 0;
         // Reported to the caller so "why did this round still read everything?" has an answer:
@@ -241,7 +242,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         jlong fallback = 0;
         auto * memory = llama_get_memory(engine.context);
         bool trimmed = false;
-        if (reuse > 0) {
+        if (restoredTo >= 0) {
+            // 刚从整份状态恢复：序列里已经是 [0, restoredTo)，**不裁也不清**。
+            trimmed = true;
+        } else if (reuse > 0) {
             trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
         }
         if (!trimmed) {
@@ -255,8 +259,18 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         int read = 0;
         engine.pendingCheckpoint.clear();
         engine.pendingCheckpointPos = -1;
-        for (int pos = reuse; pos < count && !cancelled; pos += 128) {
-            const int length = std::min(128, count - pos);
+        // **在落点拆批**（Codex R2 必修项 3）：第一版按 128 一批读，只要这一批跨过落点就存，于是存下来的
+        // 状态其实停在 `pos + length`（比如 128），却打着 `checkpointPos`（比如 56）的标——恢复出来位
+        // 置就是错的。现在遇到落点就把这一批切开，让 decode 正好停在 checkpointPos 上再存。
+        for (int pos = reuse; pos < count && !cancelled;) {
+            const bool saving = saveCheckpointAt > pos && saveCheckpointAt < count &&
+                engine.pendingCheckpoint.empty();
+            int length = std::min(128, count - pos);
+            if (saving && pos + length > saveCheckpointAt) {
+                // 本批会越过落点：先只读到落点为止。
+                length = saveCheckpointAt - pos;
+            }
+            if (length <= 0) { pos += 1; continue; }
             auto batch = llama_batch_get_one(tokens.data() + pos, length);
             if (llama_decode(engine.context, batch) != 0) {
                 if (cancelled) break;
@@ -264,15 +278,15 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
                 throw std::runtime_error("Prompt evaluation failed");
             }
             read += length;
-            // P2-1d 的 S2：**刚跨过** checkpointPos 的那一批 decode 完就存（位置正好是 checkpointPos）。
-            // 状态只能前进，读过去就回不去了，所以不能等这一轮结束再补。
-            if (saveCheckpointAt > 0 && pos + length >= saveCheckpointAt && engine.pendingCheckpoint.empty()) {
+            pos += length;
+            // 状态只能前进，读过去就回不去了：正好停在落点上的这一刻必须存（整份状态，含注意力 KV）。
+            if (saving && pos == saveCheckpointAt) {
                 const size_t size = llama_state_seq_get_size_ext(
-                    engine.context, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                    engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
                 if (size > 0) {
                     std::vector<uint8_t> buffer(size);
                     const size_t written = llama_state_seq_get_data_ext(
-                        engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                        engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
                     // 方案审必修项 2：判「等于」，不是判非零。
                     if (written == size) {
                         engine.pendingCheckpoint = std::move(buffer);
@@ -388,19 +402,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
         std::vector<uint8_t> buffer(static_cast<size_t>(size));
         env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte *>(buffer.data()));
         if (env->ExceptionCheck()) return JNI_FALSE;
-        const size_t read = llama_state_seq_set_data_ext(
-            engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
         auto * memory = llama_get_memory(engine.context);
-        // 裁掉 [pos, 末尾)：循环层那半边在「状态已经回到 pos-1」时会返回 false（llama-memory-recurrent
-        // 的分支要求 rollback >= 1），那不是失败——真正要清的是注意力那半边的旧尾巴，它由这一步
-        // 顺手清掉、并会被接下来从 pos 起的 prefill 覆盖。所以这里**记录返回值但不据此判失败**
-        // （真机实测：set_data_ext 全部吃下后 seq_rm 返回 false，而状态位置其实已经正确）。
-        if (!llama_memory_seq_rm(memory, 0, pos, -1)) {
-            engine.lastRestoreStep = 3;   // 3 = seq_rm 返回 false 但按「无需裁剪」继续
-        } else {
-            engine.lastRestoreStep = 0;
-        }
+        // 统筹裁定的三步恢复（2026-10-23；取代第 7 节「禁止先删」那条旧指令）：
+        // 1) 整段清空序列 0 —— 不留任何尾巴，绕开循环层「rollback >= 1」的限制；失败就不许往下装。
+        if (!llama_memory_seq_rm(memory, 0, -1, -1)) { engine.lastRestoreStep = 4; return JNI_FALSE; }
+        // 2) 整份装回（注意力 KV + 循环层），返回值必须**等于字节数**。
+        const size_t read = llama_state_seq_set_data_ext(
+            engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
+        // 3) 从 pos 接着读由 generate 那条路做（restoredTo = pos，跳过 P2-1c 的裁尾与清空）。
+        engine.lastRestoreStep = 0;
         return JNI_TRUE;
     } catch (...) { return JNI_FALSE; }
 }
@@ -453,6 +464,67 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject
 extern "C" JNIEXPORT jint JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_lastRestoreStep(JNIEnv *, jobject) {
     return engine.lastRestoreStep;
+}
+
+/*
+ * P2-1d 第 0 步的**只做测量**探针（统筹 2026-10-23 裁定）。
+ *
+ * 回答一个问题：把检查点从「只存循环层（PARTIAL_ONLY）」改成「整份状态（NONE，注意力 KV + 循环层）」，
+ * 体积与耗时各是多少。方案里「约 24 倍」的推算统筹不认，要以实测为准。
+ *
+ * 做法：对**当前**的序列 0 状态（调用方刚读完一段提示之后）分别取两份大小、各存一次、各恢复一次，
+ * 记录耗时。**最后一定把整份状态装回去**，所以探针跑完引擎状态不变，不影响后续生成。
+ *
+ * 返回 10 项：
+ *  0 size(NONE)      1 size(PARTIAL_ONLY)
+ *  2 存 NONE 毫秒     3 存 PARTIAL_ONLY 毫秒
+ *  4 恢复 NONE 毫秒   5 恢复 PARTIAL_ONLY 毫秒
+ *  6 written(NONE)   7 written(PARTIAL_ONLY)
+ *  8 read(NONE)      9 read(PARTIAL_ONLY)   —— 与对应 written 不等就说明这一侧没成
+ */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_measureCheckpoints(JNIEnv * env, jobject) {
+    try {
+        if (!engine.context) return nullptr;
+        auto * ctx = engine.context;
+        const size_t size_none = llama_state_seq_get_size_ext(ctx, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t size_partial = llama_state_seq_get_size_ext(ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        std::vector<uint8_t> full(size_none > 0 ? size_none : 1);
+        std::vector<uint8_t> partial(size_partial > 0 ? size_partial : 1);
+
+        const auto t_save_full = Clock::now();
+        const size_t written_full = llama_state_seq_get_data_ext(
+            ctx, full.data(), full.size(), 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const long ms_save_full = elapsed(t_save_full);
+
+        const auto t_save_partial = Clock::now();
+        const size_t written_partial = llama_state_seq_get_data_ext(
+            ctx, partial.data(), partial.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const long ms_save_partial = elapsed(t_save_partial);
+
+        // 先恢复小的那份，最后恢复整份：跑完之后引擎状态与进来时一致。
+        const auto t_restore_partial = Clock::now();
+        const size_t read_partial = llama_state_seq_set_data_ext(
+            ctx, partial.data(), written_partial, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const long ms_restore_partial = elapsed(t_restore_partial);
+
+        const auto t_restore_full = Clock::now();
+        const size_t read_full = llama_state_seq_set_data_ext(
+            ctx, full.data(), written_full, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const long ms_restore_full = elapsed(t_restore_full);
+
+        const jlong values[] = {
+            static_cast<jlong>(size_none), static_cast<jlong>(size_partial),
+            ms_save_full, ms_save_partial, ms_restore_full, ms_restore_partial,
+            static_cast<jlong>(written_full), static_cast<jlong>(written_partial),
+            static_cast<jlong>(read_full), static_cast<jlong>(read_partial),
+        };
+        auto result = env->NewLongArray(10);
+        if (!result) return nullptr;
+        env->SetLongArrayRegion(result, 0, 10, values);
+        if (env->ExceptionCheck()) return nullptr;
+        return result;
+    } catch (...) { return nullptr; }
 }
 
 /*

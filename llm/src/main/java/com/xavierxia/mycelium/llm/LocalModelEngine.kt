@@ -101,6 +101,14 @@ internal interface EngineBridge {
 
     /** 上一次恢复失败在哪一步；默认 -1（没试过）。 */
     fun lastRestoreStep(): Int = -1
+
+    /**
+     * P2-1d 第 0 步的测量探针：对当前序列 0 的状态分别取 `NONE` 与 `PARTIAL_ONLY` 两份的大小、
+     * 各存一次各恢复一次，并报耗时。**跑完会把整份状态装回去**，所以引擎状态不变。
+     *
+     * 默认返回 null = 「这台实现不支持」（旧桥与假桥都不受影响）。
+     */
+    fun measureCheckpoints(): LongArray? = null
 }
 internal class NativeBridge : EngineBridge {
     init { System.loadLibrary("mycelium_llm") }
@@ -128,6 +136,13 @@ internal class NativeBridge : EngineBridge {
     external override fun decodeTokens(ids: IntArray): String
     /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
     external override fun lastRestoreStep(): Int
+    /**
+     * P2-1d 第 0 步的测量探针：对当前序列 0 的状态分别取 `NONE` 与 `PARTIAL_ONLY` 两份的大小、
+     * 各存一次各恢复一次，并报耗时。**跑完会把整份状态装回去**，所以引擎状态不变。
+     *
+     * 返回 null = 这台实现不支持（或没加载模型）。
+     */
+    external override fun measureCheckpoints(): LongArray?
 }
 
 /**
@@ -176,6 +191,19 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     /** 这一轮没走检查点的原因码（5/6/7），0 表示这条路没被触发。 */
     @Volatile var checkpointFallbackReason: Long = 0L
         private set
+
+    /**
+     * 「系统说内存紧张，下次进锁先把检查点整批丢掉」（Codex R2 必修项 2）。
+     *
+     * 用标记而不是在回调里直接清：仓库约定只在 `gate` 锁内访问，而 `onTrimMemory` 在**主线程**上，
+     * 同步去拿推理锁会把主线程卡在一整轮生成里。
+     */
+    private val trimRequested = AtomicBoolean(false)
+
+    /** 在锁内调用：有「该清了」的标记就整批丢掉。 */
+    private fun applyPendingTrim() {
+        if (trimRequested.compareAndSet(true, false)) forgetCheckpoints()
+    }
 
     /**
      * 原生最后交回来的那一份读数（提示 token 序列 + 8 项读数）。取消发生时，收集方会被取消，但
@@ -400,6 +428,25 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
     fun lastRestoreStep(): Int = native.lastRestoreStep()
 
+    /** 第 0 步测量探针（见 [EngineBridge.measureCheckpoints]）。 */
+    fun measureCheckpoints(): LongArray? = native.measureCheckpoints()
+
+    /**
+     * 系统内存紧张时整批丢掉检查点（Codex R2 必修项 1/2）。
+     *
+     * 为什么还要**主动预算检查**：Android 16 起 `TRIM_MEMORY_RUNNING_*` 这类级别不再下发给应用，
+     * 单靠这个回调兜不住。所以主防线是保存前的准入（单份超上限就不存），这里只是额外的保险。
+     *
+     * 实现上**不碰 `gate` 锁**：从 `onTrimMemory` 回调里同步拿推理锁会把主线程卡在一整轮生成上。
+     * 改为在同一个引擎上只打一个「该清了」的标记，下一次真正进锁时先清。
+     */
+    fun requestCheckpointTrim() {
+        trimRequested.set(true)
+    }
+
+    /** 系统真的低内存时调用：同上，只是语义更重。 */
+    fun onLowMemory() = requestCheckpointTrim()
+
     /** 上一次「取检查点」的经过（字节/位置/落点），只给调试与真机读数用。 */
     @Volatile var lastTakeDiagnosis: String = ""
         private set
@@ -421,6 +468,12 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 val cacheKey = parameters.cacheKey
                 // 上一轮的读数只在它自己那一轮里用；每一轮开头清掉，免得取消收尾读到旧的一份。
                 lastNativeReadings = null
+                // 系统在这之前说过内存紧张：现在已经在锁里了，安全地把检查点整批丢掉。
+                applyPendingTrim()
+                // 每轮重置检查点诊断字段（Codex R2 必修项 4）：否则「上一轮恢复了」会挂在这一轮上，
+                // 界面与日志读到的就是别人的结论。
+                checkpointRestoredFrom = -1
+                checkpointFallbackReason = 0L
                 // 这一轮实际请求复用的 token 数：收尾校验要用，所以声明在 try 之外。
                 var requested = 0
                 var filter = ThinkingFilter()
@@ -471,6 +524,9 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                                         // 恢复后从 cp 接着读：这一轮的「复用数」就是 cp。
                                         requested = plan.checkpoint.pos
                                         cacheOwner = cacheKey
+                                        // 成功就不该留任何回退原因（Codex R2 必修项 4：码必须反映本轮
+                                        // 真实结局，不能上一轮是 6 这一轮还挂着 6）。
+                                        checkpointFallbackReason = 0L
                                     } else {
                                         checkpointFallbackReason = CheckpointFallback.RestoreFailed.code
                                     }
@@ -507,7 +563,12 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     val stats = requireNotNull(
                         readingsOf(values, prompt, requested, parameters.maxTokens, hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos)),
                     ) { "这一轮必须给出读数" }
-                    lastStats = stats
+                    // Codex R2 必修项 4：检查点路径的回退原因必须**真正进统计**（原来只落在旁路字段里，
+                    // 交付报告与界面读的是这一份）。非 0 时优先于原生那个旧码——原生只知道 P2-1c 的
+                    // 1/2/3，不知道检查点为什么没用上。正常结束与取消收尾共用这一段。
+                    lastStats = stats.copy(
+                        reuseFallbackReason = if (checkpointFallbackReason != 0L) checkpointFallbackReason else stats.reuseFallbackReason,
+                    )
                     // P2-1d 的 S2：把这一轮在「跨过 checkpointPos」时存下的检查点取回来记进仓库。
                     // 位置与字节都由原生交回来，本侧不猜；取不到（没到落点、存失败、或模型不适用）
                     // 就什么也不记——不许拿别的位置顶替。
@@ -564,6 +625,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     lastStats = stats ?: GenerationStats(
                         0, 0, 0, 0,
                         stopped = cancelled,
+                        // 取消收尾也要带上检查点回退原因（同一套口径）。
+                        reuseFallbackReason = checkpointFallbackReason,
                         hiddenTokens = hiddenTokens,
                         hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
                         nativeReadingsComplete = false,

@@ -114,16 +114,18 @@ internal class CheckpointStore(
     }
 
     companion object {
-        /** 每个缓存键最多留几份（方案 2.4；真机实测之后再调）。 */
-        const val MAX_PER_KEY = 3
+        /**
+         * 每个缓存键最多留几份（2026-10-23 统筹裁定 + Codex R2 必修项 4）：
+         * 设为 1。对话只前进，同一会话里旧检查点直接覆盖；换会话整批作废（与 P2-1c cacheOwner 一致）。
+         */
+        const val MAX_PER_KEY = 1
 
         /**
-         * 所有检查点加起来的上限：256 **MiB**（方案 2.4；`1024 * 1024`，不是十进制 MB）。
+         * 所有检查点加起来的上限：300 **MiB**（2026-10-23 统筹裁定实测整份约 94.4 MiB 后的上限）。
          *
-         * 这只是**保留数据**的上限，不代表峰值占用：写进一份的瞬间堆里有旧+新两份，原生缓冲与 JNI
-         * 字节数组另算。真机上的单份大小（按官方 Qwen3.5-4B 配置与锁定源码布局推算约 50.25 MB，
-         * 三份约 150.75 MB）要等 S5 实测后再定这两个数。
+         * 约可保留 2~3 份快照。主动预算检查是防 OOM 的主防线（Codex R2 必修项 1/2：Android 16 起
+         * onTrimMemory RUNNING_* 级别不再下发，不能靠回调兜底）。
          */
-        const val MAX_TOTAL_BYTES = 256L * 1024 * 1024
+        const val MAX_TOTAL_BYTES = 300L * 1024 * 1024
     }
 }

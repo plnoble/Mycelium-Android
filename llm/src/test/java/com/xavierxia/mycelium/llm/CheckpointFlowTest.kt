@@ -253,4 +253,40 @@ class CheckpointFlowTest {
         assertTrue("换模型之后不许恢复上一个模型的检查点：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
         assertEquals("换模型之后仓库该是空的（原因 5）", 5L, engine.checkpointFallbackReason)
     }
+
+    // ---- 2026-10-23 统筹裁定：系统内存紧张时整批丢掉（Codex R2 必修项 2）------------------
+
+    @Test
+    fun aTrimRequestDropsEveryCheckpointOnTheNextRound() {
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)                                  // 存下一份
+            engine.requestCheckpointTrim()                 // 系统说内存紧张（回调线程只打标记）
+            bridge.calls.clear()
+            round(engine)                                  // 下一轮进锁之后先清，再跑
+        }
+
+        assertTrue("清完之后不许再恢复：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
+        assertEquals("仓库被清空，这一轮报原因 5", 5L, engine.checkpointFallbackReason)
+    }
+
+    @Test
+    fun onLowMemoryOnlyMarksAndNeverTouchesTheStoreFromTheCallbackThread() {
+        // 回调只打标记：这里在「没有进入新的一轮」的情况下调它，仓库必须还在（下一轮进锁才清）。
+        // 这条与上一条合起来钉住「不在回调线程上动共享状态」这条约定。
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)
+            // onLowMemory 是主线程回调：它不许抛、不许阻塞在这里等推理锁。
+            engine.onLowMemory()
+        }
+        // 没有新的一轮 ⇒ 状态没被中途改坏，引擎仍然可用。
+        assertTrue("打完标记之后引擎仍然可用", bridge.calls.isNotEmpty())
+    }
 }

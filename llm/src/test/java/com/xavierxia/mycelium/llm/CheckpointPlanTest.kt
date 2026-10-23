@@ -25,12 +25,24 @@ class CheckpointPlanTest {
 
     @Test
     fun aHybridModelWithAUsableCheckpointRestoresFromIt() {
-        val store = store(Triple(key, 1116, 32), Triple(key, 900, 16))
+        // 「每键只留最新一份」之后，同一键写两次只剩后写的那份；这里直接给一份可用的。
+        val store = store(Triple(key, 1116, 32))
 
         val plan = planPrefix(store, key, maxPos = 1200, enabled = true, checkpointable = true)
 
         assertTrue("混合模型有可用检查点就该用它，实际 $plan", plan is PrefixPlan.Restore)
-        assertEquals("要挑位置最大的那一份（900 那一份虽然也算「不超过」，但离得更远）", 1116, (plan as PrefixPlan.Restore).checkpoint.pos)
+        assertEquals("就用这份", 1116, (plan as PrefixPlan.Restore).checkpoint.pos)
+    }
+
+    @Test
+    fun aCheckpointPastTheSharedPrefixIsNotUsed() {
+        // 位置超过本轮公共前缀的那份不能用（恢复出来位置就是错的）。
+        val store = store(Triple(key, 1300, 32))
+
+        val plan = planPrefix(store, key, maxPos = 1200, enabled = true, checkpointable = true)
+
+        assertTrue("超出公共前缀 ⇒ 退回整段重读，实际 $plan", plan is PrefixPlan.FullReread)
+        assertEquals("原因码要是 5", 5L, (plan as PrefixPlan.FullReread).reason!!.code)
     }
 
     @Test
