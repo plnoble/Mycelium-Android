@@ -32,6 +32,9 @@ struct Engine {
     // 状态只能前进，读过去就回不去，所以**必须在 prefill 循环里**存，而不是生成结束再补。
     std::vector<uint8_t> pendingCheckpoint;
     int pendingCheckpointPos = -1;
+    // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
+    // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
+    long timing[5] = {0, 0, 0, 0, 0};
     // 上一次恢复失败在哪一步（0 = 成功，1 = set_data_ext 短读，2 = seq_rm 返回 false）。
     // 只给诊断用：真机上「为什么没走检查点」要靠它归因。
     int lastRestoreStep = -1;
@@ -282,14 +285,18 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             pos += length;
             // 状态只能前进，读过去就回不去了：正好停在落点上的这一刻必须存（整份状态，含注意力 KV）。
             if (saving && pos == saveCheckpointAt) {
+                const auto t_size = Clock::now();
                 const size_t size = llama_state_seq_get_size_ext(
                     engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                engine.timing[2] = elapsed(t_size);
                 // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
                 const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
                 if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
                     std::vector<uint8_t> buffer(size);
+                    const auto t_data = Clock::now();
                     const size_t written = llama_state_seq_get_data_ext(
                         engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                    engine.timing[3] = elapsed(t_data);
                     // 方案审必修项 2：判「等于」，不是判非零。
                     if (written == size) {
                         engine.pendingCheckpoint = std::move(buffer);
@@ -408,10 +415,14 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
         auto * memory = llama_get_memory(engine.context);
         // 统筹裁定的三步恢复（2026-10-23；取代第 7 节「禁止先删」那条旧指令）：
         // 1) 整段清空序列 0 —— 不留任何尾巴，绕开循环层「rollback >= 1」的限制；失败就不许往下装。
+        const auto t_clear = Clock::now();
         if (!llama_memory_seq_rm(memory, 0, -1, -1)) { engine.lastRestoreStep = 4; return JNI_FALSE; }
+        engine.timing[0] = elapsed(t_clear);
         // 2) 整份装回（注意力 KV + 循环层），返回值必须**等于字节数**。
+        const auto t_apply = Clock::now();
         const size_t read = llama_state_seq_set_data_ext(
             engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        engine.timing[1] = elapsed(t_apply);
         if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
         // 3) 从 pos 接着读由 generate 那条路做（restoredTo = pos，跳过 P2-1c 的裁尾与清空）。
         engine.lastRestoreStep = 0;
@@ -449,7 +460,9 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
         engine.pendingCheckpointPos = -1;
         return nullptr;
     }
+    const auto t_copy = Clock::now();
     env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
+    engine.timing[4] = elapsed(t_copy);
     // 字节取走，位置也一起作废：下一次没存就是「没有待取的」。
     // 全量审必修项 3：取走后彻底释放 vector 内存，不让几十 MB 留在原生堆上。
     std::vector<uint8_t>().swap(engine.pendingCheckpoint);
@@ -464,6 +477,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
  * 与 `takeCheckpoint()` 的区别：**不新建 JByteArray、不抛异常**。清理路径（异常收尾、低内存丢弃）
  * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
  */
+/** P2-1d 诊断：返回 [清空序列 ms, set_data_ext ms, get_size_ext ms, get_data_ext ms, 取字节 JNI 拷贝 ms]。 */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_checkpointTimings(JNIEnv * env, jobject) {
+    auto result = env->NewLongArray(5);
+    if (!result) return nullptr;
+    env->SetLongArrayRegion(result, 0, 5, engine.timing);
+    if (env->ExceptionCheck()) return nullptr;
+    return result;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_discardCheckpoint(JNIEnv *, jobject) {
     std::vector<uint8_t>().swap(engine.pendingCheckpoint);

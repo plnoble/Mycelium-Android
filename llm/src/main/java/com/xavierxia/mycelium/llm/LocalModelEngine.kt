@@ -105,6 +105,9 @@ internal interface EngineBridge {
      */
     fun tokenizeBoundary(messages: ByteArray): LongArray? = null
 
+    /** 诊断：分段计时，默认 null。 */
+    fun checkpointTimings(): LongArray? = null
+
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean = false
 
@@ -143,6 +146,8 @@ internal class NativeBridge : EngineBridge {
     external override fun discardCheckpoint()
     /** 落点计算：返 [带 generation prompt 的 token 数, 不带的]（方案 2.1）。 */
     external override fun tokenizeBoundary(messages: ByteArray): LongArray?
+    /** 诊断：分段计时 [清空, set_data_ext, get_size, get_data, JNI 拷贝]（毫秒）。 */
+    external override fun checkpointTimings(): LongArray?
     /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
     external override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
@@ -465,6 +470,18 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      *
      * 只加了两轮 tokenize 的开销（不建上下文、不读 KV），相对几秒的提示读取可以忽略。
      */
+    /** 诊断：分段计时（拿锁，与其余状态操作串行）。 */
+    suspend fun checkpointTimings(): LongArray? = gate.withLock {
+        if (loaded.value == null) return@withLock null
+        native.checkpointTimings()
+    }
+
+    /** 只给真机诊断用：直接对已经编码好的 payload 调 `tokenizeBoundary()`。 */
+    suspend fun boundaryForTest(payload: ByteArray): LongArray? = gate.withLock {
+        if (loaded.value == null) return@withLock null
+        runNative { native.tokenizeBoundary(payload) }
+    }
+
     suspend fun checkpointPositionFor(messages: List<ChatMessage>): Int {
         val snapshot = messages.toList()
         if (snapshot.isEmpty()) return -1

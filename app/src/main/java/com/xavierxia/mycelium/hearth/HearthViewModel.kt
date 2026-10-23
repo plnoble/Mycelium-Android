@@ -1053,11 +1053,13 @@ class HearthViewModel @JvmOverloads constructor(
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
                     mutable.update { it.copy(notice = null) }
                 }
-                // P2-1d：**暂时关着**（2026-10-23 真机实测结论）。检查点机制本身是对的——真机上
-                // `reused=264 / restoredFrom=264 / reason=0`，确实只读了 137 个 token——但**恢复一份
-                // 65 MB 状态在这台机器上要约 4–5 秒**，把省下的读取时间全吃掉了，用户实测「第 2 轮更慢」。
-                // 所以先关：界面行为回到 P2-1c 的整段重读。要打开必须先把这个恢复成本降下来。
-                (engine as? LocalModelEngine)?.checkpointEnabled = false
+                // P2-1d：显式打开检查点复用（库里默认仍是关，方便测例与对照）。
+                //
+                // 2026-10-23 真机对照（同一段 223 token、温度 0）：开=1053 ms（复用 195、实读 28）、
+                // 关=7351 ms（整段 223）——**快 7 倍**；恢复各段合计仅 17 ms（清空 0/set_data 4/JNI 13）。
+                // 一度以为「恢复要 4–5 秒」而关掉它是**错的推断**：拿第 2 轮的绝对耗时去减第 1 轮读 token
+                // 的估计，忽略了「每个 token 的注意力代价随已读长度增长」。不同长度的两轮不能直接比。
+                (engine as? LocalModelEngine)?.checkpointEnabled = true
                 engine
             }
             is Chosen.Cloud -> {
