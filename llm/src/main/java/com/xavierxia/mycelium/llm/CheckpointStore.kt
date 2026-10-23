@@ -51,17 +51,21 @@ internal class CheckpointStore(
     /**
      * 存一份。返回是否真的存下了：单份就超过总上限时**不存**（返回 false），交给调用方记日志——
      * 直接拒绝比先塞进去再淘汰自己更清楚。
+     *
+     * **先腾空间、再拷贝**（方案审必修项 6）：第一版是「先 `copyOf()` 再淘汰」，于是淘汰旧那份之前
+     * 堆里同时有旧+新两份（原生缓冲与 JNI 数组另算），峰值比 `totalBytes` 高得多。现在先用要存的
+     * 字节数腾地方，腾不出来就不拷。
      */
     fun put(key: String, pos: Int, bytes: ByteArray): Boolean {
         require(pos >= 0) { "检查点位置不能为负" }
         if (bytes.isEmpty()) return false
-        if (bytes.size.toLong() > maxTotalBytes) return false
+        val incoming = bytes.size.toLong()
+        if (incoming > maxTotalBytes) return false
         val list = byKey.getOrPut(key) { mutableListOf() }
-        list += Checkpoint(pos, bytes.copyOf(), ++nextSequence)
         // 单键超限：先淘汰这个键里最旧的。
-        while (list.size > maxPerKey) list.removeAt(0)
-        // 总量超限：全局淘汰最旧的（跨键），直到回到上限以内。
-        while (totalBytes > maxTotalBytes) {
+        while (list.size >= maxPerKey) list.removeAt(0)
+        // 总量超限：全局淘汰最旧的（跨键），直到「再放一份也放得下」。
+        while (totalBytes + incoming > maxTotalBytes) {
             val oldestKey = byKey.entries
                 .filter { it.value.isNotEmpty() }
                 .minByOrNull { entry -> entry.value.minOf { it.sequence } }
@@ -69,7 +73,24 @@ internal class CheckpointStore(
             oldestKey.value.removeAt(0)
             if (oldestKey.value.isEmpty()) byKey.remove(oldestKey.key)
         }
+        if (totalBytes + incoming > maxTotalBytes) return false
+        list += Checkpoint(pos, bytes.copyOf(), ++nextSequence)
         return true
+    }
+
+    /**
+     * 作废同一键下「位置超过 [validPrefix]」的检查点（方案审必修项 3）。
+     *
+     * 为什么需要：本轮在 400 分叉之后，仓库里可能还留着 700 那一份；之后公共前缀长过 700，`find`
+     * 又会把它选中——可它对应的是**另一条分支**上的状态，恢复出来就答非所问。上游 server 也会删
+     * 回退点之后的检查点（`tools/server/server-context.cpp`）。
+     *
+     * @param validPrefix 这一轮真实公共前缀的长度；超过它的位置都不算数。
+     */
+    fun invalidateBeyond(key: String, validPrefix: Int) {
+        val list = byKey[key] ?: return
+        list.removeAll { it.pos > validPrefix }
+        if (list.isEmpty()) byKey.remove(key)
     }
 
     /**
@@ -96,7 +117,13 @@ internal class CheckpointStore(
         /** 每个缓存键最多留几份（方案 2.4；真机实测之后再调）。 */
         const val MAX_PER_KEY = 3
 
-        /** 所有检查点加起来的上限：256 MB（方案 2.4）。 */
+        /**
+         * 所有检查点加起来的上限：256 **MiB**（方案 2.4；`1024 * 1024`，不是十进制 MB）。
+         *
+         * 这只是**保留数据**的上限，不代表峰值占用：写进一份的瞬间堆里有旧+新两份，原生缓冲与 JNI
+         * 字节数组另算。真机上的单份大小（按官方 Qwen3.5-4B 配置与锁定源码布局推算约 50.25 MB，
+         * 三份约 150.75 MB）要等 S5 实测后再定这两个数。
+         */
         const val MAX_TOTAL_BYTES = 256L * 1024 * 1024
     }
 }

@@ -237,14 +237,22 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         if (reused + read != count && generated != 0L) {
             error("提示还没读完就报了生成 token：读完 ${reused + read}/$count、生成 $generated")
         }
-        if (reason !in 0L..4L) error("原生报的未复用原因码 $reason 不认识")
+        // P2-1d：原因码范围扩到 0..7（5/6/7 是检查点路径的码，见 CheckpointFallback）。
+        // 方案审必修项 5：只改范围不够，下面几条一致性校验要按**执行路径**分开判，否则
+        // 「首轮报 5」「开关关着报 7」会被这里当协议错误直接抛掉，真机读数会是零。
+        if (reason !in 0L..7L) error("原生报的未复用原因码 $reason 不认识")
         if (reason == 4L) error("原生报了这一轮 decode 失败（原因 4），这一轮不能当读数用")
-        if ((reason == 1L) != (requested == 0)) {
+        // 「没有任何东西可复用」（原因 1）只属于「这一轮压根没请求复用」那条路；检查点的三个码
+        // （5/6/7）也可能出现在 requested>0 的轮次里——它们说的是「检查点没帮上」，不是「没请求」。
+        val checkpointReason = reason in 5L..7L
+        if (!checkpointReason && (reason == 1L) != (requested == 0)) {
             error("原因码 $reason 与这一轮请求的复用数 $requested 不一致")
         }
-        if ((reason == 2L || reason == 3L) && reused != 0L) {
+        // 说「没复用」的码：2/3（P2-1c）与 5/6/7（P2-1d）都必须是 reused == 0。
+        if ((reason == 2L || reason == 3L || checkpointReason) && reused != 0L) {
             error("原因码 $reason 说没有复用，却报了复用 $reused")
         }
+        // 请求了复用、报「成功复用」（原因 0），却一个都没复用：没有理由。
         if (reason == 0L && reused == 0L && requested > 0) {
             error("这一轮请求了复用却没复用，也没给出原因")
         }

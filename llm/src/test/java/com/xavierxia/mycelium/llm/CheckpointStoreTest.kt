@@ -116,4 +116,55 @@ class CheckpointStoreTest {
 
         assertArrayEquals("存进来的字节必须自己留一份，调用方改了不能影响它", bytes(4, fill = 7), store.find("k", maxPos = 10)?.bytes)
     }
+
+    // ---- 方案审必修项 3：同键分叉后，旧分支的检查点必须作废 -------------------------------
+
+    @Test
+    fun aCheckpointFromAnAbandonedBranchIsDropped() {
+        // 场景：本轮在 400 分叉，仓库里还留着上一轮的 700。前缀长过 700 之后 find 会挑中 700，
+        // 但那是**另一条分支**上的状态——恢复出来就答非所问。
+        val store = CheckpointStore()
+        store.put("k", pos = 400, bytes(8))
+        store.put("k", pos = 700, bytes(8))
+
+        store.invalidateBeyond("k", validPrefix = 400)
+
+        assertTrue("700 那份必须真的被删掉", store.countFor("k") == 1)
+        assertEquals("留下的那份位置不超过有效前缀", 400, store.find("k", maxPos = 1200)?.pos)
+    }
+
+    @Test
+    fun invalidatingBeyondKeepsTheOnesAtOrBeforeThePrefix() {
+        val store = CheckpointStore()
+        store.put("k", pos = 100, bytes(8))
+        store.put("k", pos = 400, bytes(8))
+        store.put("k", pos = 700, bytes(8))
+
+        store.invalidateBeyond("k", validPrefix = 400)
+
+        assertEquals("等于有效前缀的那份要留下", 2, store.countFor("k"))
+        assertEquals("挑出来的仍然是最靠近前缀的那份", 400, store.find("k", maxPos = 1200)?.pos)
+    }
+
+    @Test
+    fun invalidatingBeyondOneKeyLeavesTheOtherKeysAlone() {
+        val store = CheckpointStore()
+        store.put("a", 700, bytes(8))
+        store.put("b", 700, bytes(8))
+
+        store.invalidateBeyond("a", validPrefix = 400)
+
+        assertEquals("只动作废的那个键", 0, store.countFor("a"))
+        assertEquals("别的键不受影响", 1, store.countFor("b"))
+    }
+
+    @Test
+    fun invalidatingBeyondAnUnknownKeyIsHarmless() {
+        val store = CheckpointStore()
+        store.put("a", 700, bytes(8))
+
+        store.invalidateBeyond("nope", validPrefix = 1)
+
+        assertEquals(1, store.size)
+    }
 }
