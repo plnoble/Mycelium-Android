@@ -120,23 +120,48 @@ class ModelRegistry(private val directory: File, private val documents: ModelDoc
     }
     private fun read(): List<LocalModelRecord> {
         if (!index.exists()) return emptyList()
-        val items = JSONArray(index.readText())
+        val text = index.readText()
+        // 两种格式都要读（2026-10-23 真机事故）：这条分支只会写旧的裸数组，而 P2-5 已经把登记表升级成
+        // `{"models":[...],"default":...}`。手机上先跑过 P2-5 的包之后，这里再按裸数组解析就会抛
+        // JSONException，整段 JSON 被当成错误信息显示在界面上——看起来像「打不开模型」。
+        val items = if (text.trimStart().startsWith("[")) {
+            JSONArray(text)
+        } else {
+            JSONObject(text).optJSONArray("models") ?: JSONArray()
+        }
         return (0 until items.length()).map {
             val row = items.getJSONObject(it)
             LocalModelRecord(row.getString("uri"), row.getString("name"), row.getLong("size"),
                 row.getString("sha256"), row.getBoolean("copied"))
         }
     }
+
     private fun write(records: List<LocalModelRecord>) {
         directory.mkdirs()
+        // 写也要**保住新格式里这条分支不认识的字段**（`default`、每条记录的 `trial`）：手机上那份是
+        // P2-5 写的，直接用裸数组覆盖会悄悄丢掉「默认模型」与「试跑结果」。
+        val previous = runCatching {
+            val text = index.readText()
+            if (text.trimStart().startsWith("[")) null else JSONObject(text)
+        }.getOrNull()
+        val trials = mutableMapOf<String, JSONObject>()
+        previous?.optJSONArray("models")?.let { rows ->
+            for (i in 0 until rows.length()) {
+                val row = rows.getJSONObject(i)
+                row.optJSONObject("trial")?.let { trials[row.getString("sha256")] = it }
+            }
+        }
         val array = JSONArray()
         records.forEach {
-            array.put(JSONObject().put("uri", it.uri).put("name", it.name).put("size", it.size)
-                .put("sha256", it.sha256).put("copied", it.copied))
+            val row = JSONObject().put("uri", it.uri).put("name", it.name).put("size", it.size)
+                .put("sha256", it.sha256).put("copied", it.copied)
+            trials[it.sha256]?.let { trial -> row.put("trial", trial) }
+            array.put(row)
         }
+        val body = JSONObject().put("models", array).put("default", previous?.optString("default").orEmpty())
         val temporary = File.createTempFile("registry-", ".tmp", directory)
         try {
-            temporary.outputStream().use { out -> out.write(array.toString().toByteArray()); out.fd.sync() }
+            temporary.outputStream().use { out -> out.write(body.toString().toByteArray()); out.fd.sync() }
             Files.move(temporary.toPath(), index.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } finally { temporary.delete() }
     }

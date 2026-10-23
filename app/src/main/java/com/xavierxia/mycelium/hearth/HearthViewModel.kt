@@ -380,7 +380,7 @@ class HearthViewModel @JvmOverloads constructor(
                 )
             }
         } catch (failure: Exception) {
-            mutable.update { it.copy(notice = failure.message ?: "本地数据打不开") }
+            mutable.update { it.copy(notice = failure.shortMessage("本地数据打不开")) }
             return
         } catch (failure: UnsatisfiedLinkError) {
             // Robolectric and other non-device runs cannot load SQLCipher.
@@ -446,7 +446,7 @@ class HearthViewModel @JvmOverloads constructor(
                         historyFailed = true,
                         openConversation = null,
                         messages = emptyList(),
-                        notice = failure.message ?: "历史读不出来",
+                        notice = failure.shortMessage("历史读不出来"),
                     )
                 }
             }
@@ -788,7 +788,7 @@ class HearthViewModel @JvmOverloads constructor(
                             historyFailed = true,
                             openConversation = null,
                             messages = emptyList(),
-                            notice = failure.message ?: "这段对话读不出来",
+                            notice = failure.shortMessage("这段对话读不出来"),
                         )
                     }
                 }
@@ -1367,4 +1367,19 @@ class HearthViewModel @JvmOverloads constructor(
     private fun gateway(): AndroidGateway = AndroidGateway(getApplication(), cloudSettings.allBaseUrls())
 
     private fun now(): String = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString()
+    /**
+     * 给用户看的一句话错误。
+     *
+     * 为什么需要它：真机事故里 JSONException 的 message 是**整段 JSON**（几 KB 的登记表内容），
+     * 直接丢到界面上就成了满屏乱码，谁也看不出是「登记表格式不对」。这里只留一句话，长消息截断——
+     * 细节仍然进日志，不在界面上呈现。
+     */
+    private fun Throwable.shortMessage(fallback: String): String {
+        val text = message?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        return when {
+            text.isEmpty() -> fallback
+            text.length > 160 -> text.take(160) + "…"
+            else -> text
+        }
+    }
 }
