@@ -1053,10 +1053,11 @@ class HearthViewModel @JvmOverloads constructor(
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
                     mutable.update { it.copy(notice = null) }
                 }
-                // P2-1d：产品在这里**显式打开**检查点复用（库里的默认仍是关，方便测例与对照）。
-                // 真机上温度 0 的逐字比对已经通过：开关开着与整段重读的正文完全一致，
-                // 读提示 1155 ms vs 2892 ms（约 2.5 倍）。整份状态每份约 55 MB，每会话只留一份。
-                (engine as? LocalModelEngine)?.checkpointEnabled = true
+                // P2-1d：**暂时关着**（2026-10-23 真机实测结论）。检查点机制本身是对的——真机上
+                // `reused=264 / restoredFrom=264 / reason=0`，确实只读了 137 个 token——但**恢复一份
+                // 65 MB 状态在这台机器上要约 4–5 秒**，把省下的读取时间全吃掉了，用户实测「第 2 轮更慢」。
+                // 所以先关：界面行为回到 P2-1c 的整段重读。要打开必须先把这个恢复成本降下来。
+                (engine as? LocalModelEngine)?.checkpointEnabled = false
                 engine
             }
             is Chosen.Cloud -> {
@@ -1121,10 +1122,8 @@ class HearthViewModel @JvmOverloads constructor(
                         runCatching { engine.checkpointPositionFor(messages) }.getOrDefault(-1)
                     } ?: -1
                 }
-                model.generate(
-                    messages,
-                    turn.character.parameters().copy(cacheKey = turn.cacheKey, checkpointPos = checkpointPos),
-                ).collect { delta ->
+                val parameters = turn.character.parameters().copy(cacheKey = turn.cacheKey, checkpointPos = checkpointPos)
+                model.generate(messages, parameters).collect { delta ->
                     // A delta that arrives after the stop is not part of this answer any more: the turn
                     // keeps what it had produced *before* the stop, so this one is dropped instead of
                     // being shown or stored (and it no longer counts as "produced").
@@ -1241,6 +1240,23 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
+        // 一轮结束的读数（P2-1d 诊断）：真机上看得出「这一轮到底复用了多少、检查点有没有存/恢复」。
+        // 只写日志，不进界面。
+        if (!turn.chosen.isCloud) {
+            val stats = engine.lastStats
+            val localEngine = engine as? LocalModelEngine
+            val line = "round: prompt=${stats?.promptTokens} reused=${stats?.reusedPromptTokens} " +
+                "read=${stats?.readPromptTokens} promptMs=${stats?.promptMillis} " +
+                "reason=${stats?.reuseFallbackReason} restoredFrom=${localEngine?.checkpointRestoredFrom} " +
+                "savedPos=${stats?.checkpointPos} savedBytes=${stats?.checkpointBytes} " +
+                "trimSkipped=${localEngine?.checkpointSkippedForMemory} " +
+                "cacheKeyLen=${turn.cacheKey?.length ?: -1}"
+            // 这台机器上 `adb logcat` 读不到缓冲区（0 行），所以再落一份到应用内文件，方便事后取证。
+            runCatching {
+                java.io.File(getApplication<android.app.Application>().filesDir, "p2-1d-rounds.txt")
+                    .appendText(line + "\n")
+            }
+        }
         // A turn from a page the user has already left is dropped whole: nothing is shown and
         // nothing is stored, no matter where the cancellation happened to land.
         if (token != generationToken) return
