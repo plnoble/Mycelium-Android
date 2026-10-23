@@ -65,7 +65,12 @@ class CheckpointEqualityDeviceTest {
      */
     private suspend fun round(engine: LocalModelEngine, turn: Int): Pair<String, String> {
         val whole = engine.promptTokenIds(history(turn))
-        val checkpointPos = (whole.size - TAIL_SCAFFOLD_TOKENS).coerceAtLeast(1)
+        // 落点必须用**应用侧同一个算法**（`tokenizeBoundary`：带/不带 generation prompt 两次 tokenize
+        // 的长度差），不能写死常数。2026-10-23 夜的真机事故就是这条：这里原本写死「末尾 4 个 token
+        // 是脚手架」，而这套模板实测是 7 个（tokenizeBoundary = [27, 20]），于是落点落在脚手架中间，
+        // 快照把「之后会被回答替换掉」的几个 token 也带了进去，循环层状态因此与真算出来的不一致——
+        // 温度 0 逐字对照稳定给出不同正文。
+        val checkpointPos = engine.checkpointPositionFor(history(turn)).let { if (it > 0) it else (whole.size - 1).coerceAtLeast(1) }
         val text = engine.generate(
             history(turn),
             GenerationParameters(
@@ -126,6 +131,9 @@ class CheckpointEqualityDeviceTest {
             log += "[B 关] $m2"
             log += "[B 关] $m3"
             log += "[B 关] 第 2/3 轮正文：$b1 -> $b2 -> $b3"
+
+            // 先把证据落盘再断言：断言失败时不能留下上一次运行的旧文件（这一夜就被它骗过一次）。
+            File(context.filesDir, "p2-1d-s5.txt").writeText("占位：见下方重写\n")
 
             // ---- 生死线：逐字相同 -----------------------------------------------------------
             assertEquals("第 1 轮的正文必须一模一样（同一份提示、温度 0）", a1, b1)

@@ -1059,7 +1059,12 @@ class HearthViewModel @JvmOverloads constructor(
                 // 关=7351 ms（整段 223）——**快 7 倍**；恢复各段合计仅 17 ms（清空 0/set_data 4/JNI 13）。
                 // 一度以为「恢复要 4–5 秒」而关掉它是**错的推断**：拿第 2 轮的绝对耗时去减第 1 轮读 token
                 // 的估计，忽略了「每个 token 的注意力代价随已读长度增长」。不同长度的两轮不能直接比。
-                (engine as? LocalModelEngine)?.checkpointEnabled = true
+                // **默认关**（2026-10-23 夜验收结论）：应用级温度 0 逐字对照**不过**——开检查点给
+                // 「想静静地看着你。」，整段重读给「想静静看着窗外的雨。」，两次运行稳定复现。
+                // 状态恢复本身是成功的（reason=0、restoredFrom=56、写入读回字节相等），差异来源尚未定论：
+                // 候选一是「恢复后只读 31 个 token」与「整段读 87 个」的矩阵乘形状不同导致浮点末位差异，
+                // 候选二是恢复的状态与真算出来的不完全一致。按统筹裁定：逐字比对不过就保持总开关关着交付。
+                (engine as? LocalModelEngine)?.checkpointEnabled = false
                 engine
             }
             is Chosen.Cloud -> {
