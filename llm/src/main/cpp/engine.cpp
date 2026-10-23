@@ -38,7 +38,8 @@ struct Engine {
     ~Engine() { clear(); }
     void clear() {
         cachedPrompt.clear();
-        pendingCheckpoint.clear();
+        // 全量审必修项 3：clear() 必须彻底释放 vector 容量，不能只把 size 变 0 却保留几十 MB 原生内存。
+        std::vector<uint8_t>().swap(pendingCheckpoint);
         pendingCheckpointPos = -1;
         if (context) llama_free(context);
         if (model) llama_model_free(model);
@@ -283,7 +284,9 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             if (saving && pos == saveCheckpointAt) {
                 const size_t size = llama_state_seq_get_size_ext(
                     engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
-                if (size > 0) {
+                // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
+                const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
+                if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
                     std::vector<uint8_t> buffer(size);
                     const size_t written = llama_state_seq_get_data_ext(
                         engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
@@ -442,7 +445,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
     if (!out) return nullptr;
     env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
     // 字节取走，位置也一起作废：下一次没存就是「没有待取的」。
-    engine.pendingCheckpoint.clear();
+    // 全量审必修项 3：取走后彻底释放 vector 内存，不让几十 MB 留在原生堆上。
+    std::vector<uint8_t>().swap(engine.pendingCheckpoint);
     engine.pendingCheckpointPos = -1;
     if (env->ExceptionCheck()) return nullptr;
     return out;

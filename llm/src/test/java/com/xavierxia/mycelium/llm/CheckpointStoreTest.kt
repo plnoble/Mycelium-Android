@@ -200,4 +200,17 @@ class CheckpointStoreTest {
         assertNull("最旧的 a 被挤掉", store.find("a", maxPos = 10))
         assertEquals(40, store.find("d", maxPos = 40)?.pos)
     }
+
+    @Test
+    fun evictingTheCurrentKeyDuringGlobalEvictionDoesNotLoseTheIncomingOne() {
+        // 全量审必修项 9 回归：maxPerKey=3、预算 100，依次写 a:40、b:40、a:40。
+        // 写第三次时 a 既是当前键也是最旧的，旧 a 被全局淘汰时不许把新 a 丢掉。
+        val store = CheckpointStore(maxPerKey = 3, maxTotalBytes = 100)
+        store.put("a", 10, bytes(40))
+        store.put("b", 20, bytes(40))
+        assertTrue("新 a 必须存下", store.put("a", 30, bytes(40)))
+
+        assertEquals("新 a 必须查得到（不能因为旧 a 被清而丢掉）", 30, store.find("a", maxPos = 100)?.pos)
+        assertEquals("b 还在", 20, store.find("b", maxPos = 100)?.pos)
+    }
 }

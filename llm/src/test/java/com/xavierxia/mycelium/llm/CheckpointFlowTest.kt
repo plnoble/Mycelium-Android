@@ -34,7 +34,7 @@ class CheckpointFlowTest {
      * @param saveBytes 跨过落点时交回来的字节；null = 存不下来。
      * @param restoreOk `restoreCheckpoint()` 的回答。
      */
-    private class Recorder(
+    private open class Recorder(
         private val checkpointable: Boolean = true,
         private val saveBytes: ByteArray? = ByteArray(16) { 3 },
         private val restoreOk: Boolean = true,
@@ -286,7 +286,55 @@ class CheckpointFlowTest {
             // onLowMemory 是主线程回调：它不许抛、不许阻塞在这里等推理锁。
             engine.onLowMemory()
         }
-        // 没有新的一轮 ⇒ 状态没被中途改坏，引擎仍然可用。
         assertTrue("打完标记之后引擎仍然可用", bridge.calls.isNotEmpty())
+    }
+
+    // ---- 全量审必修项 1 / 2 回归 ---------------------------------------------------------
+
+    @Test
+    fun editingThePrefixPreventsRestoringACheckpointBeyondTheRealCommonPrefix() {
+        // 全量审必修项 1：上一轮存了位置 15 的快照，这一轮会话被编辑了（真实公共前缀缩短到 5）。
+        // 即使这一轮传进来的 checkpointPos 还是 15，也不能恢复 15 的快照——位置对不上。
+        val bridge = object : Recorder() {
+            var round = 0
+            override fun tokenize(messages: ByteArray): IntArray {
+                round++
+                // 第 1 轮：20 个 token 全是 1；第 2 轮：前 5 个是 1，后面变成 2（真实公共前缀只有 5）
+                return if (round == 1) IntArray(20) { 1 } else IntArray(20) { if (it < 5) 1 else 2 }
+            }
+        }
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine, checkpointPos = 15) // 第 1 轮存下 15
+            bridge.calls.clear()
+            // 第 2 轮：真实公共前缀只有 5，目标落点传 15
+            round(engine, checkpointPos = 15)
+        }
+
+        assertTrue("超出真实前缀的检查点绝不许恢复：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
+        assertEquals("超出公共前缀，这一轮必须报原因 5", 5L, engine.checkpointFallbackReason)
+        assertEquals("不许声称恢复了", -1, engine.checkpointRestoredFrom)
+    }
+
+    @Test
+    fun aRestoreFailureCleansUpAndReadsFromZero() {
+        // 全量审必修项 2：恢复失败必须清干净从 0 读，不能报「reason=6 却复用了 N 个 token」。
+        val bridge = Recorder(restoreOk = false)
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine) // 存 15
+            bridge.calls.clear()
+            round(engine) // 恢复失败
+        }
+
+        assertTrue("尝试过恢复：${bridge.calls}", bridge.calls.any { it.startsWith("restore") })
+        assertEquals("失败报原因 6", 6L, engine.checkpointFallbackReason)
+        assertEquals("恢复失败后必须从 0 读（复用数为 0）", 0, bridge.lastReuse)
+        assertEquals("统计里的复用数也必须是 0", 0L, engine.lastStats?.reusedPromptTokens)
+        assertEquals("统计里的原因必须是 6", 6L, engine.lastStats?.reuseFallbackReason)
     }
 }

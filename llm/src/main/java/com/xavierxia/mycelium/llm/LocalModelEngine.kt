@@ -488,12 +488,16 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 // 那里读，不再走「共享前缀 + 自己裁」那条判断——那条对混合模型会失败并整段重读。
                 var restoredTo = -1
                 try {
-                    // A round without a key must not leave a cached prompt behind either: on this one
-                    // native context such a round clears the KV and reads everything, so afterwards the
-                    // engine holds a prompt the old key does not describe. Keeping the old ownership
-                    // would let a later round with that key reuse a prefix that belongs to another
-                    // round. Nothing is reused here either way (plan review, must-fix 2).
-                    if (cacheKey == null) forgetCachedPrompt()
+                    // 换会话或无键轮次（全量审必修项 4）：检查点与缓存一起作废。
+                    // 引擎本来就只有一组 cacheOwner/cachedPrompt，换了键就不能再保留上一个会话的状态。
+                    if (cacheKey != cacheOwner) {
+                        cacheOwner?.let { checkpoints.invalidate(it) }
+                        forgetCachedPrompt()
+                    }
+                    if (cacheKey == null) {
+                        forgetCachedPrompt()
+                        forgetCheckpoints()
+                    }
                     requested = 0
                     // P2-1d：这一轮要不要存检查点，**在进原生之前**就定下来（原生那段跑在别的线程上，
                     // 在里面写外面的变量不安全，第一版就因此丢掉过落点）。
@@ -504,30 +508,39 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
-                        val reuse = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
-                        requested = reuse
-                        // P2-1d：检查点路径。**总开关默认关**（方案审必修项 7：真机逐字比对没做之前
-                        // 不许默认开），关着时走 P2-1c 的老路，一个检查点接口都不碰。
+                        // 全量审必修项 1（P1）：挑选检查点的上限必须是**真实公共前缀**，绝不能是目标落点！
+                        // 目标落点（checkpointPos）是「这一轮想在哪存」，真实公共前缀（shared）是「和上一轮
+                        // 重合了多少」。若会话被编辑，shared 只有 2 而 checkpointPos 是 15，传 checkpointPos
+                        // 就会挑中 15 的旧快照，把另一条分支的状态恢复出来。
+                        val shared = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
+                        requested = shared
                         if (checkpointWanted) {
+                            // 先作废超出真实公共前缀的检查点（分叉处理，全量审必修项 1/4）
+                            checkpoints.invalidateBeyond(cacheKey, shared)
                             when (val plan = planPrefix(
                                 store = checkpoints,
                                 key = cacheKey,
-                                maxPos = parameters.checkpointPos,
+                                maxPos = shared,
                                 enabled = true,
                                 checkpointable = true,
                             )) {
                                 is PrefixPlan.Restore -> {
-                                    // 恢复失败 ⇒ 原因 6，整段重读（方案 2.2）。
+                                    // 全量审必修项 2（P1）：恢复失败必须「清干净、从 0 重读」。
                                     if (native.restoreCheckpoint(plan.checkpoint.bytes, plan.checkpoint.pos)) {
                                         checkpointRestoredFrom = plan.checkpoint.pos
                                         restoredTo = plan.checkpoint.pos
                                         // 恢复后从 cp 接着读：这一轮的「复用数」就是 cp。
                                         requested = plan.checkpoint.pos
                                         cacheOwner = cacheKey
-                                        // 成功就不该留任何回退原因（Codex R2 必修项 4：码必须反映本轮
-                                        // 真实结局，不能上一轮是 6 这一轮还挂着 6）。
                                         checkpointFallbackReason = 0L
                                     } else {
+                                        // 恢复失败：作废坏快照、清缓存元数据、从 0 重读，绝不能留着
+                                        // requested>0 去撞原生，否则收尾统计自相矛盾（reason=6, reused>0）。
+                                        checkpoints.invalidate(cacheKey)
+                                        forgetCachedPrompt()
+                                        requested = 0
+                                        restoredTo = -1
+                                        checkpointRestoredFrom = -1
                                         checkpointFallbackReason = CheckpointFallback.RestoreFailed.code
                                     }
                                 }
@@ -607,6 +620,11 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
+                    // 全量审必修项 4：异常与取消时，检查点必须跟着作废，不能保留不可信的状态；
+                    // 在途的原生缓冲也必须取走丢掉，不占用原生内存（必修项 3）。
+                    forgetCheckpoints()
+                    native.takeCheckpoint()
+                    native.takeCheckpointPos()
                     // 收尾统计：有可靠读数就用，读数不合格就当「没有读数」。这里绝不能因为解析出错
                     // 而顶掉原来那个异常（方案审 r2 必修 2）。
                     val readings = lastNativeReadings

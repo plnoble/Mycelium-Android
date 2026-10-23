@@ -61,10 +61,9 @@ internal class CheckpointStore(
         if (bytes.isEmpty()) return false
         val incoming = bytes.size.toLong()
         if (incoming > maxTotalBytes) return false
-        val list = byKey.getOrPut(key) { mutableListOf() }
-        // 单键超限：先淘汰这个键里最旧的。
-        while (list.size >= maxPerKey) list.removeAt(0)
-        // 总量超限：全局淘汰最旧的（跨键），直到「再放一份也放得下」。
+        // 全量审必修项 9：全局淘汰先做，**淘汰完再拿当前键的 list**。
+        // 如果先拿 list 再全局淘汰，当前键若正好是最旧的被 remove(key)，追加就会打到
+        // 脱离 byKey 映射的悬空 list 上，造成「返回 true 实际查不到」的假成功。
         while (totalBytes + incoming > maxTotalBytes) {
             val oldestKey = byKey.entries
                 .filter { it.value.isNotEmpty() }
@@ -74,6 +73,8 @@ internal class CheckpointStore(
             if (oldestKey.value.isEmpty()) byKey.remove(oldestKey.key)
         }
         if (totalBytes + incoming > maxTotalBytes) return false
+        val list = byKey.getOrPut(key) { mutableListOf() }
+        while (list.size >= maxPerKey) list.removeAt(0)
         list += Checkpoint(pos, bytes.copyOf(), ++nextSequence)
         return true
     }
