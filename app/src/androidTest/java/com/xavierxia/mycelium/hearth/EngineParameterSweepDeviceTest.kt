@@ -1,4 +1,4 @@
-﻿package com.xavierxia.mycelium.hearth
+package com.xavierxia.mycelium.hearth
 
 import android.app.Application
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -21,6 +21,10 @@ import java.io.File
  *
  * 只测这一份构建真能调的参数：CPU 线程数、上下文长度。GPU 层数 / Hexagon / 批大小要么没有后端、
  * 要么是编译期常量，界面上不暴露（批大小已固定在 512）。
+ *
+ * **线程数超过核数会灾难性变慢**（2026-10-23 实测，本机 8 核）：10 线程生成降到 0.18 tok/s、
+ * 12 线程 0.17、16 线程 0.09（8 线程是 10.25）——ggml 每个线程自旋等栅栏，超订后全在抢核。
+ * 所以扫描范围只到「核数」为止，界面上也不该让人填更大的值。
  *
  * 判据分两段量：
  *  - 读提示（promptMs）：聊天里「按下发送到第一个字」的等待，越大越明显；
