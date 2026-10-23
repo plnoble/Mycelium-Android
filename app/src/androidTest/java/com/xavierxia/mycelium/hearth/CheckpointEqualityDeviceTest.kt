@@ -103,17 +103,17 @@ class CheckpointEqualityDeviceTest {
             log += "[A 开] 检查点占用：${usage.first} 份 / ${usage.second} 字节"
             log += "[A 开] 第 2 轮恢复位置：${engine.checkpointRestoredFrom}"
             log += "[A 开] 第 2 轮正文：$a1 -> $a2"
-            // 这一轮必须走检查点那条路：要么恢复成功（restoredFrom > 0），要么恢复失败后**如实报
-            // 原因 6 并整段重读**。当前真机上恢复失败在 seq_rm（restoreStep=2：循环层状态恢复到
-            // pos-1 之后「无事可裁」，而 llama 的 seq_rm 在 rollback==0 时返回 false），所以走的是
-            // 兜底那条路——这本身就是方案允许的失败处理，重要的是下面的逐字比对仍然成立。
+            // 全量审 R2 必修项 7：这一条**必须真的恢复成功**，不许靠「恢复失败 + 原因 6」蒙混过去。
+            // 整份状态实现下恢复是能成的（第 1 轮存 56 → 第 2 轮从 56 续读），所以这里直接要求
+            // restoredFrom > 0；失败就说明这条生死线其实没被测到，用例必须红。
             assertTrue(
-                "开着检查点时第 2 轮必须走检查点那条路（成功恢复或失败兜底）。$l2；" +
+                "开着检查点时第 2 轮必须**真的恢复成功**（不是在兜底路径上跑通）。$l2；" +
                     "第 1 轮后仓库=${usage.first} 份/${usage.second} 字节；take=${engine.lastTakeDiagnosis}；" +
                     "本侧原因=${engine.checkpointFallbackReason} restoredFrom=${engine.checkpointRestoredFrom} " +
                     "restoreStep=${engine.lastRestoreStep()}",
-                engine.checkpointRestoredFrom > 0 || engine.checkpointFallbackReason == 6L,
+                engine.checkpointRestoredFrom > 0,
             )
+            assertEquals("恢复失败原因不该出现（恢复是成功的）", 0L, engine.checkpointFallbackReason)
 
             // ---- B 组：检查点关（重新加载，状态从头开始）--------------------------------------
             engine.unload()
@@ -121,23 +121,29 @@ class CheckpointEqualityDeviceTest {
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
             val (b1, m1) = round(engine, 1)
             val (b2, m2) = round(engine, 2)
+            val (b3, m3) = round(engine, 3)
             log += "[B 关] $m1"
             log += "[B 关] $m2"
-            log += "[B 关] 第 2 轮正文：$b1 -> $b2"
+            log += "[B 关] $m3"
+            log += "[B 关] 第 2/3 轮正文：$b1 -> $b2 -> $b3"
 
             // ---- 生死线：逐字相同 -----------------------------------------------------------
             assertEquals("第 1 轮的正文必须一模一样（同一份提示、温度 0）", a1, b1)
             assertEquals("第 2 轮：用检查点与整段重读必须逐字相同（生死线）", a2, b2)
             assertTrue("正文不能是空的（空对空也算「相同」，那是假通过）", a2.isNotBlank())
 
-            // ---- 3 轮读数（交付数据）--------------------------------------------------------
+            // ---- 3 轮读数（交付数据，并补第三轮的开/关对照——R2 必修项 7）--------------------
             engine.unload()
             engine.checkpointEnabled = true
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
+            val a3Texts = mutableListOf<String>()
             listOf(1, 2, 3).forEach { turn ->
-                val (_, line) = round(engine, turn)
+                val (text, line) = round(engine, turn)
+                a3Texts += text
                 log += "[3 轮] $line"
             }
+            // 第三轮也要开/关逐字比对：同一份提示、同一温度 0，两条路必须给出同一段正文。
+            assertEquals("第 3 轮：用检查点与整段重读必须逐字相同", a3Texts[2], b3)
             val finalUsage = engine.checkpointUsage()
             log += "[3 轮] 结束时检查点占用：${finalUsage.first} 份 / ${finalUsage.second} 字节"
 

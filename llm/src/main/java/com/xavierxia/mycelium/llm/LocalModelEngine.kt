@@ -169,7 +169,17 @@ interface LocalEngine : ChatModel {
 
 /** One process-wide engine. The mutex covers cleanup after cancellation as well. */
 class LocalModelEngine internal constructor(private val bridgeFactory: () -> EngineBridge) : LocalEngine {
-    companion object { val shared by lazy { LocalModelEngine { NativeBridge() } } }
+    companion object {
+        val shared by lazy { LocalModelEngine { NativeBridge() } }
+
+        /**
+         * 入库那份字节时，除「再拷一份」之外还要留的抖动余量（P2-1d 检查点准入用）。
+         *
+         * 16 MiB 是给 ART 的分配/GC 抖动与别的短命对象留的；真机上单份约 55 MB，这条余量不起决定作用，
+         * 但能挡住「刚好差一点点」的分配。
+         */
+        const val CHECKPOINT_COPY_SLACK_BYTES = 16L * 1024 * 1024
+    }
     private val nativeDelegate = lazy(bridgeFactory)
     private val native by nativeDelegate
     private val gate = Mutex()
@@ -646,10 +656,11 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                             trimRequested.set(false)
                             forgetCheckpoints()
                         } else if (saved != null && savedPos > 0) {
-                            // 全量审 R2 必修项 2（P1）：**托管堆余量准入**。入库时堆里会同时存在这份
-                            // JNI 数组与仓库里的副本，余量不够就跳过这次优化——绝不为了省几秒提示时间
-                            // 把整轮生成拖进 OOM。
-                            if (heapHeadroom() >= saved.size * 2L) {
+                            // 全量审 R2 必修项 2（P1）：**托管堆余量准入**。入库时仓库会再拷一份（`bytes.copyOf()`），
+                            // 而 JNI 那份数组已经在堆里、已经算进 usedMemory，所以只需要「再放下一份拷贝
+                            // + 一点抖动余量」。要求 2× 会白白挡掉本来放得下的快照（真机上就是它把 55 MB
+                            // 那份挡掉的）。余量不够就跳过这次优化——绝不为省几秒提示时间把生成拖进 OOM。
+                            if (heapHeadroom() >= saved.size + CHECKPOINT_COPY_SLACK_BYTES) {
                                 checkpoints.put(cacheKey, savedPos, saved)
                             } else {
                                 checkpoints.invalidate(cacheKey)
