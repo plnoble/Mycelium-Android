@@ -39,6 +39,13 @@ data class GenerationStats(
      */
     val hiddenTokens: Long = 0,
     /**
+     * P2-1d：这一轮在哪个位置存下了检查点（-1 = 没存）。存不下来的原因不在这里，而要看日志与原生
+     * 读数——但「有没有存下、多大」必须能被看到，否则真机上「为什么没提速」没法归因。
+     */
+    val checkpointPos: Int = -1,
+    /** P2-1d：这一轮存下的检查点字节数（0 = 没存）。 */
+    val checkpointBytes: Long = 0,
+    /**
      * Milliseconds from the first native token to the first non-blank visible body text (P2-1c,
      * step E). Zero when the answer started with visible text. It measures the generation phase only
      * — prompt reading, template work and model loading are not inside it — so it must never be
@@ -91,6 +98,9 @@ internal interface EngineBridge {
 
     /** 把一串 token id 还原成文本；默认空串（这台实现不给解码）。 */
     fun decodeTokens(ids: IntArray): String = ""
+
+    /** 上一次恢复失败在哪一步；默认 -1（没试过）。 */
+    fun lastRestoreStep(): Int = -1
 }
 internal class NativeBridge : EngineBridge {
     init { System.loadLibrary("mycelium_llm") }
@@ -116,6 +126,8 @@ internal class NativeBridge : EngineBridge {
      * 默认返回空串 = 「这台实现不给解码」，纯注意力与旧实现不受影响。
      */
     external override fun decodeTokens(ids: IntArray): String
+    /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
+    external override fun lastRestoreStep(): Int
 }
 
 /**
@@ -267,8 +279,10 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         hiddenMillis: Long,
     ): GenerationStats? {
         if (values == null) return null
-        if (values.size != 8) {
-            error("原生读数应有 8 项（提示 token、生成 token、读提示毫秒、生成毫秒、是否停止、复用 token、实读 token、未复用原因），实际 ${values.size} 项")
+        // P2-1d：原生读数从 8 项扩到 10 项（方案审必修项 5：加检查点统计必须一起扩）。旧桥仍然回 8 项，
+        // 缺的两项按「没有检查点」处理——这样同一个引擎既能跑真桥也能跑老假桥。
+        if (values.size != 8 && values.size != 10) {
+            error("原生读数应有 8 或 10 项（第 9/10 项是检查点位置与字节数），实际 ${values.size} 项")
         }
         if (values[0] != prompt.size.toLong()) {
             error("原生报的提示长度 ${values[0]} 与本侧 tokenize 出来的 ${prompt.size} 对不上")
@@ -321,7 +335,15 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         if (reason == 0L && reused == 0L && requested > 0) {
             error("这一轮请求了复用却没复用，也没给出原因")
         }
-        return GenerationStats(count, generated, promptMillis, generationMillis, stopped, reused, read, reason, hiddenTokens, hiddenMillis)
+        return GenerationStats(
+            promptTokens = count, generatedTokens = generated, promptMillis = promptMillis,
+            generationMillis = generationMillis, stopped = stopped, reusedPromptTokens = reused,
+            readPromptTokens = read, reuseFallbackReason = reason, hiddenTokens = hiddenTokens,
+            hiddenMillis = hiddenMillis,
+            // P2-1d：原生交回来的检查点落点与字节数（旧桥缺这两项，按「没有」处理）。
+            checkpointPos = values.getOrNull(8)?.toInt() ?: -1,
+            checkpointBytes = values.getOrNull(9) ?: 0L,
+        )
     }
 
     /**
@@ -374,6 +396,16 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
 
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。真机取证与界面提示都用它。 */
     fun canCheckpoint(): Boolean = native.canCheckpoint()
+
+    /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
+    fun lastRestoreStep(): Int = native.lastRestoreStep()
+
+    /** 上一次「取检查点」的经过（字节/位置/落点），只给调试与真机读数用。 */
+    @Volatile var lastTakeDiagnosis: String = ""
+        private set
+
+    /** 检查点仓库现在的占用（份数与字节），只给真机读数与日志用。 */
+    fun checkpointUsage(): Pair<Int, Long> = checkpoints.size to checkpoints.totalBytes
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
@@ -476,8 +508,12 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // 位置与字节都由原生交回来，本侧不猜；取不到（没到落点、存失败、或模型不适用）
                     // 就什么也不记——不许拿别的位置顶替。
                     if (checkpointAt > 0 && cacheKey != null) {
-                        val saved = native.takeCheckpoint()
+                        // **先问位置、再取字节**：原生的 takeCheckpoint() 会把位置一起作废，顺序反了就
+                        // 永远拿到 -1（第一版就是这么错的：字节 52 MB 都取到了，位置却一直是 -1，
+                        // 检查点因此永远进不了仓库）。
                         val savedPos = native.takeCheckpointPos()
+                        val saved = native.takeCheckpoint()
+                        lastTakeDiagnosis = "take=${saved?.size ?: -1}/pos=$savedPos/at=$checkpointAt"
                         if (saved != null && savedPos > 0) {
                             checkpoints.put(cacheKey, savedPos, saved)
                         } else {

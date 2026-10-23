@@ -32,6 +32,9 @@ struct Engine {
     // 状态只能前进，读过去就回不去，所以**必须在 prefill 循环里**存，而不是生成结束再补。
     std::vector<uint8_t> pendingCheckpoint;
     int pendingCheckpointPos = -1;
+    // 上一次恢复失败在哪一步（0 = 成功，1 = set_data_ext 短读，2 = seq_rm 返回 false）。
+    // 只给诊断用：真机上「为什么没走检查点」要靠它归因。
+    int lastRestoreStep = -1;
     ~Engine() { clear(); }
     void clear() {
         cachedPrompt.clear();
@@ -305,11 +308,14 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             }
         }
         // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,
-        //  tokens reused from the cache, tokens actually read, why a reuse did not happen}
-        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback};
-        auto result = env->NewLongArray(8);
+        //  tokens reused from the cache, tokens actually read, why a reuse did not happen,
+        //  P2-1d：这一轮存下的检查点位置（-1 = 没存）, 这一轮存下的检查点字节数（0 = 没存）}
+        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback,
+                          engine.pendingCheckpoint.empty() ? -1 : engine.pendingCheckpointPos,
+                          static_cast<jlong>(engine.pendingCheckpoint.size())};
+        auto result = env->NewLongArray(10);
         if (!result) return nullptr;                       // 读数没回去：guard 清缓存与内存
-        env->SetLongArrayRegion(result, 0, 8, values);
+        env->SetLongArrayRegion(result, 0, 10, values);
         if (env->ExceptionCheck()) return nullptr;         // 同上
         // 读数真的交到调用方手里了，这一轮的缓存才算数。
         guard.committed = true;
@@ -374,9 +380,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
         if (env->ExceptionCheck()) return JNI_FALSE;
         const size_t read = llama_state_seq_set_data_ext(
             engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-        if (read != buffer.size()) return JNI_FALSE;
+        if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
         auto * memory = llama_get_memory(engine.context);
-        if (!llama_memory_seq_rm(memory, 0, pos, -1)) return JNI_FALSE;
+        // 恢复之后序列里剩下的状态应该正好停在 `pos - 1`。此时「裁掉 [pos, 末尾)」其实无事可做，
+        // 而循环层的 seq_rm 在 rollback == 0 时会返回 false（llama-memory-recurrent.cpp 的分支要求
+        // rollback >= 1）——那不是失败。所以先问这个序列现在的最小位置：已经在 pos 之前就跳过裁剪。
+        const llama_pos min_pos = llama_memory_seq_pos_min(memory, 0);
+        if (min_pos >= pos) {
+            if (!llama_memory_seq_rm(memory, 0, pos, -1)) { engine.lastRestoreStep = 2; return JNI_FALSE; }
+        }
+        engine.lastRestoreStep = 0;
         return JNI_TRUE;
     } catch (...) { return JNI_FALSE; }
 }
@@ -406,16 +419,29 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobjec
     auto out = env->NewByteArray(size);
     if (!out) return nullptr;
     env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
+    // 字节取走，位置也一起作废：下一次没存就是「没有待取的」。
     engine.pendingCheckpoint.clear();
+    engine.pendingCheckpointPos = -1;
     if (env->ExceptionCheck()) return nullptr;
     return out;
 }
 
-/** 这一次待取的检查点对应哪个位置；没有就是 -1。 */
+/**
+ * 这一次待取的检查点对应哪个位置；没有就是 -1。
+ *
+ * 判据是 `pendingCheckpointPos`，**不是** `pendingCheckpoint.empty()`：字节被 `takeCheckpoint()`
+ * 取走之后位置就该失效，所以谁先被调用都不影响结果（第一版判据用错，Kotlin 先取字节再问位置，
+ * 位置永远是 -1，检查点因此永远进不了仓库）。
+ */
 extern "C" JNIEXPORT jint JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject) {
-    if (engine.pendingCheckpoint.empty()) return -1;
     return engine.pendingCheckpointPos;
+}
+
+/** 上一次恢复失败在哪一步：0 成功、1 `set_data_ext` 短读、2 `seq_rm` 返回 false、-1 没试过。 */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_lastRestoreStep(JNIEnv *, jobject) {
+    return engine.lastRestoreStep;
 }
 
 /*

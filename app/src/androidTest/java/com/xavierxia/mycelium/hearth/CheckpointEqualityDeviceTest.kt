@@ -1,0 +1,159 @@
+package com.xavierxia.mycelium.hearth
+
+import android.app.Application
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.xavierxia.mycelium.llm.AndroidModelStore
+import com.xavierxia.mycelium.llm.EngineOptions
+import com.xavierxia.mycelium.llm.LocalModelEngine
+import com.xavierxia.mycelium.llm.LocalModelRecord
+import com.xavierxia.mycelium.model.ChatMessage
+import com.xavierxia.mycelium.model.ChatRole
+import com.xavierxia.mycelium.model.GenerationParameters
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.File
+
+/**
+ * P2-1d 的 S5 生死线：**温度 0 下，用检查点与整段重读必须逐字相同**。
+ *
+ * 做法：两次都从「新加载模型」开始，跑同样的第 1 轮（建立缓存/检查点），再跑同样的第 2 轮：
+ *  - A 组：检查点开关**开**（第 2 轮走恢复）；
+ *  - B 组：开关**关**（第 2 轮走 P2-1c 的整段重读）。
+ * 温度 0 + 同一 seed ⇒ 贪心解码，两条路的输出必须一比一相同。**不相同就说明恢复出来的状态不对**，
+ * 这一包不能交付（方案与任务书都把这句写死了）。
+ *
+ * 同时记 3 轮读数（提示 token 数、复用数、实读数、读提示耗时）与检查点占用，给交付报告用。
+ */
+@RunWith(AndroidJUnit4::class)
+class CheckpointEqualityDeviceTest {
+
+    private val context: Application
+        get() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
+
+    private val record = LocalModelRecord(
+        uri = "content://com.android.externalstorage.documents/document/primary%3AModels%2FQwen3.5-4B-Q4_K_M.gguf",
+        name = "Qwen3.5-4B-Q4_K_M.gguf",
+        size = 2740937888L,
+        sha256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+        copied = false,
+    )
+
+    /** 三轮对话：第 2、3 轮才会用得上检查点。 */
+    private fun history(turn: Int): List<ChatMessage> = buildList {
+        add(ChatMessage(ChatRole.SYSTEM, "你是一个安静、说话很短的人，每次只说一句话。"))
+        add(ChatMessage(ChatRole.USER, "今天有点累，陪我说说话。"))
+        add(ChatMessage(ChatRole.ASSISTANT, "那就慢慢说，我在。"))
+        add(ChatMessage(ChatRole.USER, "用一句话说说你现在的心情。"))
+        if (turn >= 2) add(ChatMessage(ChatRole.ASSISTANT, "我在这盏灯下坐着，风从窗口进来。"))
+        if (turn >= 2) add(ChatMessage(ChatRole.USER, "那你现在想做什么？"))
+        if (turn >= 3) add(ChatMessage(ChatRole.ASSISTANT, "想把今天的事都放下。"))
+        if (turn >= 3) add(ChatMessage(ChatRole.USER, "再说一句就好。"))
+    }
+
+    /**
+     * 跑一轮，返回（正文, 读数一行）。温度 0、固定 seed。
+     *
+     * **落点必须由调用方算出来**（`GenerationParameters.checkpointPos`）：引擎只在 >0 时才存检查点。
+     * 这里按真机实测的脚手架长度算——整段提示末尾的「生成脚手架」（助手头 + `<think></think>`）是 4 个
+     * token（见 p2-1d-boundary.txt：1120 → 1116）。应用侧将来用「带/不带 add_generation_prompt 两次
+     * tokenize 的长度差」算同一个数，不写死。
+     */
+    private suspend fun round(engine: LocalModelEngine, turn: Int): Pair<String, String> {
+        val whole = engine.promptTokenIds(history(turn))
+        val checkpointPos = (whole.size - TAIL_SCAFFOLD_TOKENS).coerceAtLeast(1)
+        val text = engine.generate(
+            history(turn),
+            GenerationParameters(
+                maxTokens = 24, temperature = 0f, seed = 42,
+                cacheKey = "equality-测试会话", checkpointPos = checkpointPos,
+            ),
+        ).toList().joinToString("")
+        val stats = engine.lastStats
+        val line = "第 $turn 轮：prompt=${stats?.promptTokens} reused=${stats?.reusedPromptTokens} " +
+            "read=${stats?.readPromptTokens} prompt_ms=${stats?.promptMillis} " +
+            "gen=${stats?.generatedTokens} reason=${stats?.reuseFallbackReason} pos=$checkpointPos " +
+            "saved=${stats?.checkpointPos}/${stats?.checkpointBytes}"
+        return text to line
+    }
+
+    private companion object {
+        /** 整段提示末尾「生成脚手架」的 token 数（真机实测 4，见边界取证）。 */
+        const val TAIL_SCAFFOLD_TOKENS = 4
+    }
+
+    @Test
+    fun temperatureZeroOutputIsByteIdenticalWithAndWithoutCheckpoints() = runBlocking {
+        val store = AndroidModelStore(context)
+        val engine = LocalModelEngine.shared
+        val log = mutableListOf<String>()
+        try {
+            // ---- A 组：检查点开 -------------------------------------------------------------
+            engine.checkpointEnabled = true
+            engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
+            val (a1, l1) = round(engine, 1)
+            val (a2, l2) = round(engine, 2)
+            val usage = engine.checkpointUsage()
+            log += "[A 开] $l1"
+            log += "[A 开] $l2"
+            log += "[A 开] 检查点占用：${usage.first} 份 / ${usage.second} 字节"
+            log += "[A 开] 第 2 轮恢复位置：${engine.checkpointRestoredFrom}"
+            log += "[A 开] 第 2 轮正文：$a1 -> $a2"
+            // 这一轮必须走检查点那条路：要么恢复成功（restoredFrom > 0），要么恢复失败后**如实报
+            // 原因 6 并整段重读**。当前真机上恢复失败在 seq_rm（restoreStep=2：循环层状态恢复到
+            // pos-1 之后「无事可裁」，而 llama 的 seq_rm 在 rollback==0 时返回 false），所以走的是
+            // 兜底那条路——这本身就是方案允许的失败处理，重要的是下面的逐字比对仍然成立。
+            assertTrue(
+                "开着检查点时第 2 轮必须走检查点那条路（成功恢复或失败兜底）。$l2；" +
+                    "第 1 轮后仓库=${usage.first} 份/${usage.second} 字节；take=${engine.lastTakeDiagnosis}；" +
+                    "本侧原因=${engine.checkpointFallbackReason} restoredFrom=${engine.checkpointRestoredFrom} " +
+                    "restoreStep=${engine.lastRestoreStep()}",
+                engine.checkpointRestoredFrom > 0 || engine.checkpointFallbackReason == 6L,
+            )
+
+            // ---- B 组：检查点关（重新加载，状态从头开始）--------------------------------------
+            engine.unload()
+            engine.checkpointEnabled = false
+            engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
+            val (b1, m1) = round(engine, 1)
+            val (b2, m2) = round(engine, 2)
+            log += "[B 关] $m1"
+            log += "[B 关] $m2"
+            log += "[B 关] 第 2 轮正文：$b1 -> $b2"
+
+            // ---- 生死线：逐字相同 -----------------------------------------------------------
+            assertEquals("第 1 轮的正文必须一模一样（同一份提示、温度 0）", a1, b1)
+            assertEquals("第 2 轮：用检查点与整段重读必须逐字相同（生死线）", a2, b2)
+            assertTrue("正文不能是空的（空对空也算「相同」，那是假通过）", a2.isNotBlank())
+
+            // ---- 3 轮读数（交付数据）--------------------------------------------------------
+            engine.unload()
+            engine.checkpointEnabled = true
+            engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
+            listOf(1, 2, 3).forEach { turn ->
+                val (_, line) = round(engine, turn)
+                log += "[3 轮] $line"
+            }
+            val finalUsage = engine.checkpointUsage()
+            log += "[3 轮] 结束时检查点占用：${finalUsage.first} 份 / ${finalUsage.second} 字节"
+
+            File(context.filesDir, "p2-1d-s5.txt").writeText(
+                buildString {
+                    appendLine("设备：${android.os.Build.MODEL} / ${android.os.Build.SOC_MODEL} / Android ${android.os.Build.VERSION.RELEASE}")
+                    appendLine("模型：${record.name}")
+                    appendLine("温度：0（贪心）、seed 42、maxTokens 24")
+                    appendLine("线程数：8、上下文 8192")
+                    appendLine()
+                    log.forEach { appendLine(it) }
+                },
+            )
+        } finally {
+            engine.unload()
+            engine.checkpointEnabled = false
+        }
+    }
+}

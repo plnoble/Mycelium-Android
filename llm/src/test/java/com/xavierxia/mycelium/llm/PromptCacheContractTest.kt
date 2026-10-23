@@ -73,13 +73,33 @@ class PromptCacheContractTest {
         longArrayOf(count.toLong(), 1, 7, 3, stopped.toLong(), reused.toLong(), read.toLong(), reason.toLong())
 
     @Test
-    fun aReadingArrayThatIsNotEightItemsFailsTheRound() = runBlocking {
-        val engine = engineWith(ScriptedBridge(listOf(IntArray(4)), listOf(longArrayOf(4, 1, 7, 3, 0, 0, 4))))
+    fun aReadingArrayThatIsNotEightOrTenItemsFailsTheRound() = runBlocking {
+        // P2-1d 把读数从 8 项扩到 10 项（加了检查点位置与字节数）。9 项既不是旧格式也不是新格式，
+        // 必须仍然被拒——否则「多半项」会被当成「没有检查点」悄悄放过。
+        val engine = engineWith(
+            ScriptedBridge(listOf(IntArray(4)), listOf(longArrayOf(4, 1, 7, 3, 0, 0, 4, 0, 11))),
+        )
 
         val failure = runCatching { engine.round() }
 
         assertTrue("少一项就必须失败，实际 $failure", failure.isFailure)
-        assertTrue("失败原因要说清是几项：$failure", failure.exceptionOrNull()?.message.orEmpty().contains("8 项"))
+        assertTrue(
+            "失败原因要说清是几项：${failure.exceptionOrNull()?.message}",
+            failure.exceptionOrNull()?.message.orEmpty().contains("8 或 10 项"),
+        )
+    }
+
+    @Test
+    fun aTenItemReadingArrayIsAcceptedAndItsCheckpointFieldsAreRead() = runBlocking {
+        // 新格式：第 9、10 项是检查点位置与字节数。
+        val engine = engineWith(
+            ScriptedBridge(listOf(IntArray(4)), listOf(longArrayOf(4, 1, 7, 3, 0, 0, 4, 1, 33, 4_096))),
+        )
+
+        engine.round()
+
+        assertEquals("位置要读出来", 33, engine.lastStats?.checkpointPos)
+        assertEquals("字节数要读出来", 4_096L, engine.lastStats?.checkpointBytes)
     }
 
     @Test
