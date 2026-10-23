@@ -52,6 +52,8 @@ struct Engine {
 } engine;
 
 using Clock = std::chrono::steady_clock;
+// 预填一次提交多少个 token（与 cp.n_batch 一致；越大提示吞吐越高）。
+constexpr int PROMPT_BATCH = 512;
 long elapsed(Clock::time_point start) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
 }
@@ -157,8 +159,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         cp.n_ctx = context;
         cp.n_threads = threads;
         cp.n_threads_batch = threads;
-        cp.n_batch = 128;
-        cp.n_ubatch = 128;
+        // P2-1d 吞吐修复（2026-10-23 真机实测：提示读取只有 16-33 token/秒，比同类硬件低一个数量级）。
+        // 128 太小：预填阶段每批只能塞 128 个 token，批越大吞吐越高。llama.cpp 默认是 2048/512。
+        cp.n_batch = 512;
+        cp.n_ubatch = 512;
         // 不请求循环状态回退快照（`n_rs_seq`，P2-1c 全量审阻断 1、2）：
         //  - `llama-batch.cpp` 里 `split_equal()` 断言 `n_ubatch > n_rs_seq + 1`，按窗口配批次会直接 abort；
         //  - 更要紧的是：这个版本的快照按 ubatch 写，而生成阶段每次只解一个 token，较老的槽不会随
@@ -167,6 +171,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         // 所以这里保持 0：纯注意力模型仍能按位置精确裁剪 KV（复用照常提速），混合状态模型（qwen35
         // 这类）的循环侧会让 seq_rm 返回 false，于是整段重读——正确但拿不到提速，交统筹决定是否单开
         // 一个工作包做「按位置可恢复的检查点」。
+        // 长上下文时注意力最吃 flash attention；AUTO 让它按后端能力自己决定（不支持时自动退回）。
+        cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
         cp.offload_kqv = false;
         cp.op_offload = false;
         cp.abort_callback = abort_decode;
@@ -269,7 +275,7 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         for (int pos = reuse; pos < count && !cancelled;) {
             const bool saving = saveCheckpointAt > pos && saveCheckpointAt < count &&
                 engine.pendingCheckpoint.empty();
-            int length = std::min(128, count - pos);
+            int length = std::min(PROMPT_BATCH, count - pos);
             if (saving && pos + length > saveCheckpointAt) {
                 // 本批会越过落点：先只读到落点为止。
                 length = saveCheckpointAt - pos;
