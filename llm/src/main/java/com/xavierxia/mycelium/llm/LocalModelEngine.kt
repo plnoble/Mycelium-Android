@@ -71,7 +71,23 @@ internal interface EngineBridge {
      * leading tokens that are already in the engine's cache.
      */
     fun tokenize(messages: ByteArray): IntArray
-    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray
+    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, callback: TokenCallback): LongArray
+
+    /**
+     * P2-1d 的 S2：把刚才那一轮在跨过 [saveCheckpointAt] 时存下的检查点取走（取完清空）；没有给 null。
+     *
+     * 默认返回 null = 「这台实现不支持检查点」——纯注意力模型与旧实现因此完全不受影响。
+     */
+    fun takeCheckpoint(): ByteArray? = null
+
+    /** 待取的检查点对应哪个位置；没有就是 -1。 */
+    fun takeCheckpointPos(): Int = -1
+
+    /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
+    fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean = false
+
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
+    fun canCheckpoint(): Boolean = false
 }
 internal class NativeBridge : EngineBridge {
     init { System.loadLibrary("mycelium_llm") }
@@ -82,7 +98,15 @@ internal class NativeBridge : EngineBridge {
     external override fun load(fd: Int, threads: Int, context: Int)
     external override fun unload()
     external override fun tokenize(messages: ByteArray): IntArray
-    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray
+    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, callback: TokenCallback): LongArray
+    /** P2-1d 的 S2：把刚才那一轮在跨过 checkpointPos 时存下的检查点取走（取完清空）；没有给 null。 */
+    external override fun takeCheckpoint(): ByteArray?
+    /** 待取的检查点对应哪个位置；没有就是 -1。 */
+    external override fun takeCheckpointPos(): Int
+    /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
+    external override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
+    external override fun canCheckpoint(): Boolean
 }
 
 /**
@@ -113,6 +137,24 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      */
     private var cacheOwner: String? = null
     private var cachedPrompt: IntArray? = null
+
+    // ---- P2-1d：检查点路径（S2/S3/S4）-----------------------------------------------------
+    /**
+     * 总开关。**默认关**（方案审必修项 7）：真机逐字比对没做之前不许默认开；比对通过以后由统筹决定打开。
+     * 关着时走 P2-1c 的老路，一个检查点接口都不碰。
+     */
+    @Volatile var checkpointEnabled: Boolean = false
+
+    /** 检查点仓库（S1）。只在持有 [gate] 锁的代码里动它——和缓存状态同一把锁，同一套并发前提。 */
+    private val checkpoints = CheckpointStore()
+
+    /** 这一轮恢复到的位置；-1 表示没走恢复（给统计与日志用）。 */
+    @Volatile var checkpointRestoredFrom: Int = -1
+        private set
+
+    /** 这一轮没走检查点的原因码（5/6/7），0 表示这条路没被触发。 */
+    @Volatile var checkpointFallbackReason: Long = 0L
+        private set
 
     /**
      * 原生最后交回来的那一份读数（提示 token 序列 + 8 项读数）。取消发生时，收集方会被取消，但
@@ -316,6 +358,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 var hiddenTokens = 0L
                 var firstTokenNanos = 0L
                 var firstVisibleNanos = 0L
+                // P2-1d：这一轮要存检查点的落点（声明在 try 之外：收尾取字节时也要用它）。
+                var checkpointAt = -1
                 try {
                     // A round without a key must not leave a cached prompt behind either: on this one
                     // native context such a round clears the KV and reads everything, so afterwards the
@@ -324,16 +368,49 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // round. Nothing is reused here either way (plan review, must-fix 2).
                     if (cacheKey == null) forgetCachedPrompt()
                     requested = 0
+                    // P2-1d：这一轮要不要存检查点，**在进原生之前**就定下来（原生那段跑在别的线程上，
+                    // 在里面写外面的变量不安全，第一版就因此丢掉过落点）。
+                    val checkpointWanted = checkpointEnabled && parameters.checkpointPos > 0 &&
+                        cacheKey != null && native.canCheckpoint()
+                    if (checkpointWanted) checkpointAt = parameters.checkpointPos
                     val (prompt, values) = runNative {
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
                         val reuse = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
                         requested = reuse
+                        // P2-1d：检查点路径。**总开关默认关**（方案审必修项 7：真机逐字比对没做之前
+                        // 不许默认开），关着时走 P2-1c 的老路，一个检查点接口都不碰。
+                        if (checkpointWanted) {
+                            when (val plan = planPrefix(
+                                store = checkpoints,
+                                key = cacheKey,
+                                maxPos = parameters.checkpointPos,
+                                enabled = true,
+                                checkpointable = true,
+                            )) {
+                                is PrefixPlan.Restore -> {
+                                    // 恢复失败 ⇒ 原因 6，整段重读（方案 2.2）。
+                                    if (native.restoreCheckpoint(plan.checkpoint.bytes, plan.checkpoint.pos)) {
+                                        checkpointRestoredFrom = plan.checkpoint.pos
+                                        // 恢复后从 cp 接着读：这一轮的「复用数」就是 cp。
+                                        requested = plan.checkpoint.pos
+                                        cacheOwner = cacheKey
+                                    } else {
+                                        checkpointFallbackReason = CheckpointFallback.RestoreFailed.code
+                                    }
+                                }
+                                is PrefixPlan.FullReread -> {
+                                    checkpointFallbackReason = plan.reason?.code ?: 0L
+                                }
+                                PrefixPlan.LegacyPrefixCache -> Unit
+                            }
+                        }
                         // 读数在原生回来的那一刻就存下来：收集方被取消时 `runNative` 会抛，但它其实
                         // 还是等到了 worker 退出，这份读数照样能用（方案审必修 6）。
                         (tokens to native.generate(payload, parameters.maxTokens,
-                            parameters.temperature, parameters.topP, parameters.seed, reuse, object : TokenCallback {
+                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt,
+                            object : TokenCallback {
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {
                                     if (!isActive) return false
@@ -356,6 +433,22 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         readingsOf(values, prompt, requested, parameters.maxTokens, hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos)),
                     ) { "这一轮必须给出读数" }
                     lastStats = stats
+                    // P2-1d 的 S2：把这一轮在「跨过 checkpointPos」时存下的检查点取回来记进仓库。
+                    // 位置与字节都由原生交回来，本侧不猜；取不到（没到落点、存失败、或模型不适用）
+                    // 就什么也不记——不许拿别的位置顶替。
+                    if (checkpointAt > 0 && cacheKey != null) {
+                        val saved = native.takeCheckpoint()
+                        val savedPos = native.takeCheckpointPos()
+                        if (saved != null && savedPos > 0) {
+                            checkpoints.put(cacheKey, savedPos, saved)
+                        } else {
+                            // 没存成：把上一轮留下的、位置可能已经不对的检查点作废，别让下轮选中它。
+                            checkpoints.invalidateBeyond(cacheKey, checkpointAt)
+                        }
+                    } else {
+                        native.takeCheckpoint()
+                        native.takeCheckpointPos()
+                    }
                     // Only a prompt that was read to its end is a cache entry the next round may
                     // reuse. A round that was stopped while the prompt was still being read forgets the
                     // cache instead of carrying a half-read prompt into the next one. A stop after the

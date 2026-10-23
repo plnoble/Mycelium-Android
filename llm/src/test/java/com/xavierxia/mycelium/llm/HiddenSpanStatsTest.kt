@@ -48,6 +48,7 @@ class HiddenSpanStatsTest {
             topP: Float,
             seed: Int,
             reuseTokens: Int,
+            saveCheckpointAt: Int,
             callback: TokenCallback,
         ): LongArray {
             callback.onStart(startHidden)

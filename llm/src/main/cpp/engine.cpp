@@ -27,9 +27,15 @@ struct Engine {
     std::vector<llama_token> cachedPrompt;
     // 默认关思考（与之前写死的 false 一致）；只有真机测例会改它，用来对比模板认不认 enable_thinking。
     bool thinking = false;
+    // P2-1d：prefill 跨过 checkpointPos 时存下的循环层状态，等 Kotlin 这一轮结束后取走。
+    // 状态只能前进，读过去就回不去，所以**必须在 prefill 循环里**存，而不是生成结束再补。
+    std::vector<uint8_t> pendingCheckpoint;
+    int pendingCheckpointPos = -1;
     ~Engine() { clear(); }
     void clear() {
         cachedPrompt.clear();
+        pendingCheckpoint.clear();
+        pendingCheckpointPos = -1;
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (file) fclose(file);
@@ -187,7 +193,7 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_tokenize(JNIEnv * env, jobject, jby
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
     JNIEnv * env, jobject, jbyteArray messages, jint maximum, jfloat temperature,
-    jfloat top_p, jint seed, jint reuseTokens, jobject callback) {
+    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jobject callback) {
     try {
         if (!engine.context) throw std::runtime_error("Load a model first");
         if (maximum < 1 || maximum > 8192) throw std::runtime_error("Invalid token limit");
@@ -233,6 +239,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         }
         auto start = Clock::now();
         int read = 0;
+        engine.pendingCheckpoint.clear();
+        engine.pendingCheckpointPos = -1;
         for (int pos = reuse; pos < count && !cancelled; pos += 128) {
             const int length = std::min(128, count - pos);
             auto batch = llama_batch_get_one(tokens.data() + pos, length);
@@ -242,6 +250,22 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
                 throw std::runtime_error("Prompt evaluation failed");
             }
             read += length;
+            // P2-1d 的 S2：**刚跨过** checkpointPos 的那一批 decode 完就存（位置正好是 checkpointPos）。
+            // 状态只能前进，读过去就回不去了，所以不能等这一轮结束再补。
+            if (saveCheckpointAt > 0 && pos + length >= saveCheckpointAt && engine.pendingCheckpoint.empty()) {
+                const size_t size = llama_state_seq_get_size_ext(
+                    engine.context, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                if (size > 0) {
+                    std::vector<uint8_t> buffer(size);
+                    const size_t written = llama_state_seq_get_data_ext(
+                        engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                    // 方案审必修项 2：判「等于」，不是判非零。
+                    if (written == size) {
+                        engine.pendingCheckpoint = std::move(buffer);
+                        engine.pendingCheckpointPos = saveCheckpointAt;
+                    }
+                }
+            }
         }
         long prompt_ms = elapsed(start);
         // Only a prompt that was read to its end may be kept: a half-read prompt is not the state the
@@ -299,6 +323,98 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             "Generation failed; check the model chat template and context");
     } catch (...) { engine.cachedPrompt.clear(); fail(env, "Native generation failed"); }
     return nullptr;
+}
+
+/*
+ * P2-1d 的 S2：把这一刻的**循环层状态**存下来（方案 2.2 / 方案审必修项 2）。
+ *
+ * 只存 PARTIAL_ONLY：混合模型的普通注意力 KV 不在里面，恢复时必须保证同一前缀的 KV 本来就是对的
+ * （所以恢复位置绝不能越过本轮的公共前缀）。返回 null 表示「这一份没法存」，调用方据此不记账。
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_saveCheckpoint(JNIEnv * env, jobject) {
+    try {
+        if (!engine.context) return nullptr;
+        // 取大小与取字节必须用**同一组参数**，否则拿到的长度与实际字节对不上。
+        const size_t size = llama_state_seq_get_size_ext(engine.context, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        if (size == 0) return nullptr;
+        std::vector<uint8_t> buffer(size);
+        const size_t written = llama_state_seq_get_data_ext(
+            engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        // 方案审必修项 2：这两个接口返回的是**字节数**，要判「等于」，不是判非零。
+        if (written != size) return nullptr;
+        auto out = env->NewByteArray(static_cast<jsize>(written));
+        if (!out) return nullptr;
+        env->SetByteArrayRegion(out, 0, static_cast<jsize>(written), reinterpret_cast<const jbyte *>(buffer.data()));
+        if (env->ExceptionCheck()) return nullptr;
+        return out;
+    } catch (...) { return nullptr; }
+}
+
+/*
+ * P2-1d 的 S3：恢复检查点并裁到恢复位置（只恢复循环层部分）。
+ *
+ * 方案审必修项 2 定的顺序**全在这一个函数里**完成，调用方不需要（也不该）自己先 seq_rm：
+ *   1. `set_data_ext(..., PARTIAL_ONLY)`，返回值必须**等于字节数**（短读 = 这一份不可信）；
+ *   2. 恢复之后循环状态的最后位置是 `pos - 1`，再 `llama_memory_seq_rm(memory, 0, pos, -1)`，
+ *      这一步必须返回 true，否则位置与状态对不上；
+ *   3. 只有两步都成，才允许从 `pos` 接着读。
+ * 任何一步失败都返回 false，调用方据此清理不可信状态、从 0 重读并报原因 6。
+ */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpoint(
+    JNIEnv * env, jobject, jbyteArray data, jint pos) {
+    try {
+        if (!engine.context || !data || pos < 0) return JNI_FALSE;
+        const jsize size = env->GetArrayLength(data);
+        if (size <= 0) return JNI_FALSE;
+        std::vector<uint8_t> buffer(static_cast<size_t>(size));
+        env->GetByteArrayRegion(data, 0, size, reinterpret_cast<jbyte *>(buffer.data()));
+        if (env->ExceptionCheck()) return JNI_FALSE;
+        const size_t read = llama_state_seq_set_data_ext(
+            engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        if (read != buffer.size()) return JNI_FALSE;
+        auto * memory = llama_get_memory(engine.context);
+        if (!llama_memory_seq_rm(memory, 0, pos, -1)) return JNI_FALSE;
+        return JNI_TRUE;
+    } catch (...) { return JNI_FALSE; }
+}
+
+/*
+ * P2-1d：这个模型能不能走检查点路径（方案 2.3）。
+ *
+ * 只有混合 / 循环模型才存循环层状态；纯注意力模型走 P2-1c 的既有路径，行为完全不变。
+ */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_canCheckpoint(JNIEnv *, jobject) {
+    if (!engine.model) return JNI_FALSE;
+    return (llama_model_is_hybrid(engine.model) || llama_model_is_recurrent(engine.model))
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+/*
+ * P2-1d 的 S2：把刚才那一轮在「跨过 checkpointPos」时存下的检查点取走（取走后清空）。
+ *
+ * 存的动作发生在 prefill 循环里（状态只能前进，读过去就回不去了），所以字节先放在引擎里，
+ * 由 Kotlin 在这轮结束后取走并记进检查点仓库；取不到给 null。
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpoint(JNIEnv * env, jobject) {
+    if (engine.pendingCheckpoint.empty()) return nullptr;
+    const auto size = static_cast<jsize>(engine.pendingCheckpoint.size());
+    auto out = env->NewByteArray(size);
+    if (!out) return nullptr;
+    env->SetByteArrayRegion(out, 0, size, reinterpret_cast<const jbyte *>(engine.pendingCheckpoint.data()));
+    engine.pendingCheckpoint.clear();
+    if (env->ExceptionCheck()) return nullptr;
+    return out;
+}
+
+/** 这一次待取的检查点对应哪个位置；没有就是 -1。 */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject) {
+    if (engine.pendingCheckpoint.empty()) return -1;
+    return engine.pendingCheckpointPos;
 }
 
 
