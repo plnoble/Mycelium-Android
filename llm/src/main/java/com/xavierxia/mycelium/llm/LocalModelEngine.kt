@@ -213,6 +213,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     }
     private fun clear() {
         forgetCachedPrompt()
+        // 换模型 / 卸载 / 引擎清理：检查点跟着一起作废（它们是**这个模型、这个上下文**里的状态）。
+        forgetCheckpoints()
         native.unload()
         val previous = descriptor
         descriptor = null
@@ -223,6 +225,18 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     private fun forgetCachedPrompt() {
         cacheOwner = null
         cachedPrompt = null
+    }
+
+    /**
+     * 把检查点一起忘掉（P2-1d 必修项 3 的生命周期那一半）。
+     *
+     * 换模型、卸载、引擎清理都要调它：检查点是**某个模型、某个上下文**里的状态，换了模型再拿旧字节去
+     * 恢复，等于往新模型里灌另一份状态。
+     */
+    private fun forgetCheckpoints() {
+        checkpoints.clear()
+        checkpointRestoredFrom = -1
+        checkpointFallbackReason = 0L
     }
 
     /**

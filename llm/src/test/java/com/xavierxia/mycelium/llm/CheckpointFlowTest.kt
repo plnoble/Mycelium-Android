@@ -214,4 +214,42 @@ class CheckpointFlowTest {
         assertTrue("没有缓存键不该恢复：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
         assertEquals("没有缓存键也不存", -1, bridge.saveAtSeen)
     }
+
+    // ---- 必修项 8：检查点要跟着生命周期作废（卸载 / 换模型）--------------------------------
+
+    @Test
+    fun unloadingTheModelForgetsEveryCheckpoint() {
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)          // 存下一份
+            engine.unload()        // 卸载 ⇒ 检查点必须一起作废
+            bridge.calls.clear()
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine)          // 再来一轮：仓库应当是空的
+        }
+
+        assertTrue("卸载之后不许再恢复旧检查点：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
+        assertEquals("仓库是空的，这一轮要报原因 5", 5L, engine.checkpointFallbackReason)
+    }
+
+    @Test
+    fun loadingAnotherModelForgetsEveryCheckpoint() {
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        runBlocking {
+            engine.load(model, EngineOptions()) { Descriptor() }
+            round(engine) // 给前一个模型存一份
+            // 换成另一个模型：检查点是上一个模型的状态，绝不能拿去恢复。
+            engine.load(ModelInfo("other", "other.gguf", ModelLocation.LOCAL), EngineOptions()) { Descriptor() }
+            bridge.calls.clear()
+            round(engine)
+        }
+
+        assertTrue("换模型之后不许恢复上一个模型的检查点：${bridge.calls}", bridge.calls.none { it.startsWith("restore") })
+        assertEquals("换模型之后仓库该是空的（原因 5）", 5L, engine.checkpointFallbackReason)
+    }
 }
