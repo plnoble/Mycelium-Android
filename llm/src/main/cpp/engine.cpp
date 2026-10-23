@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include "llama.h"
 #include "json.h"
@@ -415,6 +416,34 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject) {
     if (engine.pendingCheckpoint.empty()) return -1;
     return engine.pendingCheckpointPos;
+}
+
+/*
+ * 把一串 token id 还原成文本（方案审必修项 1）。
+ *
+ * 只给「边界到底落在哪」的取证用：真机日志里要能看到 1116 与 1120 各自解码出什么，才能说清
+ * 那个位置是「助手角色头之前」还是「助手头之后、思考段之前」——光比长度证明不了这件事。
+ */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_decodeTokens(JNIEnv * env, jobject, jintArray ids) {
+    try {
+        if (!engine.model || !ids) return nullptr;
+        const jsize n = env->GetArrayLength(ids);
+        std::vector<jint> raw(static_cast<size_t>(n));
+        env->GetIntArrayRegion(ids, 0, n, raw.data());
+        if (env->ExceptionCheck()) return nullptr;
+        const auto * vocab = llama_model_get_vocab(engine.model);
+        std::string text;
+        for (jsize i = 0; i < n; ++i) {
+            std::array<char, 8> buf = {};
+            // special=true：角色头这类标记是**特殊 token**，special=false 时会被吞成空串，
+            // 那样就看不出「边界到底在助手头之前还是之后」——取证必须留下它们。
+            const int written = llama_token_to_piece(
+                vocab, static_cast<llama_token>(raw[i]), buf.data(), static_cast<int>(buf.size()), 0, true);
+            if (written > 0) text.append(buf.data(), static_cast<size_t>(written));
+        }
+        return env->NewStringUTF(text.c_str());
+    } catch (...) { return nullptr; }
 }
 
 

@@ -88,6 +88,9 @@ internal interface EngineBridge {
 
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
     fun canCheckpoint(): Boolean = false
+
+    /** 把一串 token id 还原成文本；默认空串（这台实现不给解码）。 */
+    fun decodeTokens(ids: IntArray): String = ""
 }
 internal class NativeBridge : EngineBridge {
     init { System.loadLibrary("mycelium_llm") }
@@ -107,6 +110,12 @@ internal class NativeBridge : EngineBridge {
     external override fun restoreCheckpoint(data: ByteArray, pos: Int): Boolean
     /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
     external override fun canCheckpoint(): Boolean
+    /**
+     * 把一串 token id 还原成文本（方案审必修项 1 的取证用）。
+     *
+     * 默认返回空串 = 「这台实现不给解码」，纯注意力与旧实现不受影响。
+     */
+    external override fun decodeTokens(ids: IntArray): String
 }
 
 /**
@@ -335,6 +344,22 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
             runNative { native.tokenize(payload) }
         }
     }
+
+    /**
+     * 把 token id 还原成文本（P2-1d 必修项 1 的取证：边界两侧各自解码出什么）。
+     *
+     * 只有真机测例用它；界面上不显示。
+     */
+    suspend fun decodeTokens(ids: IntArray): String {
+        require(ids.isNotEmpty()) { "没有 token 可解码" }
+        return gate.withLock {
+            checkNotNull(loaded.value) { "请先加载模型" }
+            runNative { native.decodeTokens(ids) }
+        }
+    }
+
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。真机取证与界面提示都用它。 */
+    fun canCheckpoint(): Boolean = native.canCheckpoint()
 
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
