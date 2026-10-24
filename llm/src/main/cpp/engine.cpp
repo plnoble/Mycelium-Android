@@ -545,15 +545,22 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
 /** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCuts(JNIEnv * env, jobject, jintArray cuts) {
-    engine.checkpointCuts.clear();
-    if (!cuts) return;
-    const jsize n = env->GetArrayLength(cuts);
-    if (n <= 0) return;
-    std::vector<jint> raw(static_cast<size_t>(n));
-    env->GetIntArrayRegion(cuts, 0, n, raw.data());
-    if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
-    engine.checkpointCuts.assign(raw.begin(), raw.end());
-    std::sort(engine.checkpointCuts.begin(), engine.checkpointCuts.end());
+    // 全量审 R3 P2：临时 vector 与 assign 都可能分配失败——C++ 异常绝不能越过 JNI 边界。
+    // 失败就清空断点（退回单点切法继续生成），并把这轮错误交回 Kotlin 侧记录。
+    try {
+        engine.checkpointCuts.clear();
+        if (!cuts) return;
+        const jsize n = env->GetArrayLength(cuts);
+        if (n <= 0) return;
+        std::vector<jint> raw(static_cast<size_t>(n));
+        env->GetIntArrayRegion(cuts, 0, n, raw.data());
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
+        engine.checkpointCuts.assign(raw.begin(), raw.end());
+        std::sort(engine.checkpointCuts.begin(), engine.checkpointCuts.end());
+    } catch (...) {
+        engine.checkpointCuts.clear();
+        env->ExceptionClear();
+    }
 }
 
 /** 兼容单点入口：等价于只给一个断点。 */

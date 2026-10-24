@@ -889,6 +889,10 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                             cachedPrompt = prompt
                         } else forgetCachedPrompt()
                     }
+                    // 全量审 R3 P2-4：**收尾统一丢弃在途快照**。正常轮次已经 take 走了（这里是空操作）；
+                    // 停止/未存/落点没到的轮次不丢的话，几十 MB 的在途快照就一直挂在原生侧
+                    // （探针实测：discard 被替换成空操作后 pending 还留在位置 15）。幂等，重复调无害。
+                    native.discardCheckpoint()
                     if (values[4] == 0L) {
                         val tail = filter.push(utf8.push(byteArrayOf(), last = true))
                         if (tail.isNotEmpty()) send(tail)

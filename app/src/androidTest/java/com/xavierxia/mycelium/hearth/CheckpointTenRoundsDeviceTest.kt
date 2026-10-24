@@ -12,6 +12,7 @@ import com.xavierxia.mycelium.model.ChatRole
 import com.xavierxia.mycelium.model.GenerationParameters
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -102,6 +103,14 @@ class CheckpointTenRoundsDeviceTest {
                 val stats = engine.lastStats
                 // 诊断：take 里带着「实际存下的位置」；restoredFrom 带着本轮是否恢复。
                 log += "诊断：take=${engine.lastTakeDiagnosis} restored=${engine.checkpointRestoredFrom}"
+                // 全量审 R3 P2-4：每轮都要**真恢复**——「恢复失败但重新保存」也能让占用账本好看，
+                // 那是假通过。第 3 轮起对话已稳定增长，每一轮都必须从上一轮的落点续读。
+                if (round >= 3) {
+                    val restored = engine.checkpointRestoredFrom
+                    assertTrue("第 $round 轮必须真恢复（restoredFrom=$restored）", restored > 0)
+                    assertEquals("第 $round 轮复用数必须等于恢复位置", restored.toLong(), stats?.reusedPromptTokens)
+                    assertEquals("第 $round 轮不该有回退原因", 0L, stats?.reuseFallbackReason)
+                }
                 val (count, bytes) = engine.checkpointUsage()
                 val heap = heapUsed()
                 samples += heap

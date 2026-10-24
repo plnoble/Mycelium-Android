@@ -118,18 +118,26 @@ internal class CheckpointStore(
             byKey.getOrPut(from) { mutableListOf() }.addAll(moving)
             throw failure
         }
+        // 「已被淘汰」的条目要显式记录：onDrop 抛出时那条已经移出目标——单看目标分不清
+        // 「已移交 onDrop」和「还没进目标」，回滚就会漏掉整个源列表（全量审 R3 P1）。
+        val dropped = mutableListOf<Checkpoint>()
         try {
             // 交过来的那几份是「更早存的」，但内容与位置都是对的：按插入顺序排序后再限量。
             target += moving
             target.sortBy { it.sequence }
-            while (target.size > maxPerKey) drop(target.removeAt(0))
+            while (target.size > maxPerKey) {
+                val victim = target.removeAt(0)
+                dropped += victim
+                drop(victim)
+            }
             if (target.isEmpty()) byKey.remove(to)
         } catch (failure: Throwable) {
-            // 回滚：还在目标里的那几份放回源键；已经 drop 的不再放回（句柄已按 drop 语义释放）。
-            val survivors = target.filter { entry -> moving.any { it === entry } }
-            target.removeAll(survivors)
+            // 回滚：moving 里**没有被淘汰**的条目全部放回源键——包括「已进目标」和
+            // 「从未进目标」（`+=` 分配失败）两种；被淘汰的不再放回（句柄已按 drop 语义移交）。
+            target.removeAll { entry -> moving.any { it === entry } }
             if (target.isEmpty() && createdTarget) byKey.remove(to)
-            if (survivors.isNotEmpty()) byKey.getOrPut(from) { mutableListOf() }.addAll(survivors)
+            val rollback = moving.filter { entry -> dropped.none { it === entry } }
+            if (rollback.isNotEmpty()) byKey.getOrPut(from) { mutableListOf() }.addAll(rollback)
             throw failure
         }
         while (totalBytes > maxTotalBytes && byKey.isNotEmpty()) {
