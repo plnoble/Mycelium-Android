@@ -127,6 +127,8 @@ internal interface EngineBridge {
     /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
     fun setPromptBatch(size: Int) {}
     fun setCheckpointCut(cut: Int) {}
+    /** 诊断：默认给 [0, 0]（假桥没有原生句柄）。 */
+    fun handlesAlive(): LongArray = longArrayOf(0, 0)
 
     /** 诊断：分段计时，默认 null。 */
     fun checkpointTimings(): LongArray? = null

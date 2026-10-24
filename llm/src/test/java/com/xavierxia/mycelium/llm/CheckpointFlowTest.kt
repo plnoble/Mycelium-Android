@@ -432,6 +432,8 @@ class CheckpointFlowTest {
         }
 
         assertEquals("取消收尾也要如实报原因 6", 6L, engine.lastStats?.reuseFallbackReason)
+        // 全量审 P2-8：清理之后假桥的原生句柄表必须为空——「仓库空但原生还占着」的泄漏在这里现形。
+        assertTrue("取消后不得残留句柄：${bridge.handles}", bridge.handles.isEmpty())
     }
 
     // ---- 改挂（2026-10-23 夜，任务书第一段第 2 条）------------------------------------------

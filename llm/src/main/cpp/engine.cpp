@@ -530,6 +530,20 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
 /** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
 /** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
 extern "C" JNIEXPORT void JNICALL
+/** 全量审 P2-8：返回 [存活句柄数, 句柄持有总字节]——让测例能看见原生侧的泄漏。 */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_handlesAlive(JNIEnv *, jobject) {
+    long bytes = 0;
+    for (const auto & entry : engine.checkpointStates) bytes += static_cast<long>(entry.second.size());
+    const jlong values[] = {static_cast<jlong>(engine.checkpointStates.size()), bytes};
+    auto result = env->NewLongArray(2);
+    if (!result) return nullptr;
+    env->SetLongArrayRegion(result, 0, 2, values);
+    if (env->ExceptionCheck()) return nullptr;
+    return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCut(JNIEnv *, jobject, jint cut) {
     engine.checkpointCut = cut;
 }
