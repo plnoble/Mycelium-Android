@@ -411,8 +411,15 @@ $arguments = Get-GradleArguments -Offline (!$AllowNetwork) -TaskList $Tasks
 Write-Host "check-all: repository $root"
 Write-Host "check-all: gradlew.bat $(($arguments | Select-Object -Skip 2) -join ' ')"
 try {
+    # No -Wait here: in Windows PowerShell 5.1, Start-Process -Wait also waits for every descendant
+    # of the started process. When this run has to start a new Gradle daemon, that daemon is such a
+    # descendant and stays alive (idle timeout: hours), so the gate hung after Gradle had already
+    # finished (2026-10-24). WaitForExit() waits for cmd.exe/gradlew only. Touching .Handle first
+    # makes PowerShell keep the handle, otherwise ExitCode can come back empty after the exit.
     $process = Start-Process -FilePath "cmd.exe" -ArgumentList $arguments -WorkingDirectory $root `
-        -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $null = $process.Handle
+    $process.WaitForExit()
     $gradleExit = $process.ExitCode
 } catch {
     Stop-WithError "starting Gradle failed: $($_.Exception.Message)"
