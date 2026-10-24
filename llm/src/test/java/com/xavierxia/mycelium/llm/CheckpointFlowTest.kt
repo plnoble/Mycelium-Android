@@ -22,7 +22,7 @@ import org.junit.Test
  */
 class CheckpointFlowTest {
 
-    private class Descriptor : ModelFile {
+    internal class Descriptor : ModelFile {
         override val fd = 7
         override fun close() {}
     }
@@ -34,7 +34,7 @@ class CheckpointFlowTest {
      * @param saveBytes 跨过落点时交回来的字节数；null = 存不下来。
      * @param restoreOk `restoreCheckpoint()` 的回答。
      */
-    private open class Recorder(
+    internal open class Recorder(
         private val checkpointable: Boolean = true,
         /** 这一轮「存下来」的大小；null 表示没存成。字节本体留在原生，测例只模拟句柄。 */
         private val saveBytes: Long? = 16L,
@@ -128,12 +128,12 @@ class CheckpointFlowTest {
         }
     }
 
-    private val model = ModelInfo("test", "test.gguf", ModelLocation.LOCAL)
+    internal val model = ModelInfo("test", "test.gguf", ModelLocation.LOCAL)
     private fun messages() = listOf(ChatMessage(ChatRole.USER, "问一句"))
 
-    private fun engineWith(bridge: Recorder) = LocalModelEngine { bridge }
+    internal fun engineWith(bridge: Recorder) = LocalModelEngine { bridge }
 
-    private suspend fun round(
+    internal suspend fun round(
         engine: LocalModelEngine,
         cacheKey: String? = "会话1",
         checkpointPos: Int = 15,
