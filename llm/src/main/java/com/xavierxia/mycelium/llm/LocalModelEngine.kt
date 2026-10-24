@@ -167,6 +167,10 @@ internal class NativeBridge : EngineBridge {
     external fun archVariant(): String
     /** 只给真机诊断：限制预填批次大小（0 = 用默认 512）。 */
     external override fun setPromptBatch(size: Int)
+    /** 固定切法：本轮在哪个 token 位置强制断批（-1 = 不切）。与存不存检查点无关。 */
+    external override fun setCheckpointCut(cut: Int)
+    /** 全量审 P2-8：[存活句柄数, 句柄持有总字节]——测例据此断言原生不泄漏。 */
+    external override fun handlesAlive(): LongArray
     external override fun begin()
     /** 只给真机测例用：打开后模板按「思考」渲染，默认关。 */
     external fun setThinking(thinking: Boolean)
