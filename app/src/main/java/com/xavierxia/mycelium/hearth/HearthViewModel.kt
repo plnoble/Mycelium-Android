@@ -1066,7 +1066,10 @@ class HearthViewModel @JvmOverloads constructor(
                 // 状态恢复本身是成功的（reason=0、restoredFrom=56、写入读回字节相等），差异来源尚未定论：
                 // 候选一是「恢复后只读 31 个 token」与「整段读 87 个」的矩阵乘形状不同导致浮点末位差异，
                 // 候选二是恢复的状态与真算出来的不完全一致。按统筹裁定：逐字比对不过就保持总开关关着交付。
-                (engine as? LocalModelEngine)?.checkpointEnabled = false
+                // **用户要求优先（2026-10-24 白天）**：调试包先用上提速。正式版仍是库默认「关」，也仍未通过
+// 「温度 0 逐字一致」这条验收——所以这是一次**按用户要求开的例外**，不写成验收通过。
+                // 逐字差异的原因（预填批次形状 vs 状态不完全一致）仍在查；查清后再决定正式版。
+                (engine as? LocalModelEngine)?.checkpointEnabled = true
                 engine
             }
             is Chosen.Cloud -> {

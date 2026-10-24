@@ -124,6 +124,9 @@ internal interface EngineBridge {
      */
     fun tokenizeBoundary(messages: ByteArray): LongArray? = null
 
+    /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
+    fun setPromptBatch(size: Int) {}
+
     /** 诊断：分段计时，默认 null。 */
     fun checkpointTimings(): LongArray? = null
 
@@ -159,6 +162,8 @@ internal class NativeBridge : EngineBridge {
     init { NativeLibraryVariant.load() }
     /** 编译这份库时用的 `-march`（真机验收靠它确认到底加载了哪一份变体）。 */
     external fun archVariant(): String
+    /** 只给真机诊断：限制预填批次大小（0 = 用默认 512）。 */
+    external override fun setPromptBatch(size: Int)
     external override fun begin()
     /** 只给真机测例用：打开后模板按「思考」渲染，默认关。 */
     external fun setThinking(thinking: Boolean)

@@ -38,6 +38,9 @@ struct Engine {
     // 多出一份几十 MB）；恢复时也直接从原生内存装回，省掉反向拷贝与 Kotlin 侧那一份分配。
     std::map<int, std::vector<uint8_t>> checkpointStates;
     int nextCheckpointHandle = 1;
+    // 只给真机诊断：预填一次提交多少 token。改小就能让'整段读'分成与'恢复后读'相同的批次形状，
+    // 用来区分温度 0 的差异到底是批次形状造成的浮点差异，还是状态恢复得不完全一致。
+    int promptBatch = 0;
     // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
     // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
     long timing[5] = {0, 0, 0, 0, 0};
@@ -282,7 +285,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         for (int pos = reuse; pos < count && !cancelled;) {
             const bool saving = saveCheckpointAt > pos && saveCheckpointAt < count &&
                 engine.pendingCheckpoint.empty();
-            int length = std::min(PROMPT_BATCH, count - pos);
+            const int chunk = engine.promptBatch > 0 ? engine.promptBatch : PROMPT_BATCH;
+            int length = std::min(chunk, count - pos);
             if (saving && pos + length > saveCheckpointAt) {
                 // 本批会越过落点：先只读到落点为止。
                 length = saveCheckpointAt - pos;
@@ -514,6 +518,13 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
  * 与 `takeCheckpoint()` 的区别：**不新建 JByteArray、不抛异常**。清理路径（异常收尾、低内存丢弃）
  * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
  */
+/** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
+/** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setPromptBatch(JNIEnv *, jobject, jint size) {
+    engine.promptBatch = size > 0 ? size : 0;
+}
+
 /** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_archVariant(JNIEnv * env, jobject) {
