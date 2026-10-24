@@ -36,6 +36,9 @@ class MyceliumApp : Application() {
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) trim(LocalModelEngine.shared)
             }
             private fun trim(engine: LocalModelEngine) {
+                // 全量审 R2 P2-3：**先同步打标记，再异步等锁清理**。只 launch 的话，生成持锁期间的
+                // 通知根本传不进去——收尾的入库准入看不到它，这一轮照样把新快照收进仓库。
+                engine.requestCheckpointTrim()
                 scope.launch { runCatching { engine.trimCheckpointsNow() } }
             }
         })

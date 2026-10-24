@@ -47,6 +47,10 @@ struct Engine {
     bool checkpointSaving = false;
     // 固定切法的强制断批位置（-1 = 不切）。与 checkpointSaving 无关：关、开、第一轮都切。
     int checkpointCut = -1;
+    // 跨轮稳定的断批点（全量审 R2 P1-1）：**每条消息结束处**的 token 位置，由 token 序列唯一决定。
+    // 只在「本轮保存点」切是不够的——恢复从上一轮保存点起步，两个位置通常不同，共同前缀仍会
+    // 经历不同批次，浮点形状差异照旧。有了这份集合，冷读与续读在共同前缀上的批次完全一致。
+    std::vector<int> checkpointCuts;
     // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
     // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
     long timing[5] = {0, 0, 0, 0, 0};
@@ -290,8 +294,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         // 开、关、第一轮都用这套规则，共同前缀上的批次形状完全一致；**存不存检查点**由
         // `checkpointSaving` 另行决定，与切法解耦。
         for (int pos = reuse; pos < count && !cancelled;) {
-            const int cutPos = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
-            const bool cutAhead = cutPos > pos && cutPos < count;
+            // 下一个断点：优先用跨轮稳定的集合，没有就退回单点（本轮落点）。
+            int cutPos = -1;
+            for (const int candidate : engine.checkpointCuts) {
+                if (candidate > pos && candidate < count) { cutPos = candidate; break; }
+            }
+            if (cutPos < 0) {
+                const int single = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
+                if (single > pos && single < count) cutPos = single;
+            }
+            const bool cutAhead = cutPos > pos;
             const bool saving = checkpointSave == JNI_TRUE && saveCheckpointAt > pos &&
                 saveCheckpointAt < count && engine.pendingCheckpoint.empty();
             const int chunk = engine.promptBatch > 0 ? engine.promptBatch : PROMPT_BATCH;
@@ -311,26 +323,18 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             pos += length;
             // 状态只能前进，读过去就回不去了：正好停在落点上的这一刻必须存（整份状态，含注意力 KV）。
             if (saving && pos == saveCheckpointAt) {
-                const auto t_size = Clock::now();
-                const size_t size = llama_state_seq_get_size_ext(
-                    engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
-                engine.timing[2] = elapsed(t_size);
-                // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
-                const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
-                if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
-                    // 全量审 P1-4：**保存快照失败只是跳过优化，绝不能把生成拖垮**。原来直接
-                    // `std::vector<uint8_t> buffer(size)`：几十 MB 的分配一旦抛 bad_alloc，就会被当成
-                    // 整轮生成的失败抛出 JNI 边界（Android 明确要求 C++ 异常不得越界）。这里单独接住。
-                    std::vector<uint8_t> buffer;
-                    bool allocated = true;
-                    try {
-                        buffer.resize(size);
-                    } catch (...) {
-                        allocated = false;
-                    }
-                    if (!allocated) {
-                        engine.pendingCheckpointPos = -1;
-                    } else {
+                // 全量审 R2 P2-7：**整个可选保存都放进异常边界**。上一轮只护住了 `buffer.resize()`，
+                // 但 `llama_state_seq_get_size_ext()` 内部会 `make_unique<llama_io_write_host>`（几十 MB），
+                // 那一步分配失败会在我们捕获之前抛出，把整轮生成带崩——快照失败只该跳过优化。
+                try {
+                    const auto t_size = Clock::now();
+                    const size_t size = llama_state_seq_get_size_ext(
+                        engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                    engine.timing[2] = elapsed(t_size);
+                    // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
+                    const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
+                    if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
+                        std::vector<uint8_t> buffer(size);
                         const auto t_data = Clock::now();
                         const size_t written = llama_state_seq_get_data_ext(
                             engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
@@ -341,6 +345,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
                             engine.pendingCheckpointPos = saveCheckpointAt;
                         }
                     }
+                } catch (...) {
+                    // 内存不足或其它失败：这一轮不存检查点，生成继续（绝不能越过 JNI 边界）。
+                    engine.pendingCheckpoint.clear();
+                    engine.pendingCheckpointPos = -1;
                 }
             }
         }
@@ -529,6 +537,20 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
  */
 /** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
 /** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCuts(JNIEnv * env, jobject, jintArray cuts) {
+    engine.checkpointCuts.clear();
+    if (!cuts) return;
+    const jsize n = env->GetArrayLength(cuts);
+    if (n <= 0) return;
+    std::vector<jint> raw(static_cast<size_t>(n));
+    env->GetIntArrayRegion(cuts, 0, n, raw.data());
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
+    engine.checkpointCuts.assign(raw.begin(), raw.end());
+    std::sort(engine.checkpointCuts.begin(), engine.checkpointCuts.end());
+}
+
+/** 兼容单点入口：等价于只给一个断点。 */
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCut(JNIEnv *, jobject, jint cut) {
     engine.checkpointCut = cut;

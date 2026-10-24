@@ -71,7 +71,11 @@ class CheckpointEqualityDeviceTest {
         // 是脚手架」，而这套模板实测是 7 个（tokenizeBoundary = [27, 20]），于是落点落在脚手架中间，
         // 快照把「之后会被回答替换掉」的几个 token 也带了进去，循环层状态因此与真算出来的不一致——
         // 温度 0 逐字对照稳定给出不同正文。
-        val checkpointPos = engine.checkpointPositionFor(history(turn)).let { if (it > 0) it else (whole.size - 1).coerceAtLeast(1) }
+        // 落点算不出来就**直接失败**：回退成 `whole.size - 1` 会把落点放进脚手架里，等于用错的
+        // 条件做生死线验收（全量审 R2 P2-4）。
+        val computed = engine.checkpointPositionFor(history(turn))
+        assertTrue("第 $turn 轮落点计算失败（tokenizeBoundary 没给出边界）", computed > 0 && computed < whole.size)
+        val checkpointPos = computed
         val text = engine.generate(
             history(turn),
             GenerationParameters(
@@ -102,7 +106,10 @@ class CheckpointEqualityDeviceTest {
             engine.checkpointEnabled = true
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
             val (a1, l1) = round(engine, 1)
+            val a1Restored = engine.checkpointRestoredFrom
             val (a2, l2) = round(engine, 2)
+            val a2Restored = engine.checkpointRestoredFrom
+            val a2Stats = engine.lastStats
             val usage = engine.checkpointUsage()
             log += "[A 开] $l1"
             log += "[A 开] $l2"
@@ -127,15 +134,15 @@ class CheckpointEqualityDeviceTest {
             // 归因实验（2026-10-24，两轮真机）最终结论：
             //  1. 落点必须用模板真实边界（tokenizeBoundary，本段是 53）。此前写死 whole-4=56，
             //     快照把 3 个下一轮会被回答替换掉的 token 也包了进去，循环层状态不一致。
-            //  2. **即使落点正确**，「恢复后续读 34 个」与「整段一次读 87 个」的批次形状差异
-            //     仍会让温度 0 的 argmax 翻转（切批 [56+31] 时两条路逐字一致；一次读 [87] 时
-            //     稳定给出不同正文）。这是 llama.cpp 混合模型预填的数值特性。
-            //  所以这里把整段重读切成同形状批次来验收「恢复状态精确」；跨批次的逐字判据待统筹改。
-            NativePromptBatch.set(56)
+            //  2. 批次形状差异（全量审 R2 P1-1 已修）：断批点改为「每条消息结束处」的集合，跨轮稳定，
+            //     所以这里**用生产默认批次**验收——两组只差检查点开关，不再手工改批次（R2 P2-4）。
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
             val (b1, m1) = round(engine, 1)
+            val b1Stats = engine.lastStats
             val (b2, m2) = round(engine, 2)
+            val b2Stats = engine.lastStats
             val (b3, m3) = round(engine, 3)
+            val b3Stats = engine.lastStats
             log += "[B 关] $m1"
             log += "[B 关] $m2"
             log += "[B 关] $m3"
@@ -148,6 +155,15 @@ class CheckpointEqualityDeviceTest {
             assertEquals("第 1 轮的正文必须一模一样（同一份提示、温度 0）", a1, b1)
             assertEquals("第 2 轮：用检查点与整段重读必须逐字相同（生死线）", a2, b2)
             assertTrue("正文不能是空的（空对空也算「相同」，那是假通过）", a2.isNotBlank())
+            // 全量审 R2 P2-4：逐轮验证「真恢复、真全读」——否则逐字相同可能只是两条路都在整段重读。
+            assertTrue("第 1 轮不该有恢复（restoredFrom=$a1Restored）", a1Restored == -1)
+            assertTrue("第 2 轮必须真恢复（restoredFrom=$a2Restored）", a2Restored > 0)
+            assertEquals("第 2 轮复用的 token 数必须等于恢复位置", a2Restored.toLong(), a2Stats?.reusedPromptTokens)
+            assertTrue("第 2 轮正文不能为空", a1.isNotBlank() && b1.isNotBlank())
+            assertEquals("关闭组第 2 轮必须整段读", 0L, b2Stats?.reusedPromptTokens)
+            assertEquals("关闭组第 2 轮读的 token 数必须等于提示长度", b2Stats?.promptTokens, b2Stats?.readPromptTokens)
+            assertEquals("关闭组第 3 轮必须整段读", 0L, b3Stats?.reusedPromptTokens)
+            assertTrue("关闭组正文不能为空", b3.isNotBlank())
 
             NativePromptBatch.set(0)
             NativePromptBatch.set(0)

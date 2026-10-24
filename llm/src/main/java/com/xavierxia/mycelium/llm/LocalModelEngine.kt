@@ -127,6 +127,9 @@ internal interface EngineBridge {
     /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
     fun setPromptBatch(size: Int) {}
     fun setCheckpointCut(cut: Int) {}
+
+    /** 跨轮稳定的断批点集合（每条消息结束处）；默认空 = 不额外切。 */
+    fun setCheckpointCuts(cuts: IntArray) {}
     /** 诊断：默认给 [0, 0]（假桥没有原生句柄）。 */
     fun handlesAlive(): LongArray = longArrayOf(0, 0)
 
@@ -169,6 +172,8 @@ internal class NativeBridge : EngineBridge {
     external override fun setPromptBatch(size: Int)
     /** 固定切法：本轮在哪个 token 位置强制断批（-1 = 不切）。与存不存检查点无关。 */
     external override fun setCheckpointCut(cut: Int)
+    /** 跨轮稳定的断批点集合（全量审 R2 P1-1）。 */
+    external override fun setCheckpointCuts(cuts: IntArray)
     /** 全量审 P2-8：[存活句柄数, 句柄持有总字节]——测例据此断言原生不泄漏。 */
     external override fun handlesAlive(): LongArray
     external override fun begin()
@@ -390,8 +395,11 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      */
     override suspend fun rekeyCheckpoints(from: String, to: String) = gate.withLock {
         if (from == to) return@withLock
-        if (cacheOwner == from) cacheOwner = to
+        // 全量审 R2 P1-2：**先迁移，成功后才改 `cacheOwner`**。原来先改所有者再迁移，一旦迁移抛异常
+        // （分配失败），所有者已经指向目标键、仓库里却还是源键的数据——上层 `runCatching` 又会把异常
+        // 吞掉，于是这份检查点从此再也匹配不上，等于永久泄漏。
         checkpoints.rekey(from, to)
+        if (cacheOwner == from) cacheOwner = to
     }
 
     /**
@@ -692,6 +700,23 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 native.setCheckpointCut(cutAt)
                 if (checkpointWanted) checkpointAt = parameters.checkpointPos
                     val (prompt, values) = runNative {
+                        // 全量审 R2 P1-1：断批点取「每条消息结束处」，只由 token 序列决定 ⇒ **跨轮稳定**。
+                        // 冷读与「从上一轮落点续读」在共同前缀上于是经历完全相同的批次——只在单点（本轮
+                        // 保存点）切是不够的：恢复从上一轮保存点起步，两个位置通常不同，浮点形状仍会偏。
+                        if (parameters.checkpointPos > 0) {
+                            val cuts = ArrayList<Int>(snapshot.size)
+                            for (size in 1..snapshot.size) {
+                                val prefix = JSONArray()
+                                snapshot.take(size).forEach {
+                                    prefix.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content))
+                                }
+                                val bounds = native.tokenizeBoundary(prefix.toString().toByteArray(Charsets.UTF_8))
+                                if (bounds != null && bounds.size == 2 && bounds[1] > 0) cuts += bounds[1].toInt()
+                            }
+                            native.setCheckpointCuts(cuts.toIntArray())
+                        } else {
+                            native.setCheckpointCuts(IntArray(0))
+                        }
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
@@ -780,7 +805,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // 正常返回（stopped=1），提示可能没读完，那一刻的状态不能当下一轮的起点。第一版
                     // 只判「要不要存」，停止后仍入库，下一轮就恢复到那个半截位置。
                     val stoppedThisRound = values[4] != 0L
-                    if (!stoppedThisRound && checkpointAt > 0 && cacheKey != null) {
+                    // 全量审 R2 P2-3：生成期间收到过低内存通知的，这一轮**不许入库**——
+                // 否则刚被告知内存紧张就又多存一份几十 MB 的快照。
+                if (trimRequested.get()) {
+                    checkpointSkippedForMemory = true
+                    trimRequested.set(false)
+                }
+                if (!stoppedThisRound && checkpointAt > 0 && cacheKey != null && !checkpointSkippedForMemory) {
                         // **先问位置、再取字节**：原生的 takeCheckpoint() 会把位置一起作废，顺序反了就
                         // 永远拿到 -1（第一版就是这么错的：字节 52 MB 都取到了，位置却一直是 -1，
                         // 检查点因此永远进不了仓库）。

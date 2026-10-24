@@ -105,14 +105,33 @@ internal class CheckpointStore(
      */
     fun rekey(from: String, to: String) {
         if (from == to) return
-        val moving = byKey.remove(from) ?: return
-        if (moving.isEmpty()) return
-        val target = byKey.getOrPut(to) { mutableListOf() }
-        // 交过来的那几份是「更早存的」，但内容与位置都是对的：按插入顺序排序后再限量。
-        target += moving
-        target.sortBy { it.sequence }
-        while (target.size > maxPerKey) drop(target.removeAt(0))
-        if (target.isEmpty()) byKey.remove(to)
+        val moving = byKey[from] ?: return
+        if (moving.isEmpty()) { byKey.remove(from); return }
+        // 全量审 R2 P1-2：**所有权在迁移成功之前不能松手**。原来一上来就 `byKey.remove(from)`，
+        // 之后目标侧任何一次分配抛异常（getOrPut / += / sortBy 都可能），这批句柄就既不在源键、
+        // 也不在目标键——仓库查不到、原生还占着，trim 和卸载都释放不到它。
+        val createdTarget = byKey[to] == null
+        val target = try {
+            byKey.remove(from)
+            byKey.getOrPut(to) { mutableListOf() }
+        } catch (failure: Throwable) {
+            byKey.getOrPut(from) { mutableListOf() }.addAll(moving)
+            throw failure
+        }
+        try {
+            // 交过来的那几份是「更早存的」，但内容与位置都是对的：按插入顺序排序后再限量。
+            target += moving
+            target.sortBy { it.sequence }
+            while (target.size > maxPerKey) drop(target.removeAt(0))
+            if (target.isEmpty()) byKey.remove(to)
+        } catch (failure: Throwable) {
+            // 回滚：还在目标里的那几份放回源键；已经 drop 的不再放回（句柄已按 drop 语义释放）。
+            val survivors = target.filter { entry -> moving.any { it === entry } }
+            target.removeAll(survivors)
+            if (target.isEmpty() && createdTarget) byKey.remove(to)
+            if (survivors.isNotEmpty()) byKey.getOrPut(from) { mutableListOf() }.addAll(survivors)
+            throw failure
+        }
         while (totalBytes > maxTotalBytes && byKey.isNotEmpty()) {
             val oldestKey = byKey.entries
                 .filter { it.value.isNotEmpty() }

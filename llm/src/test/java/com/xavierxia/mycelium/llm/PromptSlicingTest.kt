@@ -1,48 +1,70 @@
-package com.xavierxia.mycelium.llm
+﻿package com.xavierxia.mycelium.llm
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 固定切法（任务书 2026-10-24 第一节第 2 条）：**切法只由 token 序列决定**；
- * 开和关的切法在共同前缀上完全一致——这是温度 0 逐字对照能成立的前提。
+ * 固定切法（全量审 R2 P1-1 修正版）：**切法只由 token 序列决定**，且必须跨轮稳定——
+ * 冷读与「从上一轮落点续读」在共同前缀上要经历完全相同的批次。
  */
 class PromptSlicingTest {
 
     @Test
-    fun `the cut splits the prompt regardless of the switch`() {
-        // 同一段 87 token 提示、落点 53：开（恢复）与关（整段重读）在共同前缀上的批次完全一致。
-        val closed = PromptSlicing.batches(count = 87, cut = 53, nBatch = 512)
-        assertEquals(listOf(53, 34), closed)
-        // 恢复组：[0,53) 由检查点载入，预填只剩尾巴 [34] —— 与关闭组的最后一批相同。
-        assertEquals(listOf(34), PromptSlicing.batches(count = 87, cut = 53, nBatch = 512, restoredFrom = 53))
+    fun `resuming from an earlier save point keeps the shared prefix in the same batches`() {
+        // 真实续聊条件（第一版漏掉的）：第 1 轮落点 53，第 2 轮落点 80，恢复自 53。
+        val cuts = listOf(53, 80)
+        val cold = PromptSlicing.batches(count = 87, cuts = cuts, nBatch = 512)
+        val resumed = PromptSlicing.batches(count = 87, cuts = cuts, nBatch = 512, restoredFrom = 53)
+        assertEquals(listOf(53, 27, 7), cold)
+        assertEquals(listOf(27, 7), resumed)
+        // 共同前缀 [53,87) 在两条路上批次完全一致：冷读的尾两批 == 续读的全部批次。
+        assertEquals("续读必须是冷读的后缀", cold.drop(1), resumed)
     }
 
     @Test
-    fun `without a cut the prompt is plain n_batch chunks`() {
+    fun `the cut is only the message boundary not the save point`() {
+        // 只有单点（本轮保存点 80）时，共同前缀 [53,80) 会被并进第一批——这正是第一版的缺陷。
+        assertEquals(listOf(80, 7), PromptSlicing.batches(count = 87, cut = 80, nBatch = 512))
+        // 取全部消息边界后，[53,80) 与 [80,87) 各自成批。
+        assertEquals(listOf(53, 27, 7), PromptSlicing.batches(count = 87, cuts = listOf(53, 80), nBatch = 512))
+    }
+
+    @Test
+    fun `without cuts the prompt is plain n_batch chunks`() {
         assertEquals(listOf(32, 32, 23), PromptSlicing.batches(count = 87, cut = 0, nBatch = 32))
     }
 
     @Test
     fun `both segments restart the n_batch count from their own head`() {
-        // 任务书字面：「切开，段内从段首起每 n_batch 个一批」——两段各自从段首数。
-        // 头段 [0,53)：[32,21]；尾段 [53,87) 长 34：[32,2]。恢复组从 53 起也是 [32,2]，对齐 ✓。
+        // n_batch=32、断点 53：[32,21] 到断点，尾段 [32,2]。
         assertEquals(listOf(32, 21, 32, 2), PromptSlicing.batches(count = 87, cut = 53, nBatch = 32))
-        assertEquals(listOf(32, 2), PromptSlicing.batches(count = 87, cut = 53, nBatch = 32, restoredFrom = 53))
     }
 
     @Test
-    fun `first round and restored round share the tail shape`() {
-        // 第一轮（无恢复、读整段）与「恢复到同落点」在共同前缀上切法一致：
-        // 第一轮 = [53] + [7]；恢复组从 53 起只有 [7]。
-        assertEquals(listOf(53, 7), PromptSlicing.batches(count = 60, cut = 53, nBatch = 512))
-        assertEquals(listOf(7), PromptSlicing.batches(count = 60, cut = 53, nBatch = 512, restoredFrom = 53))
+    fun `a long conversation stays aligned across all boundaries`() {
+        // 跨 512 token：边界 300/700/1100，n_batch 512。
+        val cuts = listOf(300, 700, 1100)
+        assertEquals(listOf(300, 400, 400, 100), PromptSlicing.batches(count = 1200, cuts = cuts, nBatch = 512))
+        // 恢复自 700（上一轮落点）⇒ 与冷读从 700 起完全一致。
+        assertEquals(
+            PromptSlicing.batches(count = 1200, cuts = cuts, nBatch = 512).drop(2),
+            PromptSlicing.batches(count = 1200, cuts = cuts, nBatch = 512, restoredFrom = 700),
+        )
+    }
+
+    @Test
+    fun `the slicing never depends on the key or the store`() {
+        // trim 之后冷读、rekey 之后续读，切法都不变——它只由 count 与 cuts 决定。
+        val cuts = listOf(53, 80)
+        val first = PromptSlicing.batches(count = 87, cuts = cuts, nBatch = 512)
+        repeat(3) { assertEquals(first, PromptSlicing.batches(count = 87, cuts = cuts, nBatch = 512)) }
     }
 
     @Test
     fun `the cut never produces an empty batch`() {
-        // 落点正好在段首（cut=0 视为无落点；cut=count 视为没有尾巴）：不允许出现 0 长批次。
         assertEquals(listOf(60), PromptSlicing.batches(count = 60, cut = 60, nBatch = 512))
         assertEquals(listOf(60), PromptSlicing.batches(count = 60, cut = 0, nBatch = 512))
+        // 越界或重复的断点被忽略。
+        assertEquals(listOf(60), PromptSlicing.batches(count = 60, cuts = listOf(-5, 0, 60, 99, 60), nBatch = 512))
     }
 }
