@@ -683,9 +683,18 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_decodeTokens(JNIEnv * env, jobject,
             std::array<char, 8> buf = {};
             // special=true：角色头这类标记是**特殊 token**，special=false 时会被吞成空串，
             // 那样就看不出「边界到底在助手头之前还是之后」——取证必须留下它们。
-            const int written = llama_token_to_piece(
+            // 全量审 P2-11：缓冲不足时 llama 返回**负的所需长度**，固定 8 字节会把长特殊 token
+            // 静默吞掉（边界取证因此被污染）。不足即按所需长度扩容重试。
+            int written = llama_token_to_piece(
                 vocab, static_cast<llama_token>(raw[i]), buf.data(), static_cast<int>(buf.size()), 0, true);
-            if (written > 0) text.append(buf.data(), static_cast<size_t>(written));
+            if (written < 0) {
+                std::string big(static_cast<size_t>(-written) + 1, '\0');
+                written = llama_token_to_piece(
+                    vocab, static_cast<llama_token>(raw[i]), big.data(), static_cast<int>(big.size()), 0, true);
+                if (written > 0) text.append(big.data(), static_cast<size_t>(written));
+            } else if (written > 0) {
+                text.append(buf.data(), static_cast<size_t>(written));
+            }
         }
         return env->NewStringUTF(text.c_str());
     } catch (...) { return nullptr; }

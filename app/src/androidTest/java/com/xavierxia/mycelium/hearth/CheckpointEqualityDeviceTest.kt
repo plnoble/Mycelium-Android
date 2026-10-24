@@ -156,13 +156,24 @@ class CheckpointEqualityDeviceTest {
             engine.checkpointEnabled = true
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
             val a3Texts = mutableListOf<String>()
+            // 全量审 P2-9：3 轮组**每一轮**都要断言「真的恢复成功」，不许靠「恢复失败 + 整段重读」
+            // 蒙混过逐字比对——那等于这条生死线没被测到。
+            val a3Restored = mutableListOf<Int>()
+            val a3Reasons = mutableListOf<Long>()
             listOf(1, 2, 3).forEach { turn ->
                 val (text, line) = round(engine, turn)
                 a3Texts += text
+                a3Restored += engine.checkpointRestoredFrom
+                a3Reasons += engine.checkpointFallbackReason
                 log += "[3 轮] $line"
             }
             // 第三轮也要开/关逐字比对：同一份提示、同一温度 0，两条路必须给出同一段正文。
             assertEquals("第 3 轮：用检查点与整段重读必须逐字相同", a3Texts[2], b3)
+            // 第 2、3 轮必须真的从检查点续读（第 1 轮还没有可恢复的，restoredFrom=-1 属正常）。
+            assertEquals("3 轮组第 2 轮必须真恢复", true, a3Restored[1] > 0)
+            assertEquals("3 轮组第 2 轮不该回退", 0L, a3Reasons[1])
+            assertEquals("3 轮组第 3 轮必须真恢复", true, a3Restored[2] > 0)
+            assertEquals("3 轮组第 3 轮不该回退", 0L, a3Reasons[2])
             val finalUsage = engine.checkpointUsage()
             log += "[3 轮] 结束时检查点占用：${finalUsage.first} 份 / ${finalUsage.second} 字节"
 
