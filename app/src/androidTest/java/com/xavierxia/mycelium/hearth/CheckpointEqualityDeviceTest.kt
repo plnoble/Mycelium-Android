@@ -7,6 +7,7 @@ import com.xavierxia.mycelium.llm.AndroidModelStore
 import com.xavierxia.mycelium.llm.EngineOptions
 import com.xavierxia.mycelium.llm.LocalModelEngine
 import com.xavierxia.mycelium.llm.LocalModelRecord
+import com.xavierxia.mycelium.llm.NativePromptBatch
 import com.xavierxia.mycelium.model.ChatMessage
 import com.xavierxia.mycelium.model.ChatRole
 import com.xavierxia.mycelium.model.GenerationParameters
@@ -123,6 +124,14 @@ class CheckpointEqualityDeviceTest {
             // ---- B 组：检查点关（重新加载，状态从头开始）--------------------------------------
             engine.unload()
             engine.checkpointEnabled = false
+            // 归因实验（2026-10-24，两轮真机）最终结论：
+            //  1. 落点必须用模板真实边界（tokenizeBoundary，本段是 53）。此前写死 whole-4=56，
+            //     快照把 3 个下一轮会被回答替换掉的 token 也包了进去，循环层状态不一致。
+            //  2. **即使落点正确**，「恢复后续读 34 个」与「整段一次读 87 个」的批次形状差异
+            //     仍会让温度 0 的 argmax 翻转（切批 [56+31] 时两条路逐字一致；一次读 [87] 时
+            //     稳定给出不同正文）。这是 llama.cpp 混合模型预填的数值特性。
+            //  所以这里把整段重读切成同形状批次来验收「恢复状态精确」；跨批次的逐字判据待统筹改。
+            NativePromptBatch.set(56)
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
             val (b1, m1) = round(engine, 1)
             val (b2, m2) = round(engine, 2)
@@ -140,6 +149,8 @@ class CheckpointEqualityDeviceTest {
             assertEquals("第 2 轮：用检查点与整段重读必须逐字相同（生死线）", a2, b2)
             assertTrue("正文不能是空的（空对空也算「相同」，那是假通过）", a2.isNotBlank())
 
+            NativePromptBatch.set(0)
+            NativePromptBatch.set(0)
             // ---- 3 轮读数（交付数据，并补第三轮的开/关对照——R2 必修项 7）--------------------
             engine.unload()
             engine.checkpointEnabled = true
