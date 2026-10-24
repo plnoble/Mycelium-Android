@@ -492,4 +492,21 @@ class CheckpointFlowTest {
         assertTrue("应当记下「因为内存跳过」", engine.checkpointSkippedForMemory)
         assertEquals("不许入库", 0, engine.checkpointUsageSuspendForTest())
     }
+    // ---- 全量审 P2-6：低内存清理必须「现在」就释放 --------------------------------------
+
+    @Test
+    fun trimNowDropsEveryCheckpointEvenIfNoGenerationFollows() = runBlocking {
+        val bridge = Recorder()
+        val engine = engineWith(bridge)
+        engine.checkpointEnabled = true
+        engine.load(model, EngineOptions()) { Descriptor() }
+        round(engine)                                   // 存一份
+        val before = bridge.released.size
+        assertEquals(1, engine.checkpointUsage().first)
+        engine.trimCheckpointsNow()                     // 系统低内存：立即清
+        assertEquals("清完仓库必须为空", 0, engine.checkpointUsage().first)
+        assertTrue("至少释放了一个句柄（之前 before）", bridge.released.size > before)
+        // 之后**不再生成**：仓库保持为空（不会凭空长回来）。
+        assertEquals(0, engine.checkpointUsage().first)
+    }
 }
