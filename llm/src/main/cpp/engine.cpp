@@ -299,6 +299,12 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             for (const int candidate : engine.checkpointCuts) {
                 if (candidate > pos && candidate < count) { cutPos = candidate; break; }
             }
+            // **落点本身也必须是一个断点**。否则：落点 56 不在集合里、集合里下一个是 84 时，这一批会
+            // 一路读到 84，`pos == saveCheckpointAt` 永远不成立 —— 检查点静默地一次都存不上
+            // （真机十轮验收就这样变成 0 份、全程整段重读）。
+            const int landing = saveCheckpointAt > 0 ? saveCheckpointAt
+                : (engine.checkpointCut > 0 ? engine.checkpointCut : -1);
+            if (landing > pos && landing < count && (cutPos < 0 || landing < cutPos)) cutPos = landing;
             if (cutPos < 0) {
                 const int single = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
                 if (single > pos && single < count) cutPos = single;

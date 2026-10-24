@@ -40,14 +40,19 @@ class CheckpointTenRoundsDeviceTest {
         copied = false,
     )
 
-    /** 每轮加一句，让对话真的往前走（上下文也会随之变长）。 */
+    /**
+     * **真实的追加式对话**（2026-10-24）：上一轮以用户消息结束，这一轮在其后追加「助手回复 + 新的
+     * 用户消息」。之前把新消息插在「固定收尾」**之前**，上一轮的落点就不在这条对话的公共前缀里，
+     * 按语义本来就该被作废——检查点因此永远复用不上，十轮读数全是整段重读（测的不是引擎，是
+     * 一个不可能成立的场景）。
+     */
     private fun history(round: Int): List<ChatMessage> = buildList {
         add(ChatMessage(ChatRole.SYSTEM, "你是一个安静、说话很短的人，每次只说一句话。"))
-        for (i in 1..round) {
+        for (i in 1 until round) {
             add(ChatMessage(ChatRole.USER, "第 $i 句：说一件今天窗外的事。"))
             add(ChatMessage(ChatRole.ASSISTANT, "第 $i 句回答。"))
         }
-        add(ChatMessage(ChatRole.USER, "用一句话收尾。"))
+        add(ChatMessage(ChatRole.USER, "第 $round 句：说一件今天窗外的事。"))
     }
 
     private fun heapUsed(): Long {
@@ -67,6 +72,9 @@ class CheckpointTenRoundsDeviceTest {
         val samples = mutableListOf<Long>()
         try {
             engine.checkpointEnabled = true
+            // 这条测例量的是「不受打扰时 10 轮的内存行为」，所以关掉系统低内存信号：
+            // 否则后台/内存压力回调会把检查点反复清空，读数变成「一直整段重读」，什么也测不到。
+            engine.trimOnSystemSignal = false
             engine.load(record.info, EngineOptions(threads = 8, contextLength = 8192)) { store.open(record) }
 
             // 先跑一轮预热：加载、JIT、首次分配都发生在这里，之后的数字才说明问题。
@@ -78,9 +86,12 @@ class CheckpointTenRoundsDeviceTest {
             log += "预热之后堆占用：$baseline 字节（${baseline / 1024 / 1024} MiB）"
 
             for (round in 2..11) {
-                // 落点用上一轮提示的 token 数减 4（与真机验证用的同一个算法：整段 - 脚手架）。
+                // 落点必须用**应用侧同一个算法**（tokenizeBoundary），不能写死常数：这套模板的生成
+                // 脚手架是 7 个 token，写死 4 会让落点落进脚手架中间（2026-10-23 夜的真机事故）。
                 val previous = engine.promptTokenIds(history(round - 1))
-                val pos = (previous.size - 4).coerceAtLeast(1)
+                val pos = engine.checkpointPositionFor(history(round))
+                assertTrue("第 $round 轮落点必须算得出来", pos > 0 && pos < engine.promptTokenIds(history(round)).size)
+                // 落点天然比上一轮提示长（本轮多了助手回复与用户消息），不比较两者大小。
                 engine.generate(
                     history(round),
                     GenerationParameters(
@@ -89,6 +100,8 @@ class CheckpointTenRoundsDeviceTest {
                     ),
                 ).toList()
                 val stats = engine.lastStats
+                // 诊断：take 里带着「实际存下的位置」；restoredFrom 带着本轮是否恢复。
+                log += "诊断：take=${engine.lastTakeDiagnosis} restored=${engine.checkpointRestoredFrom}"
                 val (count, bytes) = engine.checkpointUsage()
                 val heap = heapUsed()
                 samples += heap
@@ -104,6 +117,12 @@ class CheckpointTenRoundsDeviceTest {
             // 先把证据写下来：即便下面某条判据没过，也要能拿到完整读数（这是验收数据，不是调试输出）。
             val last = samples.last()
             log += "堆占用：首 ${samples.first()} → 尾 $last（差 ${last - samples.first()}）"
+            // 全量审 R2 P2-6：JVM 堆不涨只能说明 Kotlin 侧干净。**原生句柄**必须单独读：
+            // 字节归原生之后，快照泄漏全部发生在那一侧，只看堆是看不见的。
+            val alive = engine.checkpointHandlesAlive()
+            log += "原生句柄：${alive.first} 个 / ${alive.second} 字节"
+            assertTrue("原生句柄不该随轮次增长（实际 ${alive.first} 个）", alive.first <= 1)
+            assertTrue("原生句柄字节不得超过单份上限（实际 ${alive.second}）", alive.second <= 300L * 1024 * 1024)
 
             File(context.filesDir, "p2-1d-ten-rounds.txt").writeText(
                 buildString {

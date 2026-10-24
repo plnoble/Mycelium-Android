@@ -305,6 +305,15 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      * 消息，检查点就一直占着内存。这个入口由系统低内存回调（`ComponentCallbacks2.onTrimMemory`）在
      * **后台协程**里调用：拿 `gate` 清仓库并释放句柄，主线程不等推理锁。空闲时没有在途快照，清完即净。
      */
+    /**
+     * 原生侧真实占用（全量审 R2 P2-6）：(存活句柄数, 句柄持有字节)。必须拿 `gate`——它读的是
+     * 原生句柄表，与生成/清理并发就是数据竞争。测例与真机验收据此判断「仓库空但原生还占着」。
+     */
+    suspend fun checkpointHandlesAlive(): Pair<Int, Long> = gate.withLock {
+        val values = runNative { native.handlesAlive() }
+        (values.getOrNull(0)?.toInt() ?: -1) to (values.getOrNull(1) ?: -1L)
+    }
+
     override suspend fun trimCheckpointsNow() = gate.withLock {
         trimRequested.set(false)
         forgetCheckpoints()
@@ -610,7 +619,14 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      * 实现上**不碰 `gate` 锁**：从 `onTrimMemory` 回调里同步拿推理锁会把主线程卡在一整轮生成上。
      * 改为在同一个引擎上只打一个「该清了」的标记，下一次真正进锁时先清。
      */
+    /**
+     * 系统低内存信号的总开关（默认开）。真机验收要把「不受打扰时的内存行为」与「系统真的报紧张」
+     * 分开测：测试里关掉它，避免后台回调把检查点反复清空，让读数失去意义。
+     */
+    @Volatile var trimOnSystemSignal = true
+
     fun requestCheckpointTrim() {
+        if (!trimOnSystemSignal) return
         trimRequested.set(true)
     }
 

@@ -33,7 +33,15 @@ class MyceliumApp : Application() {
 
             @Suppress("DEPRECATION")
             override fun onTrimMemory(level: Int) {
-                if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) trim(LocalModelEngine.shared)
+                // **级别必须挑对**：`TRIM_MEMORY_UI_HIDDEN`(20) 的意思是「界面不可见」，不是内存紧张。
+                // 用 `level >= RUNNING_LOW` 会把它一起算进来，于是用户切一次后台、检查点就被清空，
+                // 回来还得整段重读——比占那几十 MB 难受得多（真机十轮验收就这样被反复清到 0 份）。
+                // 现在只在「明确的内存压力」下清理：
+                //   RUNNING_MODERATE(5) 不动；RUNNING_LOW(10)/RUNNING_CRITICAL(15) 清；
+                //   UI_HIDDEN(20) 不动；BACKGROUND(40) 及以上清。
+                val pressure = (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && level < ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) ||
+                    level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+                if (pressure) trim(LocalModelEngine.shared)
             }
             private fun trim(engine: LocalModelEngine) {
                 // 全量审 R2 P2-3：**先同步打标记，再异步等锁清理**。只 launch 的话，生成持锁期间的

@@ -48,6 +48,9 @@ class CheckpointFlowTest {
         var lastReuse: Int = -1
         private var pending: Long? = null
         val handles = mutableMapOf<Int, Long>()
+
+        /** 在途快照的位置（-1 = 没有）——给「清理必须真的丢掉 pending」这类断言用。 */
+        val pendingPosPublic: Int get() = pendingPos
         private var nextHandle = 100
         val released = mutableListOf<Int>()
         private var pendingPos: Int = -1
@@ -90,6 +93,17 @@ class CheckpointFlowTest {
             released += handle
             handles.remove(handle)
         }
+
+        // 全量审 R2 P2-6：**假的 discard 必须真的丢掉 pending**。原来继承空实现，于是「停止/取消时
+        // 在途快照有没有被丢弃」这条根本没被测到（取消后的探针还能看到 fakePending=16）。
+        override fun discardCheckpoint() {
+            calls += "discard"
+            pending = null
+            pendingPos = -1
+        }
+
+        override fun handlesAlive(): LongArray =
+            longArrayOf(handles.size.toLong(), handles.values.sum())
 
         override fun takeCheckpointPos(): Int {
             calls += "takePos"
@@ -507,6 +521,9 @@ class CheckpointFlowTest {
         assertEquals(1, engine.checkpointUsage().first)
         engine.trimCheckpointsNow()                     // 系统低内存：立即清
         assertEquals("清完仓库必须为空", 0, engine.checkpointUsage().first)
+        // 全量审 R2 P2-6：仓库空不等于原生空——句柄表与在途快照都要空。
+        assertTrue("清完原生句柄也必须为空：${bridge.handles}", bridge.handles.isEmpty())
+        assertEquals("清完在途快照也必须丢掉", -1, bridge.pendingPosPublic)
         assertTrue("至少释放了一个句柄（之前 before）", bridge.released.size > before)
         // 之后**不再生成**：仓库保持为空（不会凭空长回来）。
         assertEquals(0, engine.checkpointUsage().first)
