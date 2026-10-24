@@ -528,8 +528,17 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
  * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
  */
 /** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_archVariant(JNIEnv * env, jobject) {
+    return env->NewStringUTF(MYCELIUM_ARCH_VARIANT);
+}
+
 /** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
 extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setPromptBatch(JNIEnv *, jobject, jint size) {
+    engine.promptBatch = size > 0 ? size : 0;
+}
+
 /** 全量审 P2-8：返回 [存活句柄数, 句柄持有总字节]——让测例能看见原生侧的泄漏。 */
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_handlesAlive(JNIEnv *, jobject) {
