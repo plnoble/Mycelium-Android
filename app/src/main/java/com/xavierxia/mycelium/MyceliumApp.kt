@@ -1,8 +1,8 @@
-﻿package com.xavierxia.mycelium
+package com.xavierxia.mycelium
 
 import android.app.Application
 import android.content.ComponentCallbacks2
-import com.xavierxia.mycelium.llm.LocalEngine
+import com.xavierxia.mycelium.llm.LocalModelEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,7 +30,7 @@ class MyceliumApp : Application() {
             override fun onTrimMemory(level: Int) {
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) trim(LocalModelEngine.shared)
             }
-            private fun trim(engine: LocalEngine) {
+            private fun trim(engine: LocalModelEngine) {
                 scope.launch { runCatching { engine.trimCheckpointsNow() } }
             }
         })

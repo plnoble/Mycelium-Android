@@ -47,7 +47,7 @@ class CheckpointFlowTest {
         var restorePos: Int = -1
         var lastReuse: Int = -1
         private var pending: Long? = null
-        private val handles = mutableMapOf<Int, Long>()
+        val handles = mutableMapOf<Int, Long>()
         private var nextHandle = 100
         val released = mutableListOf<Int>()
         private var pendingPos: Int = -1
