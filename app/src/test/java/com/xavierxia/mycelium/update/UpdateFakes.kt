@@ -14,7 +14,7 @@ import kotlinx.coroutines.Dispatchers
  * 第 3 步的测例只用**显式 fake**（没有 mock 框架）：调用次数、参数、结果都看得见，
  * 下载/校验/安装三件没接线时用 `Unwired*`，接线后在这里换掉。
  *
- * 仓库版本是 0.4.0，所以「有新版」用 0.5.0，「不比当前新」用 0.3.0。
+ * 仓库版本是 0.4.0，所以「有新版」用 0.6.0，「不比当前新」用 0.3.0。
  */
 internal const val CURRENT_VERSION = "0.4.0"
 

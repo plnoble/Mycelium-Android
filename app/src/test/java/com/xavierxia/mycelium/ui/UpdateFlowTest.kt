@@ -60,13 +60,13 @@ class UpdateFlowTest {
 
     @Test
     fun aNewVersionShowsTheBadgeAndTheCard() {
-        val source = CountingReleaseSource { testRelease("0.5.0") }
+        val source = CountingReleaseSource { testRelease("0.6.0") }
         val center = testCenter(source, UpdatePreferences(context), clock = { 1_000L })
         compose.setContent { MyceliumApp(center) }
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("检查更新").performClick()
-        awaitText("发现新版本：0.5.0")
+        awaitText("发现新版本：0.6.0")
 
         assertTrue(badgeNodes() > 0)
         compose.onNodeWithText("安装包 38.5 MiB").assertIsDisplayed()
@@ -79,30 +79,30 @@ class UpdateFlowTest {
 
     @Test
     fun ignoringTheVersionRemovesTheBadgeAndTheCard() {
-        val source = CountingReleaseSource { testRelease("0.5.0") }
+        val source = CountingReleaseSource { testRelease("0.6.0") }
         val center = testCenter(source, UpdatePreferences(context), clock = { 1_000L })
         compose.setContent { MyceliumApp(center) }
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("检查更新").performClick()
-        awaitText("发现新版本：0.5.0")
+        awaitText("发现新版本：0.6.0")
 
         compose.onNodeWithText("忽略这个版本").performClick()
-        awaitGone("发现新版本：0.5.0")
+        awaitGone("发现新版本：0.6.0")
 
         assertEquals(0, badgeNodes())
     }
 
     @Test
     fun anUnknownSizeAndAMissingInstallableAssetAreSaidOutLoud() {
-        val release = testRelease("0.5.0", installable = false).copy(apkSizeBytes = null)
+        val release = testRelease("0.6.0", installable = false).copy(apkSizeBytes = null)
         val source = CountingReleaseSource { release }
         val center = testCenter(source, UpdatePreferences(context), clock = { 1_000L })
         compose.setContent { MyceliumApp(center) }
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("检查更新").performClick()
-        awaitText("发现新版本：0.5.0")
+        awaitText("发现新版本：0.6.0")
 
         compose.onNodeWithText("大小未知").assertIsDisplayed()
         compose.onNodeWithText("这个版本没有可用的安装包，请到发布页查看。").assertIsDisplayed()
@@ -111,13 +111,13 @@ class UpdateFlowTest {
 
     @Test
     fun longReleaseNotesFoldAndUnfold() {
-        val source = CountingReleaseSource { testRelease("0.5.0").copy(releaseNotes = "很长的一段说明。".repeat(30)) }
+        val source = CountingReleaseSource { testRelease("0.6.0").copy(releaseNotes = "很长的一段说明。".repeat(30)) }
         val center = testCenter(source, UpdatePreferences(context), clock = { 1_000L })
         compose.setContent { MyceliumApp(center) }
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("检查更新").performClick()
-        awaitText("发现新版本：0.5.0")
+        awaitText("发现新版本：0.6.0")
 
         compose.onNodeWithText("展开更新说明").performClick()
         compose.onNodeWithText("收起更新说明").assertIsDisplayed()
@@ -125,7 +125,7 @@ class UpdateFlowTest {
 
     @Test
     fun theInstallEntryAppearsOnlyWhenTheDownloadPathIsWiredAndTheBuildIsNotDebug() {
-        val wired = CountingReleaseSource { testRelease("0.5.0") }
+        val wired = CountingReleaseSource { testRelease("0.6.0") }
         val releaseCenter = testCenter(
             wired,
             UpdatePreferences(context),
@@ -145,7 +145,7 @@ class UpdateFlowTest {
 
     @Test
     fun aDebugPackageNeverOffersTheInstallEntry() {
-        val source = CountingReleaseSource { testRelease("0.5.0") }
+        val source = CountingReleaseSource { testRelease("0.6.0") }
         val center = testCenter(
             source,
             UpdatePreferences(context),
@@ -159,7 +159,7 @@ class UpdateFlowTest {
 
         compose.onNodeWithText("我的").performClick()
         compose.onNodeWithText("检查更新").performClick()
-        awaitText("发现新版本：0.5.0")
+        awaitText("发现新版本：0.6.0")
 
         assertTrue(compose.onAllNodesWithText("下载并安装").fetchSemanticsNodes().isEmpty())
     }

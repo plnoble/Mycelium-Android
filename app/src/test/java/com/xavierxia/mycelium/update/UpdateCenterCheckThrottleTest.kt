@@ -47,7 +47,7 @@ class UpdateCenterCheckThrottleTest {
             calls.incrementAndGet()
             entered.countDown()
             if (block) gate.await(10, TimeUnit.SECONDS)
-            return testRelease("0.5.0")
+            return testRelease("0.6.0")
         }
     }
 

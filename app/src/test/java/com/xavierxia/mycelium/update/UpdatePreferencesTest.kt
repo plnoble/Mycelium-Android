@@ -41,9 +41,9 @@ class UpdatePreferencesTest {
         first.autoCheck = false
         first.lastAutoAttemptAtMs = 111L
         first.lastSuccessAtMs = 222L
-        first.ignoredTag = "v0.5.0"
+        first.ignoredTag = "v0.6.0"
         first.pendingReleaseJson = "{\"a\":1}"
-        first.pendingReleaseTag = "v0.5.0"
+        first.pendingReleaseTag = "v0.6.0"
         first.pendingApkPath = "/tmp/x.apk"
 
         val second = UpdatePreferences(context)
@@ -51,18 +51,18 @@ class UpdatePreferencesTest {
         assertFalse(second.autoCheck)
         assertEquals(111L, second.lastAutoAttemptAtMs)
         assertEquals(222L, second.lastSuccessAtMs)
-        assertEquals("v0.5.0", second.ignoredTag)
+        assertEquals("v0.6.0", second.ignoredTag)
         assertEquals("{\"a\":1}", second.pendingReleaseJson)
-        assertEquals("v0.5.0", second.pendingReleaseTag)
+        assertEquals("v0.6.0", second.pendingReleaseTag)
         assertEquals("/tmp/x.apk", second.pendingApkPath)
     }
 
     @Test
     fun clearPendingKeepsTheIgnoredTag() {
         val prefs = UpdatePreferences(context)
-        prefs.ignoredTag = "v0.5.0"
+        prefs.ignoredTag = "v0.6.0"
         prefs.pendingReleaseJson = "{}"
-        prefs.pendingReleaseTag = "v0.5.0"
+        prefs.pendingReleaseTag = "v0.6.0"
         prefs.pendingApkPath = "/tmp/x.apk"
 
         prefs.clearPending()
@@ -70,6 +70,6 @@ class UpdatePreferencesTest {
         assertNull(prefs.pendingReleaseJson)
         assertNull(prefs.pendingReleaseTag)
         assertNull(prefs.pendingApkPath)
-        assertEquals("v0.5.0", prefs.ignoredTag)
+        assertEquals("v0.6.0", prefs.ignoredTag)
     }
 }

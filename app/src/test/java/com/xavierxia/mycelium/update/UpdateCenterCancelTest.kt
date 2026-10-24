@@ -88,7 +88,7 @@ class UpdateCenterCancelTest {
         files: UpdateFiles,
         verifier: ApkVerifier = RecordingVerifier(),
     ): UpdateCenter = testCenter(
-        source = CountingReleaseSource { testRelease("0.5.0") },
+        source = CountingReleaseSource { testRelease("0.6.0") },
         prefs = prefs,
         clock = { 100 * 3_600_000L },
         files = files,

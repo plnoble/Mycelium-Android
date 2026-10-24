@@ -41,7 +41,7 @@ class InstallSessionRecoveryTest {
 
     private fun record(phase: InstallPhase, status: Int = 0) = InstallSessionRecord(
         sessionId = 42,
-        tagName = "v0.5.0",
+        tagName = "v0.6.0",
         packageName = "com.xavierxia.mycelium",
         baselineVersionCode = 4L,
         phase = phase,
@@ -55,11 +55,11 @@ class InstallSessionRecoveryTest {
     /** 落盘里躺着「上个进程提交过、但还没结果」的会话，外加一个已下好的包。 */
     private fun previousProcessLeftASession(): Triple<UpdateFiles, java.io.File, MemoryInstallSessionState> {
         val store = files()
-        val apk = store.finalFile("v0.5.0")
+        val apk = store.finalFile("v0.6.0")
         apk.parentFile?.mkdirs()
         apk.writeBytes(ByteArray(16))
-        prefs.pendingReleaseTag = "v0.5.0"
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0"))
+        prefs.pendingReleaseTag = "v0.6.0"
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0"))
         prefs.pendingApkPath = apk.path
         val state = MemoryInstallSessionState()
         // 真实实现总是先写 Created：空记录只接受初始阶段（M7）。
@@ -74,7 +74,7 @@ class InstallSessionRecoveryTest {
         val installer = RecordingInstaller()
 
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0") },
+            source = CountingReleaseSource { testRelease("0.6.0") },
             prefs = prefs,
             clock = { 100 * hour },
             files = store,
@@ -95,7 +95,7 @@ class InstallSessionRecoveryTest {
         val (store, apk, state) = previousProcessLeftASession()
         val installer = RecordingInstaller()
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0") },
+            source = CountingReleaseSource { testRelease("0.6.0") },
             prefs = prefs,
             clock = { 100 * hour },
             files = store,
@@ -119,7 +119,7 @@ class InstallSessionRecoveryTest {
     fun aTargetThatIsAlreadyInstalledStartsNoSession() {
         val installer = RecordingInstaller()
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0") },
+            source = CountingReleaseSource { testRelease("0.6.0") },
             prefs = prefs,
             clock = { 100 * hour },
             files = files(),

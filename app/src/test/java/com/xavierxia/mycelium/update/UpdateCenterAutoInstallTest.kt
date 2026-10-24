@@ -33,7 +33,7 @@ class UpdateCenterAutoInstallTest {
     }
 
     private fun center(installer: InstallSessionGateway): UpdateCenter = testCenter(
-        source = CountingReleaseSource { testRelease("0.5.0") },
+        source = CountingReleaseSource { testRelease("0.6.0") },
         prefs = prefs,
         clock = { 100 * 3_600_000L },
         files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 }),
@@ -51,7 +51,7 @@ class UpdateCenterAutoInstallTest {
         center.startDownload()
 
         assertEquals("一次 startDownload 就该建好会话，不该等第二次点击", 1, installer.installs)
-        assertEquals("装的就是刚校验通过的那一版", "v0.5.0", installer.lastTag)
+        assertEquals("装的就是刚校验通过的那一版", "v0.6.0", installer.lastTag)
     }
 
     @Test
@@ -81,7 +81,7 @@ class UpdateCenterAutoInstallTest {
         val store = UpdateFiles(tmp.root, availableBytes = { free })
         val installer = RecordingInstaller()
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0") },
+            source = CountingReleaseSource { testRelease("0.6.0") },
             prefs = prefs,
             clock = { 100 * 3_600_000L },
             files = store,
@@ -109,7 +109,7 @@ class UpdateCenterAutoInstallTest {
         val installer = RecordingInstaller()
         val files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0") },
+            source = CountingReleaseSource { testRelease("0.6.0") },
             prefs = prefs,
             clock = { 100 * 3_600_000L },
             files = files,

@@ -25,7 +25,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
 class MainActivityAutoCheckTest {
-    private val source = CountingReleaseSource { testRelease("0.5.0") }
+    private val source = CountingReleaseSource { testRelease("0.6.0") }
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
@@ -47,6 +47,6 @@ class MainActivityAutoCheckTest {
         compose.waitUntil(timeoutMillis = 5_000) { source.calls == 1 }
 
         compose.onNodeWithText("我的").performClick()
-        compose.onNodeWithText("发现新版本：0.5.0").assertIsDisplayed()
+        compose.onNodeWithText("发现新版本：0.6.0").assertIsDisplayed()
     }
 }

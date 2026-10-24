@@ -84,7 +84,7 @@ class UpdateThreadBoundaryTest {
         val main = dispatcher("m1-main")
         val io = dispatcher("m1-io")
         val root = Files.createTempDirectory("m1-download").toFile()
-        val release = testRelease("0.5.0").copy(apkSizeBytes = 1024L)
+        val release = testRelease("0.6.0").copy(apkSizeBytes = 1024L)
         val transport = ThreadRecordingTransport()
         val downloader = GatewayApkDownloader(
             UpdateFiles(File(root, "files"), availableBytes = { Long.MAX_VALUE / 4 }),
@@ -113,7 +113,7 @@ class UpdateThreadBoundaryTest {
         val main = dispatcher("m1-main")
         val io = dispatcher("m1-io")
         val root = Files.createTempDirectory("m1-verify").toFile()
-        val apk = File(root, "mycelium-v0.5.0.apk")
+        val apk = File(root, "mycelium-v0.6.0.apk")
         apk.writeBytes(ByteArray(32))
         File(root, apk.name + ".sha256").writeText("a".repeat(64) + "\n")
         val transport = ThreadRecordingTransport()
@@ -133,7 +133,7 @@ class UpdateThreadBoundaryTest {
             io = io,
         )
         try {
-            val verdict = withContext(main) { verifier.verify(apk, testRelease("0.5.0")) }
+            val verdict = withContext(main) { verifier.verify(apk, testRelease("0.6.0")) }
             assertTrue("校验应当通过", verdict is VerifyOutcome.Verified)
             assertEquals("算哈希必须在 IO 线程上", "m1-io", transport.hashThread)
             assertEquals("读 APK 必须在 IO 线程上", "m1-io", archiveThread)
@@ -152,7 +152,7 @@ class UpdateThreadBoundaryTest {
         val root = Files.createTempDirectory("m1-block").toFile()
         val gate = CountDownLatch(1)
         val entered = CountDownLatch(1)
-        val release = testRelease("0.5.0").copy(apkSizeBytes = 1024L)
+        val release = testRelease("0.6.0").copy(apkSizeBytes = 1024L)
         val transport = ThreadRecordingTransport(downloadGate = gate, downloadEntered = entered)
         val files = UpdateFiles(File(root, "files"), availableBytes = { Long.MAX_VALUE / 4 })
         val downloader = GatewayApkDownloader(files, transport, io = io)
