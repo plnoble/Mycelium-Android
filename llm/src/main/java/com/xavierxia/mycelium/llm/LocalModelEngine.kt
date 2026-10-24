@@ -223,6 +223,9 @@ interface LocalEngine : ChatModel {
      * 默认空实现：云端实现没有检查点；假引擎不需要这个能力。真引擎给了实现。
      */
     suspend fun rekeyCheckpoints(from: String, to: String) {}
+
+    /** 立即丢掉全部检查点（系统低内存回调用）；默认空实现。 */
+    suspend fun trimCheckpointsNow() {}
 }
 
 /** One process-wide engine. The mutex covers cleanup after cancellation as well. */
@@ -282,6 +285,18 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     /** 在锁内调用：有「该清了」的标记就整批丢掉。 */
     private fun applyPendingTrim() {
         if (trimRequested.compareAndSet(true, false)) forgetCheckpoints()
+    }
+
+    /**
+     * **立即**丢掉全部检查点（全量审 P2-6，2026-10-24）。
+     *
+     * 与 [requestCheckpointTrim] 的区别：那个只置标记、等下一轮生成开始才消费——如果用户之后再没发过
+     * 消息，检查点就一直占着内存。这个入口由系统低内存回调（`ComponentCallbacks2.onTrimMemory`）在
+     * **后台协程**里调用：拿 `gate` 清仓库并释放句柄，主线程不等推理锁。空闲时没有在途快照，清完即净。
+     */
+    override suspend fun trimCheckpointsNow() = gate.withLock {
+        trimRequested.set(false)
+        forgetCheckpoints()
     }
 
     /**
