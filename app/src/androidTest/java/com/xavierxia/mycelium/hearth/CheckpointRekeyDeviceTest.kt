@@ -88,7 +88,11 @@ class CheckpointRekeyDeviceTest {
                 "reused=${secondStats?.reusedPromptTokens} read=${secondStats?.readPromptTokens} " +
                 "reason=${secondStats?.reuseFallbackReason} restoredFrom=${engine.checkpointRestoredFrom} " +
                 "promptMs=${secondStats?.promptMillis}"
+            // 诊断：take 的经过与恢复步（为什么没存上/没恢复，一眼可见）。
+            log += "take=${engine.lastTakeDiagnosis} restoreStep=${engine.lastRestoreStep()} " +
+                "usage=${engine.checkpointUsage()}"
 
+            // 证据先落盘再断言：断言失败时不能留下上一次的旧文件。
             File(context.filesDir, "p2-1d-rekey.txt").writeText(
                 buildString {
                     appendLine("设备：${android.os.Build.MODEL} / ${android.os.Build.SOC_MODEL}")

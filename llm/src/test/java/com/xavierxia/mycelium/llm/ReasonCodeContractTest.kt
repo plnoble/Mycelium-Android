@@ -46,6 +46,7 @@ class ReasonCodeContractTest {
             seed: Int,
             reuseTokens: Int,
             saveCheckpointAt: Int,
+            checkpointSave: Boolean,
             restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {

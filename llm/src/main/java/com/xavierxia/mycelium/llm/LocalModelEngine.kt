@@ -97,7 +97,7 @@ internal interface EngineBridge {
      * leading tokens that are already in the engine's cache.
      */
     fun tokenize(messages: ByteArray): IntArray
-    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback): LongArray
+    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, checkpointSave: Boolean, restoredTo: Int, callback: TokenCallback): LongArray
 
     /**
      * P2-1d 的 S2：把刚才那一轮在跨过 [saveCheckpointAt] 时存下的检查点取走（取完清空）；没有给 null。
@@ -127,7 +127,6 @@ internal interface EngineBridge {
     /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
     fun setPromptBatch(size: Int) {}
     fun setCheckpointCut(cut: Int) {}
-    fun setCheckpointSaving(allowed: Boolean) {}
 
     /** 诊断：分段计时，默认 null。 */
     fun checkpointTimings(): LongArray? = null
@@ -173,7 +172,7 @@ internal class NativeBridge : EngineBridge {
     external override fun load(fd: Int, threads: Int, context: Int)
     external override fun unload()
     external override fun tokenize(messages: ByteArray): IntArray
-    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback): LongArray
+    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, checkpointSave: Boolean, restoredTo: Int, callback: TokenCallback): LongArray
     /** P2-1d 的 S2：把刚才那一轮在跨过 checkpointPos 时存下的检查点取走（取完清空）；没有给 null。 */
     external override fun takeCheckpointHandle(): Int
     /** 待取的检查点对应哪个位置；没有就是 -1。 */
@@ -670,7 +669,6 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 // checkpointAt 保持原语义（只有 checkpointWanted 才非 -1），决定「这一轮存不存、取不取」。
                 val cutAt = if (parameters.checkpointPos > 0) parameters.checkpointPos else -1
                 native.setCheckpointCut(cutAt)
-                native.setCheckpointSaving(checkpointWanted)
                 if (checkpointWanted) checkpointAt = parameters.checkpointPos
                     val (prompt, values) = runNative {
                         // The sequence the model is actually asked about decides the reuse; a key that
@@ -724,7 +722,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         // 读数在原生回来的那一刻就存下来：收集方被取消时 `runNative` 会抛，但它其实
                         // 还是等到了 worker 退出，这份读数照样能用（方案审必修 6）。
                         (tokens to native.generate(payload, parameters.maxTokens,
-                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt, restoredTo,
+                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt, checkpointWanted, restoredTo,
                             object : TokenCallback {
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {

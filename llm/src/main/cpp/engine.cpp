@@ -223,7 +223,7 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_tokenize(JNIEnv * env, jobject, jby
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
     JNIEnv * env, jobject, jbyteArray messages, jint maximum, jfloat temperature,
-    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jint restoredTo, jobject callback) {
+    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jboolean checkpointSave, jint restoredTo, jobject callback) {
     // 恢复位置本轮不参与读取决策（见下面 reuse 的计算）：保留参数是为了让「恢复与否」在原生这一侧
     // 有据可查，也为了将来连注意力 KV 一起存之后可以直接接上。
     (void) restoredTo;
@@ -292,7 +292,7 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         for (int pos = reuse; pos < count && !cancelled;) {
             const int cutPos = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
             const bool cutAhead = cutPos > pos && cutPos < count;
-            const bool saving = engine.checkpointSaving && saveCheckpointAt > pos &&
+            const bool saving = checkpointSave == JNI_TRUE && saveCheckpointAt > pos &&
                 saveCheckpointAt < count && engine.pendingCheckpoint.empty();
             const int chunk = engine.promptBatch > 0 ? engine.promptBatch : PROMPT_BATCH;
             int length = std::min(chunk, count - pos);
@@ -532,11 +532,6 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCut(JNIEnv *, jobject, jint cut) {
     engine.checkpointCut = cut;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointSaving(JNIEnv *, jobject, jboolean allowed) {
-    engine.checkpointSaving = allowed == JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL

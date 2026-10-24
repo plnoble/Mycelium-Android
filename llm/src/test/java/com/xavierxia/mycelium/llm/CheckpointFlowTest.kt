@@ -63,11 +63,8 @@ class CheckpointFlowTest {
             return checkpointable
         }
 
-        private var savingAllowed = false
-
-        override fun setCheckpointSaving(allowed: Boolean) {
-            calls += "saving=$allowed"
-            savingAllowed = allowed
+        override fun setCheckpointCut(cut: Int) {
+            calls += "cut=$cut"
         }
 
         override fun restoreCheckpointHandle(handle: Int, pos: Int): Boolean {
@@ -109,6 +106,7 @@ class CheckpointFlowTest {
             seed: Int,
             reuseTokens: Int,
             saveCheckpointAt: Int,
+            checkpointSave: Boolean,
             restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {
@@ -417,10 +415,10 @@ class CheckpointFlowTest {
             var round = 0
             override fun generate(
                 messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int,
-                reuseTokens: Int, saveCheckpointAt: Int, restoredTo: Int, callback: TokenCallback,
+                reuseTokens: Int, saveCheckpointAt: Int, checkpointSave: Boolean, restoredTo: Int, callback: TokenCallback,
             ): LongArray {
                 round++
-                if (round == 1) return super.generate(messages, maximum, temperature, topP, seed, reuseTokens, saveCheckpointAt, restoredTo, callback)
+                if (round == 1) return super.generate(messages, maximum, temperature, topP, seed, reuseTokens, saveCheckpointAt, checkpointSave, restoredTo, callback)
                 callback.onStart(false)
                 throw kotlinx.coroutines.CancellationException("用户取消")
             }
