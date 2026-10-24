@@ -26,7 +26,12 @@ class MyceliumApp : Application() {
         super.onCreate()
         registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {}
+            // onLowMemory 与 TRIM_MEMORY_RUNNING_LOW 在新 API 上标记了弃用（onTrimMemory 取代），
+            // 但旧设备的低内存回调仍走它们：这里显式保留并压掉弃用告警。
+            @Deprecated("旧设备仍走这里", ReplaceWith("onTrimMemory"))
             override fun onLowMemory() = trim(LocalModelEngine.shared)
+
+            @Suppress("DEPRECATION")
             override fun onTrimMemory(level: Int) {
                 if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) trim(LocalModelEngine.shared)
             }
