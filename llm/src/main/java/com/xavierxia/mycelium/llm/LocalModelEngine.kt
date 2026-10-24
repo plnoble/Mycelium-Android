@@ -719,20 +719,20 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         // 全量审 R2 P1-1：断批点取「每条消息结束处」，只由 token 序列决定 ⇒ **跨轮稳定**。
                         // 冷读与「从上一轮落点续读」在共同前缀上于是经历完全相同的批次——只在单点（本轮
                         // 保存点）切是不够的：恢复从上一轮保存点起步，两个位置通常不同，浮点形状仍会偏。
-                        if (parameters.checkpointPos > 0) {
-                            val cuts = ArrayList<Int>(snapshot.size)
-                            for (size in 1..snapshot.size) {
-                                val prefix = JSONArray()
-                                snapshot.take(size).forEach {
-                                    prefix.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content))
-                                }
-                                val bounds = native.tokenizeBoundary(prefix.toString().toByteArray(Charsets.UTF_8))
-                                if (bounds != null && bounds.size == 2 && bounds[1] > 0) cuts += bounds[1].toInt()
+                        // **总是**计算断批点（全量审 R2 P1-1）：切法只由 token 序列决定（每条消息结束
+                        // 处），与「这一轮存不存」和「落点参数是否为 -1」都无关。之前挂在
+                        // `checkpointPos > 0` 上，关闭组（传 -1）整段一批、开组按边界切——两条路的批次
+                        // 又不一样了，矩阵测例当场抓住。
+                        val cuts = ArrayList<Int>(snapshot.size)
+                        for (size in 1..snapshot.size) {
+                            val prefix = JSONArray()
+                            snapshot.take(size).forEach {
+                                prefix.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content))
                             }
-                            native.setCheckpointCuts(cuts.toIntArray())
-                        } else {
-                            native.setCheckpointCuts(IntArray(0))
+                            val bounds = native.tokenizeBoundary(prefix.toString().toByteArray(Charsets.UTF_8))
+                            if (bounds != null && bounds.size == 2 && bounds[1] > 0) cuts += bounds[1].toInt()
                         }
+                        native.setCheckpointCuts(cuts.toIntArray())
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
