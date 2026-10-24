@@ -14,6 +14,9 @@ if(NOT GIT_RESULT EQUAL 0 OR NOT LLAMA_DIRTY STREQUAL "")
     message(FATAL_ERROR "llama.cpp source is modified")
 endif()
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+# 不用 ccache：没装 ccache 时 ggml 会打印「ccache not found」警告。P2-1d 的快库是单独一次 CMake 构建，
+# 它的配置输出不被 AGP 吞掉，CI 门禁（零警告）就判失败了（2026-10-24 run 40100757411）。统筹补改。
+set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
 # P2-1d 运行时指令集挑选（2026-10-23 夜，任务书第一段第 1 条）。
 #
 # 背景：原先这里写死 `armv8.2-a+dotprod+i8mm+fp16`。带这些指令的内核在**不支持 i8mm 的老手机**上
