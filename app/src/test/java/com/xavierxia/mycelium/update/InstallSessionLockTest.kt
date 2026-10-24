@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 class InstallSessionLockTest {
     private fun record(phase: InstallPhase, status: Int = 0) = InstallSessionRecord(
         sessionId = 42,
-        tagName = "v0.5.0",
+        tagName = "v0.6.0",
         packageName = "com.xavierxia.mycelium",
         baselineVersionCode = 4L,
         phase = phase,

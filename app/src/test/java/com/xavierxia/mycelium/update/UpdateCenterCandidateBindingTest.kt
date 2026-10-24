@@ -19,7 +19,7 @@ import java.io.IOException
  * M5：候选版本和下载状态、文件必须绑在一起。
  *
  * 两个真问题：
- *  * 已经有 v0.5.0 的包（就绪或待安装），又查到 v0.6.0 —— 旧包不能按新 tag 交出去；
+ *  * 已经有 v0.6.0 的包（就绪或待安装），又查到 v0.7.0 —— 旧包不能按新 tag 交出去；
  *  * 检查失败（断网）不能把已知候选清掉，否则卡片、续传目标和 `.part` 一起丢。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -36,7 +36,7 @@ class UpdateCenterCandidateBindingTest {
 
     /** 可切换、可抛错的发布源：同一个 center 上模拟「又查了一次」。 */
     private class SwitchableSource : ReleaseSource {
-        var next: () -> ReleaseInfo? = { testRelease("0.5.0") }
+        var next: () -> ReleaseInfo? = { testRelease("0.6.0") }
         override fun latestRelease(): ReleaseInfo? = next()
     }
 
@@ -62,16 +62,16 @@ class UpdateCenterCandidateBindingTest {
         runBlocking { center.checkIfDue() }
         center.startDownload()
 
-        val oldTag = "v0.5.0"
+        val oldTag = "v0.6.0"
         val oldFile = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 }).finalFile(oldTag)
         assertTrue("旧版本的包应该已经下好", oldFile.isFile)
         assertTrue(center.state.value.download is DownloadUiState.NeedsUnknownSources)
 
         // 又查到更新的版本：旧包与旧状态必须一起作废。
-        source.next = { testRelease("0.6.0") }
+        source.next = { testRelease("0.7.0") }
         runBlocking { center.checkNow() }
 
-        assertEquals("v0.6.0", center.state.value.release?.tagName)
+        assertEquals("v0.7.0", center.state.value.release?.tagName)
         assertEquals(DownloadUiState.Idle, center.state.value.download)
         assertFalse("旧版本的包要清掉，不能留给新 tag", oldFile.exists())
         assertNull(prefs.pendingApkPath)
@@ -86,7 +86,7 @@ class UpdateCenterCandidateBindingTest {
     fun aFailedCheckKeepsTheKnownCandidateAndItsResumeTarget() {
         val (center, source) = center(RecordingInstaller())
         runBlocking { center.checkIfDue() }
-        assertEquals("v0.5.0", center.state.value.release?.tagName)
+        assertEquals("v0.6.0", center.state.value.release?.tagName)
         val tagBefore = prefs.pendingReleaseTag
         val jsonBefore = prefs.pendingReleaseJson
 
@@ -94,20 +94,20 @@ class UpdateCenterCandidateBindingTest {
         runBlocking { center.checkNow() }
 
         assertTrue("失败要报错", center.state.value.lastResult is UpdateResult.Error)
-        assertEquals("断网不能把卡片弄丢", "v0.5.0", center.state.value.release?.tagName)
+        assertEquals("断网不能把卡片弄丢", "v0.6.0", center.state.value.release?.tagName)
         assertEquals("候选 tag 要留着，续传才接得上", tagBefore, prefs.pendingReleaseTag)
         assertEquals("候选元数据也要留着", jsonBefore, prefs.pendingReleaseJson)
     }
 
     @Test
     fun aReadyFileThatBelongsToAnotherTagIsNeverInstalled() {
-        // 落盘的候选是 v0.5.0，但待安装路径指着一个属于 v0.4.9 的文件：恢复时必须丢掉它。
+        // 落盘的候选是 v0.6.0，但待安装路径指着一个属于 v0.4.9 的文件：恢复时必须丢掉它。
         val files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
         val stale = files.finalFile("v0.4.9")
         stale.parentFile?.mkdirs()
         stale.writeBytes(ByteArray(8))
-        prefs.pendingReleaseTag = "v0.5.0"
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0"))
+        prefs.pendingReleaseTag = "v0.6.0"
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0"))
         prefs.pendingApkPath = stale.path
 
         val (center, _) = center(RecordingInstaller())
@@ -166,13 +166,13 @@ class UpdateCenterCandidateBindingTest {
             installer = installer,
             sessionState = state,
         )
-        runBlocking { center.checkIfDue() } // 当前候选 v0.5.0
+        runBlocking { center.checkIfDue() } // 当前候选 v0.6.0
         state.advance(oldRecord(InstallPhase.Created))
         state.advance(oldRecord(InstallPhase.Succeeded, InstallStatusCode.SUCCESS))
 
         center.onResume()
 
-        assertEquals("旧候选的回执不许改状态", "v0.5.0", center.state.value.release?.tagName)
+        assertEquals("旧候选的回执不许改状态", "v0.6.0", center.state.value.release?.tagName)
         assertTrue("旧候选的记录要被清掉", state.read() == null)
     }
 

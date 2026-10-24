@@ -7,7 +7,7 @@ import org.junit.Test
 class ReleaseJsonTest {
     @Test
     fun everyFieldSurvivesTheRoundTrip() {
-        val release = testRelease("0.5.0")
+        val release = testRelease("0.6.0")
 
         val decoded = ReleaseJson.decode(ReleaseJson.encode(release))
 
@@ -16,7 +16,7 @@ class ReleaseJsonTest {
 
     @Test
     fun nullAttachmentsSurviveTheRoundTrip() {
-        val release = testRelease("0.5.0", installable = false)
+        val release = testRelease("0.6.0", installable = false)
 
         val decoded = ReleaseJson.decode(ReleaseJson.encode(release))
 
@@ -29,6 +29,6 @@ class ReleaseJsonTest {
     @Test
     fun garbageDecodesToNothingInsteadOfThrowing() {
         assertNull(ReleaseJson.decode("not json at all"))
-        assertNull(ReleaseJson.decode("{\"versionName\":\"0.5.0\"}"))
+        assertNull(ReleaseJson.decode("{\"versionName\":\"0.6.0\"}"))
     }
 }

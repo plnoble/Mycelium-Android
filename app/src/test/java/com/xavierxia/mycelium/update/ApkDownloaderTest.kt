@@ -26,7 +26,7 @@ class ApkDownloaderTest {
 
     private val mib = 1024L * 1024
     private val expected = "a".repeat(64)
-    private val release = testRelease("0.5.0")
+    private val release = testRelease("0.6.0")
     private val transport = FakeUpdateTransport()
 
     private fun downloader(free: Long, inUse: (File) -> Boolean = { false }) =
@@ -241,7 +241,7 @@ class ApkDownloaderTest {
 
     @Test
     fun aMissingApkAssetIsRejectedWithoutTouchingTheNetwork() {
-        val notInstallable = testRelease("0.5.0").copy(apkUrl = null)
+        val notInstallable = testRelease("0.6.0").copy(apkUrl = null)
 
         val outcome = runBlocking {
             downloader(Long.MAX_VALUE / 4)

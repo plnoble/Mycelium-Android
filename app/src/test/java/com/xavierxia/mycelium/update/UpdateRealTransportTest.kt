@@ -178,8 +178,8 @@ class UpdateRealTransportTest {
         val transport = RealTransport()
         val base = "http://127.0.0.1:${server.address.port}"
         val release = ReleaseInfo(
-            versionName = "0.5.0",
-            tagName = "v0.5.0",
+            versionName = "0.6.0",
+            tagName = "v0.6.0",
             releasePageUrl = "$base/page",
             apkUrl = "$base/asset",
             apkSizeBytes = payload.size.toLong(),

@@ -100,11 +100,11 @@ class UpdateFilesTest {
     fun promoteRenamesThePartFile() {
         val files = files(0)
         files.ensureDirectory()
-        val part = files.partFile("v0.5.0").apply { writeText("half") }
+        val part = files.partFile("v0.6.0").apply { writeText("half") }
 
-        val promoted = files.promote("v0.5.0")
+        val promoted = files.promote("v0.6.0")
 
-        assertEquals(files.finalFile("v0.5.0"), promoted)
+        assertEquals(files.finalFile("v0.6.0"), promoted)
         assertTrue(promoted.isFile)
         assertFalse(part.exists())
     }
@@ -113,15 +113,15 @@ class UpdateFilesTest {
     fun deleteForTagRemovesTheApkThePartAndTheChecksum() {
         val files = files(0)
         files.ensureDirectory()
-        files.finalFile("v0.5.0").writeText("apk")
-        files.partFile("v0.5.0").writeText("part")
-        files.checksumFile("v0.5.0").writeText("hash")
+        files.finalFile("v0.6.0").writeText("apk")
+        files.partFile("v0.6.0").writeText("part")
+        files.checksumFile("v0.6.0").writeText("hash")
 
-        files.deleteForTag("v0.5.0")
+        files.deleteForTag("v0.6.0")
 
-        assertFalse(files.finalFile("v0.5.0").exists())
-        assertFalse(files.partFile("v0.5.0").exists())
-        assertFalse(files.checksumFile("v0.5.0").exists())
+        assertFalse(files.finalFile("v0.6.0").exists())
+        assertFalse(files.partFile("v0.6.0").exists())
+        assertFalse(files.checksumFile("v0.6.0").exists())
     }
 
     @Test
@@ -129,9 +129,9 @@ class UpdateFilesTest {
         val files = files(0)
         files.ensureDirectory()
         val old = files.partFile("v0.4.0").apply { writeText("old") }
-        val current = files.partFile("v0.5.0").apply { writeText("current") }
+        val current = files.partFile("v0.6.0").apply { writeText("current") }
 
-        files.deleteForeignParts("v0.5.0")
+        files.deleteForeignParts("v0.6.0")
 
         assertFalse(old.exists())
         assertTrue(current.exists())
@@ -143,7 +143,7 @@ class UpdateFilesTest {
         files.ensureDirectory()
         val running = files.partFile("v0.4.0").apply { writeText("running") }
 
-        files.deleteForeignParts("v0.5.0", inUse = { it == running })
+        files.deleteForeignParts("v0.6.0", inUse = { it == running })
 
         assertTrue(running.exists())
     }
@@ -173,9 +173,9 @@ class UpdateFilesTest {
         val now = 1_000L * UpdateFiles.PURGE_AGE_MS
         val old = now - 8 * 24 * 60 * 60 * 1000L
         // 明明过期了，但因为它是当前 tag 的续传前提，必须留着。
-        val current = files.partFile("v0.5.0").apply { writeText("resume") }.also { it.setLastModified(old) }
+        val current = files.partFile("v0.6.0").apply { writeText("resume") }.also { it.setLastModified(old) }
 
-        files.purge(now, keepTagName = "v0.5.0")
+        files.purge(now, keepTagName = "v0.6.0")
 
         assertTrue(current.exists())
     }
@@ -188,7 +188,7 @@ class UpdateFilesTest {
         val old = now - 8 * 24 * 60 * 60 * 1000L
         val busy = files.partFile("v0.4.0").apply { writeText("busy") }.also { it.setLastModified(old) }
 
-        files.purge(now, keepTagName = "v0.5.0", inUse = { it == busy })
+        files.purge(now, keepTagName = "v0.6.0", inUse = { it == busy })
 
         assertTrue(busy.exists())
     }
@@ -198,7 +198,7 @@ class UpdateFilesTest {
         val files = files(0)
         files.ensureDirectory()
         val now = 1_000L * UpdateFiles.PURGE_AGE_MS
-        val fresh = files.finalFile("v0.5.0").apply { writeText("apk") }
+        val fresh = files.finalFile("v0.6.0").apply { writeText("apk") }
 
         assertTrue(files.purge(now, keepTagName = null).isEmpty())
         assertTrue(fresh.exists())
@@ -208,10 +208,10 @@ class UpdateFilesTest {
     fun existingBytesPrefersTheLargerOfPartAndFinal() {
         val files = files(0)
         files.ensureDirectory()
-        files.partFile("v0.5.0").writeText("12345")
-        files.finalFile("v0.5.0").writeText("1234567")
+        files.partFile("v0.6.0").writeText("12345")
+        files.finalFile("v0.6.0").writeText("1234567")
 
-        assertEquals(7L, files.existingBytes("v0.5.0"))
+        assertEquals(7L, files.existingBytes("v0.6.0"))
     }
 
     @Test
@@ -222,8 +222,8 @@ class UpdateFilesTest {
     @Test
     fun checksumFileNameMatchesTheVerifierSidecar()  {
         val files = files(0)
-        val apk = files.finalFile("v0.5.0")
-        assertEquals(File(tmp.root, "mycelium-v0.5.0.apk.sha256"), files.checksumFile("v0.5.0"))
-        assertEquals("mycelium-v0.5.0.apk.sha256", File(apk.parentFile, apk.name + ".sha256").name)
+        val apk = files.finalFile("v0.6.0")
+        assertEquals(File(tmp.root, "mycelium-v0.6.0.apk.sha256"), files.checksumFile("v0.6.0"))
+        assertEquals("mycelium-v0.6.0.apk.sha256", File(apk.parentFile, apk.name + ".sha256").name)
     }
 }

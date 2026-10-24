@@ -35,7 +35,7 @@ class PackageInstallFlowTest {
     val tmp = TemporaryFolder()
 
     private val start = 100 * HOUR
-    private val tag = "v0.5.0"
+    private val tag = "v0.6.0"
     private val sessionId = 7
 
     private lateinit var context: Context
@@ -60,12 +60,12 @@ class PackageInstallFlowTest {
     ): UpdateCenter {
         val apk = files.apkFile(tag).apply { writeBytes(ByteArray(64)) }
         files.checksumFile(tag).writeText("a".repeat(64))
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0", tag = tag))
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0", tag = tag))
         prefs.pendingReleaseTag = tag
         prefs.pendingApkPath = apk.path
         if (ignoredTag != null) prefs.ignoredTag = ignoredTag
         return testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0", tag = tag) },
+            source = CountingReleaseSource { testRelease("0.6.0", tag = tag) },
             prefs = prefs,
             clock = clock,
             files = files,
@@ -318,11 +318,11 @@ class PackageInstallFlowTest {
     fun debugPackageHasNoInstallEntry() {
         val installer = RecordingInstaller(canInstall = false)
         val apk = files.apkFile(tag).apply { writeBytes(ByteArray(64)) }
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0", tag = tag))
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0", tag = tag))
         prefs.pendingReleaseTag = tag
         prefs.pendingApkPath = apk.path
         val center = testCenter(
-            source = CountingReleaseSource { testRelease("0.5.0", tag = tag) },
+            source = CountingReleaseSource { testRelease("0.6.0", tag = tag) },
             prefs = prefs,
             clock = { start },
             isDebugPackage = true,
@@ -394,12 +394,12 @@ class PackageInstallFlowTest {
     fun processDeathAfterSuccessIsRecognisedFromTheStoredCandidate() {
         val apk = files.apkFile(tag).apply { writeBytes(ByteArray(64)) }
         files.checksumFile(tag).writeText("a".repeat(64))
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0", tag = tag))
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0", tag = tag))
         prefs.pendingReleaseTag = tag
         prefs.pendingApkPath = apk.path
         prefs.ignoredTag = tag
 
-        // 新进程里跑着的已经是 0.5.0 了：候选发布不再比当前版本新。
+        // 新进程里跑着的已经是 0.6.0 了：候选发布不再比当前版本新。
         val center = testCenter(
             source = CountingReleaseSource { null },
             prefs = prefs,
@@ -408,7 +408,7 @@ class PackageInstallFlowTest {
             downloader = RecordingDownloader(),
             verifier = RecordingVerifier(),
             installer = RecordingInstaller(),
-            currentVersionName = "0.5.0",
+            currentVersionName = "0.6.0",
         )
 
         assertEquals(INSTALLED_NOTICE, center.state.value.installNotice)

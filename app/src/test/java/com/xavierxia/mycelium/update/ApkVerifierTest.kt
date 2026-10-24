@@ -39,7 +39,7 @@ class ApkVerifierTest {
     val tmp = TemporaryFolder()
 
     private val transport = FakeUpdateTransport()
-    private val release = testRelease("0.5.0")
+    private val release = testRelease("0.6.0")
     private val currentSigner = "f".repeat(64)
     private val installed = factsOf(versionCode = 4L, signerSha256 = currentSigner)
 

@@ -50,7 +50,7 @@ class UpdateCenterDownloadTest {
         files: UpdateFiles = UpdateFiles(tmp.root, availableBytes = { free }),
         clock: () -> Long = { 100 * hour },
     ): UpdateCenter = testCenter(
-        source = CountingReleaseSource { testRelease("0.5.0") },
+        source = CountingReleaseSource { testRelease("0.6.0") },
         prefs = prefs,
         clock = clock,
         files = files,
@@ -100,7 +100,7 @@ class UpdateCenterDownloadTest {
         assertEquals(DownloadFailureReason.Verification, failed.reason)
         assertTrue(failed.message.orEmpty(), failed.message.orEmpty().contains("包名不对"))
         // 校验不过：文件删掉，绝不安装。
-        assertFalse(files.apkFile("v0.5.0").exists())
+        assertFalse(files.apkFile("v0.6.0").exists())
         assertEquals(0, installer.installs)
     }
 
@@ -143,9 +143,9 @@ class UpdateCenterDownloadTest {
     fun startupPurgeKeepsThePendingPartialFileSoResumeStillWorks() {
         val now = System.currentTimeMillis()
         // 候选发布落盘（进程重建后的常态），它的 .part 明明过期也必须留着。
-        prefs.pendingReleaseTag = "v0.5.0"
-        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.5.0"))
-        val pending = File(tmp.root, "mycelium-v0.5.0.apk.part").apply { writeText("resume") }
+        prefs.pendingReleaseTag = "v0.6.0"
+        prefs.pendingReleaseJson = ReleaseJson.encode(testRelease("0.6.0"))
+        val pending = File(tmp.root, "mycelium-v0.6.0.apk.part").apply { writeText("resume") }
         pending.setLastModified(now - 8 * 24 * hour)
 
         center(free = Long.MAX_VALUE / 4, clock = { now })
@@ -155,7 +155,7 @@ class UpdateCenterDownloadTest {
 
     @Test
     fun aSuccessfulPipelinePromotesTheFileAndGoesStraightToInstall() {
-        val apk = apkWithSidecar(tmp.root, "v0.5.0", "real-apk")
+        val apk = apkWithSidecar(tmp.root, "v0.6.0", "real-apk")
         transport.checksumText = sha256Of(apk)
         transport.payload = "real-apk".toByteArray()
         val files = UpdateFiles(tmp.root, availableBytes = { Long.MAX_VALUE / 4 })
@@ -167,9 +167,9 @@ class UpdateCenterDownloadTest {
 
         // M2 之后这里不再停在 Ready：四项校验一过就自己接着装，用户不用再点第二次。
         assertEquals(1, installer.installs)
-        assertEquals(files.finalFile("v0.5.0"), installer.lastApk)
-        assertTrue(files.finalFile("v0.5.0").isFile)
-        assertFalse(files.partFile("v0.5.0").exists())
-        assertEquals(prefs.pendingApkPath, files.finalFile("v0.5.0").path)
+        assertEquals(files.finalFile("v0.6.0"), installer.lastApk)
+        assertTrue(files.finalFile("v0.6.0").isFile)
+        assertFalse(files.partFile("v0.6.0").exists())
+        assertEquals(prefs.pendingApkPath, files.finalFile("v0.6.0").path)
     }
 }
