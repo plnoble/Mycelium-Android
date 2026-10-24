@@ -41,6 +41,12 @@ struct Engine {
     // 只给真机诊断：预填一次提交多少 token。改小就能让'整段读'分成与'恢复后读'相同的批次形状，
     // 用来区分温度 0 的差异到底是批次形状造成的浮点差异，还是状态恢复得不完全一致。
     int promptBatch = 0;
+    // 固定切法（任务书 2026-10-24 第一节第 2 条）：断批只由 token 序列决定（落点处必断、段内每
+    // n_batch 个一批），**与「这一轮存不存检查点」无关**——这样开、关、第一轮在共同前缀上的批次
+    // 形状完全一致，浮点末位对齐，温度 0 才可能逐字相同。这个标志只管「落点上要不要真的存」。
+    bool checkpointSaving = false;
+    // 固定切法的强制断批位置（-1 = 不切）。与 checkpointSaving 无关：关、开、第一轮都切。
+    int checkpointCut = -1;
     // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
     // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
     long timing[5] = {0, 0, 0, 0, 0};
@@ -279,17 +285,20 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         int read = 0;
         engine.pendingCheckpoint.clear();
         engine.pendingCheckpointPos = -1;
-        // **在落点拆批**（Codex R2 必修项 3）：第一版按 128 一批读，只要这一批跨过落点就存，于是存下来的
-        // 状态其实停在 `pos + length`（比如 128），却打着 `checkpointPos`（比如 56）的标——恢复出来位
-        // 置就是错的。现在遇到落点就把这一批切开，让 decode 正好停在 checkpointPos 上再存。
+        // **固定切法**（任务书 2026-10-24 第一节第 2 条）：断批只由 token 序列决定——落点
+        // （`checkpointCut`，「用户消息结束、助手头之前」）处必断，段内每 n_batch 个一批。
+        // 开、关、第一轮都用这套规则，共同前缀上的批次形状完全一致；**存不存检查点**由
+        // `checkpointSaving` 另行决定，与切法解耦。
         for (int pos = reuse; pos < count && !cancelled;) {
-            const bool saving = saveCheckpointAt > pos && saveCheckpointAt < count &&
-                engine.pendingCheckpoint.empty();
+            const int cutPos = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
+            const bool cutAhead = cutPos > pos && cutPos < count;
+            const bool saving = engine.checkpointSaving && saveCheckpointAt > pos &&
+                saveCheckpointAt < count && engine.pendingCheckpoint.empty();
             const int chunk = engine.promptBatch > 0 ? engine.promptBatch : PROMPT_BATCH;
             int length = std::min(chunk, count - pos);
-            if (saving && pos + length > saveCheckpointAt) {
+            if (cutAhead && pos + length > cutPos) {
                 // 本批会越过落点：先只读到落点为止。
-                length = saveCheckpointAt - pos;
+                length = cutPos - pos;
             }
             if (length <= 0) { pos += 1; continue; }
             auto batch = llama_batch_get_one(tokens.data() + pos, length);
@@ -520,6 +529,16 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, j
  */
 /** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
 /** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCut(JNIEnv *, jobject, jint cut) {
+    engine.checkpointCut = cut;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointSaving(JNIEnv *, jobject, jboolean allowed) {
+    engine.checkpointSaving = allowed == JNI_TRUE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_setPromptBatch(JNIEnv *, jobject, jint size) {
     engine.promptBatch = size > 0 ? size : 0;

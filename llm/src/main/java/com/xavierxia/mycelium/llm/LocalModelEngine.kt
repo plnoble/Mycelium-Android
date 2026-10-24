@@ -126,6 +126,8 @@ internal interface EngineBridge {
 
     /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
     fun setPromptBatch(size: Int) {}
+    fun setCheckpointCut(cut: Int) {}
+    fun setCheckpointSaving(allowed: Boolean) {}
 
     /** 诊断：分段计时，默认 null。 */
     fun checkpointTimings(): LongArray? = null
@@ -663,7 +665,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     // 在里面写外面的变量不安全，第一版就因此丢掉过落点）。
                     val checkpointWanted = checkpointEnabled && parameters.checkpointPos > 0 &&
                         cacheKey != null && native.canCheckpoint()
-                    if (checkpointWanted) checkpointAt = parameters.checkpointPos
+                    // 固定切法（任务书 2026-10-24 第一节第 2 条）：**切刀位置与「存不存」是两个独立旋钮**。
+                // 切刀位置只要合法就传（关、开、第一轮都在同一位置断批 ⇒ 共同前缀上批次形状一致）；
+                // checkpointAt 保持原语义（只有 checkpointWanted 才非 -1），决定「这一轮存不存、取不取」。
+                val cutAt = if (parameters.checkpointPos > 0) parameters.checkpointPos else -1
+                native.setCheckpointCut(cutAt)
+                native.setCheckpointSaving(checkpointWanted)
+                if (checkpointWanted) checkpointAt = parameters.checkpointPos
                     val (prompt, values) = runNative {
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.

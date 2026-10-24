@@ -63,6 +63,13 @@ class CheckpointFlowTest {
             return checkpointable
         }
 
+        private var savingAllowed = false
+
+        override fun setCheckpointSaving(allowed: Boolean) {
+            calls += "saving=$allowed"
+            savingAllowed = allowed
+        }
+
         override fun restoreCheckpointHandle(handle: Int, pos: Int): Boolean {
             calls += "restore@$pos"
             restorePos = pos
