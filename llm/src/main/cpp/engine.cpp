@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <map>
+#include <array>
 #include <algorithm>
 #include "llama.h"
 #include "json.h"
@@ -27,9 +29,41 @@ struct Engine {
     std::vector<llama_token> cachedPrompt;
     // 默认关思考（与之前写死的 false 一致）；只有真机测例会改它，用来对比模板认不认 enable_thinking。
     bool thinking = false;
+    // P2-1d：prefill 跨过 checkpointPos 时存下的循环层状态，等 Kotlin 这一轮结束后取走。
+    // 状态只能前进，读过去就回不去，所以**必须在 prefill 循环里**存，而不是生成结束再补。
+    std::vector<uint8_t> pendingCheckpoint;
+    int pendingCheckpointPos = -1;
+    // P2-1d（2026-10-23 夜，任务书第一段第 2 条）：检查点的字节**归原生**，Kotlin 只拿句柄与元数据。
+    // 好处：不必为了交给 Kotlin 再拷一份 JByteArray（真机实测那次拷贝 13-31 ms，而且让托管堆峰值
+    // 多出一份几十 MB）；恢复时也直接从原生内存装回，省掉反向拷贝与 Kotlin 侧那一份分配。
+    std::map<int, std::vector<uint8_t>> checkpointStates;
+    int nextCheckpointHandle = 1;
+    // 只给真机诊断：预填一次提交多少 token。改小就能让'整段读'分成与'恢复后读'相同的批次形状，
+    // 用来区分温度 0 的差异到底是批次形状造成的浮点差异，还是状态恢复得不完全一致。
+    int promptBatch = 0;
+    // 固定切法（任务书 2026-10-24 第一节第 2 条）：断批只由 token 序列决定（落点处必断、段内每
+    // n_batch 个一批），**与「这一轮存不存检查点」无关**——这样开、关、第一轮在共同前缀上的批次
+    // 形状完全一致，浮点末位对齐，温度 0 才可能逐字相同。这个标志只管「落点上要不要真的存」。
+    bool checkpointSaving = false;
+    // 固定切法的强制断批位置（-1 = 不切）。与 checkpointSaving 无关：关、开、第一轮都切。
+    int checkpointCut = -1;
+    // 跨轮稳定的断批点（全量审 R2 P1-1）：**每条消息结束处**的 token 位置，由 token 序列唯一决定。
+    // 只在「本轮保存点」切是不够的——恢复从上一轮保存点起步，两个位置通常不同，共同前缀仍会
+    // 经历不同批次，浮点形状差异照旧。有了这份集合，冷读与续读在共同前缀上的批次完全一致。
+    std::vector<int> checkpointCuts;
+    // P2-1d 诊断计时（毫秒）：0 清空序列、1 set_data_ext、2 get_size_ext、3 get_data_ext、4 取字节的 JNI 拷贝。
+    // 只用来回答「恢复一份 65 MB 状态为什么这么慢」，不改任何行为。
+    long timing[5] = {0, 0, 0, 0, 0};
+    // 上一次恢复失败在哪一步（0 = 成功，1 = set_data_ext 短读，2 = seq_rm 返回 false）。
+    // 只给诊断用：真机上「为什么没走检查点」要靠它归因。
+    int lastRestoreStep = -1;
     ~Engine() { clear(); }
     void clear() {
         cachedPrompt.clear();
+        // 全量审必修项 3：clear() 必须彻底释放 vector 容量，不能只把 size 变 0 却保留几十 MB 原生内存。
+        std::vector<uint8_t>().swap(pendingCheckpoint);
+        pendingCheckpointPos = -1;
+        checkpointStates.clear();
         if (context) llama_free(context);
         if (model) llama_model_free(model);
         if (file) fclose(file);
@@ -38,6 +72,8 @@ struct Engine {
 } engine;
 
 using Clock = std::chrono::steady_clock;
+// 预填一次提交多少个 token（与 cp.n_batch 一致；越大提示吞吐越高）。
+constexpr int PROMPT_BATCH = 512;
 long elapsed(Clock::time_point start) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
 }
@@ -61,13 +97,13 @@ std::string piece(const llama_vocab * vocab, llama_token token, bool special) {
     if (n < 0) throw std::runtime_error("Token conversion failed");
     return std::string(buffer.data(), n);
 }
-std::string prompt(const std::string & messages) {
+std::string prompt(const std::string & messages, bool add_generation_prompt = true) {
     const char * source = llama_model_chat_template(engine.model, nullptr);
     if (!source || !*source) throw std::runtime_error("The model has no chat template");
     const auto * vocab = llama_model_get_vocab(engine.model);
     auto variables = common_json::object();
     variables["messages"] = common_json::parse(messages);
-    variables["add_generation_prompt"] = true;
+    variables["add_generation_prompt"] = add_generation_prompt;
     variables["enable_thinking"] = engine.thinking;
     variables["bos_token"] = piece(vocab, llama_vocab_bos(vocab), true);
     variables["eos_token"] = piece(vocab, llama_vocab_eos(vocab), true);
@@ -143,8 +179,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         cp.n_ctx = context;
         cp.n_threads = threads;
         cp.n_threads_batch = threads;
-        cp.n_batch = 128;
-        cp.n_ubatch = 128;
+        // P2-1d 吞吐修复（2026-10-23 真机实测：提示读取只有 16-33 token/秒，比同类硬件低一个数量级）。
+        // 128 太小：预填阶段每批只能塞 128 个 token，批越大吞吐越高。llama.cpp 默认是 2048/512。
+        cp.n_batch = 512;
+        cp.n_ubatch = 512;
         // 不请求循环状态回退快照（`n_rs_seq`，P2-1c 全量审阻断 1、2）：
         //  - `llama-batch.cpp` 里 `split_equal()` 断言 `n_ubatch > n_rs_seq + 1`，按窗口配批次会直接 abort；
         //  - 更要紧的是：这个版本的快照按 ubatch 写，而生成阶段每次只解一个 token，较老的槽不会随
@@ -153,6 +191,8 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         // 所以这里保持 0：纯注意力模型仍能按位置精确裁剪 KV（复用照常提速），混合状态模型（qwen35
         // 这类）的循环侧会让 seq_rm 返回 false，于是整段重读——正确但拿不到提速，交统筹决定是否单开
         // 一个工作包做「按位置可恢复的检查点」。
+        // 长上下文时注意力最吃 flash attention；AUTO 让它按后端能力自己决定（不支持时自动退回）。
+        cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
         cp.offload_kqv = false;
         cp.op_offload = false;
         cp.abort_callback = abort_decode;
@@ -187,7 +227,10 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_tokenize(JNIEnv * env, jobject, jby
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
     JNIEnv * env, jobject, jbyteArray messages, jint maximum, jfloat temperature,
-    jfloat top_p, jint seed, jint reuseTokens, jobject callback) {
+    jfloat top_p, jint seed, jint reuseTokens, jint saveCheckpointAt, jboolean checkpointSave, jint restoredTo, jobject callback) {
+    // 恢复位置本轮不参与读取决策（见下面 reuse 的计算）：保留参数是为了让「恢复与否」在原生这一侧
+    // 有据可查，也为了将来连注意力 KV 一起存之后可以直接接上。
+    (void) restoredTo;
     try {
         if (!engine.context) throw std::runtime_error("Load a model first");
         if (maximum < 1 || maximum > 8192) throw std::runtime_error("Invalid token limit");
@@ -214,7 +257,13 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         // prompt, never past what the engine itself still holds (its own prefix is the only state
         // that may be reused), and always at least one token to read.
         const int requested = reuseTokens < 0 ? 0 : reuseTokens;
-        int reuse = std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
+        // P2-1d（2026-10-23 统筹裁定）：这一轮如果已经从**整份状态**恢复好了（restoredTo >= 0），就直接
+        // 从那里接着读：状态里既有注意力 KV 也有循环层，内容与位置都对，跳过 P2-1c 的「共享前缀 + 裁尾」
+        // 那条路（它会因为混合模型退不回去而整段重读，把刚恢复好的状态白丢）。
+        // 只存循环层的时候这么干会答错（注意力那半边是旧内容），所以旧路径已废止。
+        int reuse = restoredTo >= 0
+            ? std::min(restoredTo, count - 1)
+            : std::min(requested, shared_prefix(engine.cachedPrompt, tokens));
         if (reuse > count - 1) reuse = count - 1;
         if (reuse < 0) reuse = 0;
         // Reported to the caller so "why did this round still read everything?" has an answer:
@@ -223,7 +272,12 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         jlong fallback = 0;
         auto * memory = llama_get_memory(engine.context);
         bool trimmed = false;
-        if (reuse > 0) trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
+        if (restoredTo >= 0) {
+            // 刚从整份状态恢复：序列里已经是 [0, restoredTo)，**不裁也不清**。
+            trimmed = true;
+        } else if (reuse > 0) {
+            trimmed = llama_memory_seq_rm(memory, 0, reuse, -1);
+        }
         if (!trimmed) {
             // Nothing to reuse, or this build cannot drop only a suffix: read the whole prompt, which
             // is what every round did before this cache existed.
@@ -233,8 +287,38 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
         }
         auto start = Clock::now();
         int read = 0;
-        for (int pos = reuse; pos < count && !cancelled; pos += 128) {
-            const int length = std::min(128, count - pos);
+        engine.pendingCheckpoint.clear();
+        engine.pendingCheckpointPos = -1;
+        // **固定切法**（任务书 2026-10-24 第一节第 2 条）：断批只由 token 序列决定——落点
+        // （`checkpointCut`，「用户消息结束、助手头之前」）处必断，段内每 n_batch 个一批。
+        // 开、关、第一轮都用这套规则，共同前缀上的批次形状完全一致；**存不存检查点**由
+        // `checkpointSaving` 另行决定，与切法解耦。
+        for (int pos = reuse; pos < count && !cancelled;) {
+            // 下一个断点：优先用跨轮稳定的集合，没有就退回单点（本轮落点）。
+            int cutPos = -1;
+            for (const int candidate : engine.checkpointCuts) {
+                if (candidate > pos && candidate < count) { cutPos = candidate; break; }
+            }
+            // **落点本身也必须是一个断点**。否则：落点 56 不在集合里、集合里下一个是 84 时，这一批会
+            // 一路读到 84，`pos == saveCheckpointAt` 永远不成立 —— 检查点静默地一次都存不上
+            // （真机十轮验收就这样变成 0 份、全程整段重读）。
+            const int landing = saveCheckpointAt > 0 ? saveCheckpointAt
+                : (engine.checkpointCut > 0 ? engine.checkpointCut : -1);
+            if (landing > pos && landing < count && (cutPos < 0 || landing < cutPos)) cutPos = landing;
+            if (cutPos < 0) {
+                const int single = engine.checkpointCut > 0 ? engine.checkpointCut : saveCheckpointAt;
+                if (single > pos && single < count) cutPos = single;
+            }
+            const bool cutAhead = cutPos > pos;
+            const bool saving = checkpointSave == JNI_TRUE && saveCheckpointAt > pos &&
+                saveCheckpointAt < count && engine.pendingCheckpoint.empty();
+            const int chunk = engine.promptBatch > 0 ? engine.promptBatch : PROMPT_BATCH;
+            int length = std::min(chunk, count - pos);
+            if (cutAhead && pos + length > cutPos) {
+                // 本批会越过落点：先只读到落点为止。
+                length = cutPos - pos;
+            }
+            if (length <= 0) { pos += 1; continue; }
             auto batch = llama_batch_get_one(tokens.data() + pos, length);
             if (llama_decode(engine.context, batch) != 0) {
                 if (cancelled) break;
@@ -242,6 +326,37 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
                 throw std::runtime_error("Prompt evaluation failed");
             }
             read += length;
+            pos += length;
+            // 状态只能前进，读过去就回不去了：正好停在落点上的这一刻必须存（整份状态，含注意力 KV）。
+            if (saving && pos == saveCheckpointAt) {
+                // 全量审 R2 P2-7：**整个可选保存都放进异常边界**。上一轮只护住了 `buffer.resize()`，
+                // 但 `llama_state_seq_get_size_ext()` 内部会 `make_unique<llama_io_write_host>`（几十 MB），
+                // 那一步分配失败会在我们捕获之前抛出，把整轮生成带崩——快照失败只该跳过优化。
+                try {
+                    const auto t_size = Clock::now();
+                    const size_t size = llama_state_seq_get_size_ext(
+                        engine.context, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                    engine.timing[2] = elapsed(t_size);
+                    // 全量审必修项 3：分配前按 300 MiB 准入——单份就超上限的直接不分配，避免打爆原生堆。
+                    const size_t MAX_CHECKPOINT_SIZE = 300ULL * 1024 * 1024;
+                    if (size > 0 && size <= MAX_CHECKPOINT_SIZE) {
+                        std::vector<uint8_t> buffer(size);
+                        const auto t_data = Clock::now();
+                        const size_t written = llama_state_seq_get_data_ext(
+                            engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+                        engine.timing[3] = elapsed(t_data);
+                        // 方案审必修项 2：判「等于」，不是判非零。
+                        if (written == size) {
+                            engine.pendingCheckpoint = std::move(buffer);
+                            engine.pendingCheckpointPos = saveCheckpointAt;
+                        }
+                    }
+                } catch (...) {
+                    // 内存不足或其它失败：这一轮不存检查点，生成继续（绝不能越过 JNI 边界）。
+                    engine.pendingCheckpoint.clear();
+                    engine.pendingCheckpointPos = -1;
+                }
+            }
         }
         long prompt_ms = elapsed(start);
         // Only a prompt that was read to its end may be kept: a half-read prompt is not the state the
@@ -280,11 +395,14 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             }
         }
         // {prompt tokens, generated, prompt ms (the part actually read), generation ms, stopped,
-        //  tokens reused from the cache, tokens actually read, why a reuse did not happen}
-        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback};
-        auto result = env->NewLongArray(8);
+        //  tokens reused from the cache, tokens actually read, why a reuse did not happen,
+        //  P2-1d：这一轮存下的检查点位置（-1 = 没存）, 这一轮存下的检查点字节数（0 = 没存）}
+        jlong values[] = {count, generated, prompt_ms, elapsed(start), cancelled ? 1 : 0, reuse, read, fallback,
+                          engine.pendingCheckpoint.empty() ? -1 : engine.pendingCheckpointPos,
+                          static_cast<jlong>(engine.pendingCheckpoint.size())};
+        auto result = env->NewLongArray(10);
         if (!result) return nullptr;                       // 读数没回去：guard 清缓存与内存
-        env->SetLongArrayRegion(result, 0, 8, values);
+        env->SetLongArrayRegion(result, 0, 10, values);
         if (env->ExceptionCheck()) return nullptr;         // 同上
         // 读数真的交到调用方手里了，这一轮的缓存才算数。
         guard.committed = true;
@@ -299,6 +417,335 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_generate(
             "Generation failed; check the model chat template and context");
     } catch (...) { engine.cachedPrompt.clear(); fail(env, "Native generation failed"); }
     return nullptr;
+}
+
+/*
+ * P2-1d 的 S2：把这一刻的**循环层状态**存下来（方案 2.2 / 方案审必修项 2）。
+ *
+ * 只存 PARTIAL_ONLY：混合模型的普通注意力 KV 不在里面，恢复时必须保证同一前缀的 KV 本来就是对的
+ * （所以恢复位置绝不能越过本轮的公共前缀）。返回 null 表示「这一份没法存」，调用方据此不记账。
+ */
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_saveCheckpoint(JNIEnv * env, jobject) {
+    try {
+        if (!engine.context) return nullptr;
+        // 取大小与取字节必须用**同一组参数**，否则拿到的长度与实际字节对不上。
+        const size_t size = llama_state_seq_get_size_ext(engine.context, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        if (size == 0) return nullptr;
+        std::vector<uint8_t> buffer(size);
+        const size_t written = llama_state_seq_get_data_ext(
+            engine.context, buffer.data(), size, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        // 方案审必修项 2：这两个接口返回的是**字节数**，要判「等于」，不是判非零。
+        if (written != size) return nullptr;
+        auto out = env->NewByteArray(static_cast<jsize>(written));
+        if (!out) return nullptr;
+        env->SetByteArrayRegion(out, 0, static_cast<jsize>(written), reinterpret_cast<const jbyte *>(buffer.data()));
+        if (env->ExceptionCheck()) return nullptr;
+        return out;
+    } catch (...) { return nullptr; }
+}
+
+/*
+ * P2-1d 的 S3：恢复检查点并裁到恢复位置（只恢复循环层部分）。
+ *
+ * 方案审必修项 2 定的顺序**全在这一个函数里**完成，调用方不需要（也不该）自己先 seq_rm：
+ *   1. `set_data_ext(..., PARTIAL_ONLY)`，返回值必须**等于字节数**（短读 = 这一份不可信）；
+ *   2. 恢复之后循环状态的最后位置是 `pos - 1`，再 `llama_memory_seq_rm(memory, 0, pos, -1)`，
+ *      这一步必须返回 true，否则位置与状态对不上；
+ *   3. 只有两步都成，才允许从 `pos` 接着读。
+ * 任何一步失败都返回 false，调用方据此清理不可信状态、从 0 重读并报原因 6。
+ */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_restoreCheckpointHandle(
+    JNIEnv *, jobject, jint handle, jint pos) {
+    try {
+        if (!engine.context || pos < 0) return JNI_FALSE;
+        const auto found = engine.checkpointStates.find(handle);
+        if (found == engine.checkpointStates.end()) return JNI_FALSE;
+        // 直接读原生里那一份，不再从 Kotlin 拷一份 ByteArray 进来。
+        const auto & buffer = found->second;
+        if (buffer.empty()) return JNI_FALSE;
+        auto * memory = llama_get_memory(engine.context);
+        // 统筹裁定的三步恢复（2026-10-23；取代第 7 节「禁止先删」那条旧指令）：
+        // 1) 整段清空序列 0 —— 不留任何尾巴，绕开循环层「rollback >= 1」的限制；失败就不许往下装。
+        const auto t_clear = Clock::now();
+        if (!llama_memory_seq_rm(memory, 0, -1, -1)) { engine.lastRestoreStep = 4; return JNI_FALSE; }
+        engine.timing[0] = elapsed(t_clear);
+        // 2) 整份装回（注意力 KV + 循环层），返回值必须**等于字节数**。
+        const auto t_apply = Clock::now();
+        const size_t read = llama_state_seq_set_data_ext(
+            engine.context, buffer.data(), buffer.size(), 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        engine.timing[1] = elapsed(t_apply);
+        if (read != buffer.size()) { engine.lastRestoreStep = 1; return JNI_FALSE; }
+        // 3) 从 pos 接着读由 generate 那条路做（restoredTo = pos，跳过 P2-1c 的裁尾与清空）。
+        engine.lastRestoreStep = 0;
+        return JNI_TRUE;
+    } catch (...) { return JNI_FALSE; }
+}
+
+/*
+ * P2-1d：这个模型能不能走检查点路径（方案 2.3）。
+ *
+ * 只有混合 / 循环模型才存循环层状态；纯注意力模型走 P2-1c 的既有路径，行为完全不变。
+ */
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_canCheckpoint(JNIEnv *, jobject) {
+    if (!engine.model) return JNI_FALSE;
+    return (llama_model_is_hybrid(engine.model) || llama_model_is_recurrent(engine.model))
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * P2-1d：把刚才那一轮存下的检查点**留在原生内存**里，返回一个句柄（取不到给 -1）。
+ *
+ * 与旧版 `takeCheckpoint()` 的区别：不再新建 JByteArray，字节直接进 `checkpointStates`，Kotlin 只
+ * 拿这个整数。这样既省掉一次几十 MB 的拷贝，也让托管堆峰值少一份（任务书第一段第 2 条）。
+ * 句柄由 Kotlin 的检查点仓库保管，作废/淘汰时必须调 `releaseCheckpointHandle()` 释放。
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointHandle(JNIEnv *, jobject) {
+    if (engine.pendingCheckpoint.empty()) return -1;
+    const int handle = engine.nextCheckpointHandle++;
+    // 全量审 P1-4：登记句柄要建 map 节点，也可能抛 bad_alloc。异常绝不能越过 JNI 边界，所以这里接住：
+    // 登记失败就当「这一轮没存下」，把在途缓冲丢掉，生成照常继续。
+    try {
+        engine.checkpointStates[handle] = std::move(engine.pendingCheckpoint);
+    } catch (...) {
+        std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+        engine.pendingCheckpointPos = -1;
+        return -1;
+    }
+    // move 之后 pending 的内容已归新那份，这里只把容量还回去，避免留下空壳占着内存。
+    std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+    engine.pendingCheckpointPos = -1;
+    return handle;
+}
+
+/** 某个句柄现在占多少字节（元数据用；句柄不存在给 -1）。 */
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_checkpointHandleBytes(JNIEnv *, jobject, jint handle) {
+    const auto found = engine.checkpointStates.find(handle);
+    if (found == engine.checkpointStates.end()) return -1;
+    return static_cast<jlong>(found->second.size());
+}
+
+/** 释放一个句柄占的原生内存（作废、淘汰、卸载都要调）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_releaseCheckpointHandle(JNIEnv *, jobject, jint handle) {
+    engine.checkpointStates.erase(handle);
+}
+
+/**
+ * 丢掉待取的检查点（全量审 R2 必修项 2）。
+ *
+ * 与 `takeCheckpoint()` 的区别：**不新建 JByteArray、不抛异常**。清理路径（异常收尾、低内存丢弃）
+ * 必须用它——在「正要处理异常」时再去做一次几十 MB 的分配，可能把原来的异常替换成 OOM。
+ */
+/** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
+/** 只给真机诊断：限制预填批次大小（0 = 默认 512）。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCuts(JNIEnv * env, jobject, jintArray cuts) {
+    // 全量审 R3 P2：临时 vector 与 assign 都可能分配失败——C++ 异常绝不能越过 JNI 边界。
+    // 失败就清空断点（退回单点切法继续生成），并把这轮错误交回 Kotlin 侧记录。
+    try {
+        engine.checkpointCuts.clear();
+        if (!cuts) return;
+        const jsize n = env->GetArrayLength(cuts);
+        if (n <= 0) return;
+        std::vector<jint> raw(static_cast<size_t>(n));
+        env->GetIntArrayRegion(cuts, 0, n, raw.data());
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
+        engine.checkpointCuts.assign(raw.begin(), raw.end());
+        std::sort(engine.checkpointCuts.begin(), engine.checkpointCuts.end());
+    } catch (...) {
+        engine.checkpointCuts.clear();
+        env->ExceptionClear();
+    }
+}
+
+/** 兼容单点入口：等价于只给一个断点。 */
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setCheckpointCut(JNIEnv *, jobject, jint cut) {
+    engine.checkpointCut = cut;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_setPromptBatch(JNIEnv *, jobject, jint size) {
+    engine.promptBatch = size > 0 ? size : 0;
+}
+
+/** 全量审 P2-8：返回 [存活句柄数, 句柄持有总字节]——让测例能看见原生侧的泄漏。 */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_handlesAlive(JNIEnv * env, jobject) {
+    long bytes = 0;
+    for (const auto & entry : engine.checkpointStates) bytes += static_cast<long>(entry.second.size());
+    const jlong values[] = {static_cast<jlong>(engine.checkpointStates.size()), bytes};
+    auto result = env->NewLongArray(2);
+    if (!result) return nullptr;
+    env->SetLongArrayRegion(result, 0, 2, values);
+    if (env->ExceptionCheck()) return nullptr;
+    return result;
+}
+
+/** 编译时选定的指令集变体（Kotlin 侧用来确认到底加载了哪一份）。 */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_archVariant(JNIEnv * env, jobject) {
+    return env->NewStringUTF(MYCELIUM_ARCH_VARIANT);
+}
+
+/** P2-1d 诊断：返回 [清空序列 ms, set_data_ext ms, get_size_ext ms, get_data_ext ms, 取字节 JNI 拷贝 ms]。 */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_checkpointTimings(JNIEnv * env, jobject) {
+    auto result = env->NewLongArray(5);
+    if (!result) return nullptr;
+    env->SetLongArrayRegion(result, 0, 5, engine.timing);
+    if (env->ExceptionCheck()) return nullptr;
+    return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_discardCheckpoint(JNIEnv *, jobject) {
+    std::vector<uint8_t>().swap(engine.pendingCheckpoint);
+    engine.pendingCheckpointPos = -1;
+}
+
+/**
+ * 这一次待取的检查点对应哪个位置；没有就是 -1。
+ *
+ * 判据是 `pendingCheckpointPos`，**不是** `pendingCheckpoint.empty()`：字节被 `takeCheckpoint()`
+ * 取走之后位置就该失效，所以谁先被调用都不影响结果（第一版判据用错，Kotlin 先取字节再问位置，
+ * 位置永远是 -1，检查点因此永远进不了仓库）。
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_takeCheckpointPos(JNIEnv *, jobject) {
+    return engine.pendingCheckpointPos;
+}
+
+/*
+ * P2-1d 的落点计算（方案 2.1）：返回 [带 generation prompt 的 token 数, 不带 generation prompt 的 token 数]。
+ *
+ * 两者之差就是模板给助手头加的那几个 token。落点 = **不带**的那个数：状态停在「用户这一轮结束、
+ * 生成脚手架之前」，正好与下一轮的真实公共前缀对齐。**不写死常数**，换模型/换模板都对。
+ */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_tokenizeBoundary(
+    JNIEnv * env, jobject, jbyteArray messages) {
+    try {
+        if (!engine.model) throw std::runtime_error("Load a model first");
+        const auto payload = bytes(env, messages);
+        const int withGeneration = static_cast<int>(prompt_tokens(prompt(payload, true)).size());
+        const int withoutGeneration = static_cast<int>(prompt_tokens(prompt(payload, false)).size());
+        const jlong values[] = {withGeneration, withoutGeneration};
+        auto result = env->NewLongArray(2);
+        if (!result) return nullptr;
+        env->SetLongArrayRegion(result, 0, 2, values);
+        if (env->ExceptionCheck()) return nullptr;
+        return result;
+    } catch (...) { return nullptr; }
+}
+
+/** 上一次恢复失败在哪一步：0 成功、1 `set_data_ext` 短读、2 `seq_rm` 返回 false、-1 没试过。 */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_lastRestoreStep(JNIEnv *, jobject) {
+    return engine.lastRestoreStep;
+}
+
+/*
+ * P2-1d 第 0 步的**只做测量**探针（统筹 2026-10-23 裁定）。
+ *
+ * 回答一个问题：把检查点从「只存循环层（PARTIAL_ONLY）」改成「整份状态（NONE，注意力 KV + 循环层）」，
+ * 体积与耗时各是多少。方案里「约 24 倍」的推算统筹不认，要以实测为准。
+ *
+ * 做法：对**当前**的序列 0 状态（调用方刚读完一段提示之后）分别取两份大小、各存一次、各恢复一次，
+ * 记录耗时。**最后一定把整份状态装回去**，所以探针跑完引擎状态不变，不影响后续生成。
+ *
+ * 返回 10 项：
+ *  0 size(NONE)      1 size(PARTIAL_ONLY)
+ *  2 存 NONE 毫秒     3 存 PARTIAL_ONLY 毫秒
+ *  4 恢复 NONE 毫秒   5 恢复 PARTIAL_ONLY 毫秒
+ *  6 written(NONE)   7 written(PARTIAL_ONLY)
+ *  8 read(NONE)      9 read(PARTIAL_ONLY)   —— 与对应 written 不等就说明这一侧没成
+ */
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_measureCheckpoints(JNIEnv * env, jobject) {
+    try {
+        if (!engine.context) return nullptr;
+        auto * ctx = engine.context;
+        const size_t size_none = llama_state_seq_get_size_ext(ctx, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const size_t size_partial = llama_state_seq_get_size_ext(ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        std::vector<uint8_t> full(size_none > 0 ? size_none : 1);
+        std::vector<uint8_t> partial(size_partial > 0 ? size_partial : 1);
+
+        const auto t_save_full = Clock::now();
+        const size_t written_full = llama_state_seq_get_data_ext(
+            ctx, full.data(), full.size(), 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const long ms_save_full = elapsed(t_save_full);
+
+        const auto t_save_partial = Clock::now();
+        const size_t written_partial = llama_state_seq_get_data_ext(
+            ctx, partial.data(), partial.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const long ms_save_partial = elapsed(t_save_partial);
+
+        // 先恢复小的那份，最后恢复整份：跑完之后引擎状态与进来时一致。
+        const auto t_restore_partial = Clock::now();
+        const size_t read_partial = llama_state_seq_set_data_ext(
+            ctx, partial.data(), written_partial, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+        const long ms_restore_partial = elapsed(t_restore_partial);
+
+        const auto t_restore_full = Clock::now();
+        const size_t read_full = llama_state_seq_set_data_ext(
+            ctx, full.data(), written_full, 0, LLAMA_STATE_SEQ_FLAGS_NONE);
+        const long ms_restore_full = elapsed(t_restore_full);
+
+        const jlong values[] = {
+            static_cast<jlong>(size_none), static_cast<jlong>(size_partial),
+            ms_save_full, ms_save_partial, ms_restore_full, ms_restore_partial,
+            static_cast<jlong>(written_full), static_cast<jlong>(written_partial),
+            static_cast<jlong>(read_full), static_cast<jlong>(read_partial),
+        };
+        auto result = env->NewLongArray(10);
+        if (!result) return nullptr;
+        env->SetLongArrayRegion(result, 0, 10, values);
+        if (env->ExceptionCheck()) return nullptr;
+        return result;
+    } catch (...) { return nullptr; }
+}
+
+/*
+ * 把一串 token id 还原成文本（方案审必修项 1）。
+ *
+ * 只给「边界到底落在哪」的取证用：真机日志里要能看到 1116 与 1120 各自解码出什么，才能说清
+ * 那个位置是「助手角色头之前」还是「助手头之后、思考段之前」——光比长度证明不了这件事。
+ */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xavierxia_mycelium_llm_NativeBridge_decodeTokens(JNIEnv * env, jobject, jintArray ids) {
+    try {
+        if (!engine.model || !ids) return nullptr;
+        const jsize n = env->GetArrayLength(ids);
+        std::vector<jint> raw(static_cast<size_t>(n));
+        env->GetIntArrayRegion(ids, 0, n, raw.data());
+        if (env->ExceptionCheck()) return nullptr;
+        const auto * vocab = llama_model_get_vocab(engine.model);
+        std::string text;
+        for (jsize i = 0; i < n; ++i) {
+            std::array<char, 8> buf = {};
+            // special=true：角色头这类标记是**特殊 token**，special=false 时会被吞成空串，
+            // 那样就看不出「边界到底在助手头之前还是之后」——取证必须留下它们。
+            // 全量审 P2-11：缓冲不足时 llama 返回**负的所需长度**，固定 8 字节会把长特殊 token
+            // 静默吞掉（边界取证因此被污染）。不足即按所需长度扩容重试。
+            int written = llama_token_to_piece(
+                vocab, static_cast<llama_token>(raw[i]), buf.data(), static_cast<int>(buf.size()), 0, true);
+            if (written < 0) {
+                std::string big(static_cast<size_t>(-written) + 1, '\0');
+                written = llama_token_to_piece(
+                    vocab, static_cast<llama_token>(raw[i]), big.data(), static_cast<int>(big.size()), 0, true);
+                if (written > 0) text.append(big.data(), static_cast<size_t>(written));
+            } else if (written > 0) {
+                text.append(buf.data(), static_cast<size_t>(written));
+            }
+        }
+        return env->NewStringUTF(text.c_str());
+    } catch (...) { return nullptr; }
 }
 
 

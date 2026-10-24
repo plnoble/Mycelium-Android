@@ -13,7 +13,26 @@ import org.json.JSONObject
 
 interface ModelFile : Closeable { val fd: Int }
 
-data class EngineOptions(val threads: Int = 6, val contextLength: Int = 8192) {
+data class EngineOptions(
+    // 默认 8 线程：真机扫描（234 token 提示、32 token 生成、armv9.2 + dotprod/i8mm）实测 8 线程首字
+    // 最快（2420-4004 ms），6 线程出字更快（12.1 vs 10.25 tok/s）但首字要慢 1.3 秒。聊天看首字。
+    val threads: Int = 8,
+    val contextLength: Int = 8192,
+) {
+    /**
+     * 实际交给原生的线程数：**永远不超过 CPU 核数**（P2-1d，2026-10-23 夜，任务书第一段第 3 条）。
+     *
+     * 真机实测（NX809J，8 核，同一段 234 token 提示）：8 线程生成 10.25 tok/s，10 线程掉到 0.18、
+     * 12 线程 0.17、16 线程 0.09 —— ggml 每个线程都在栅栏上自旋，超过核数就变成互相抢核，生成速度
+     * 掉两个数量级。界面上随手填个大数就能把应用拖到几乎不动，所以在**引擎入口**截住。
+     *
+     * @param cores 这台设备的核数；默认取运行时可用的处理器数。
+     */
+    fun clampedThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int {
+        val usable = cores.coerceAtLeast(1)
+        return threads.coerceIn(1, usable)
+    }
+
     init {
         require(threads in 1..16) { "线程数须为 1–16" }
         require(contextLength in 512..32768) { "上下文长度须为 512–32768" }
@@ -38,6 +57,13 @@ data class GenerationStats(
      * the body text and the generated-token count above are unchanged.
      */
     val hiddenTokens: Long = 0,
+    /**
+     * P2-1d：这一轮在哪个位置存下了检查点（-1 = 没存）。存不下来的原因不在这里，而要看日志与原生
+     * 读数——但「有没有存下、多大」必须能被看到，否则真机上「为什么没提速」没法归因。
+     */
+    val checkpointPos: Int = -1,
+    /** P2-1d：这一轮存下的检查点字节数（0 = 没存）。 */
+    val checkpointBytes: Long = 0,
     /**
      * Milliseconds from the first native token to the first non-blank visible body text (P2-1c,
      * step E). Zero when the answer started with visible text. It measures the generation phase only
@@ -71,10 +97,85 @@ internal interface EngineBridge {
      * leading tokens that are already in the engine's cache.
      */
     fun tokenize(messages: ByteArray): IntArray
-    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray
+    fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, checkpointSave: Boolean, restoredTo: Int, callback: TokenCallback): LongArray
+
+    /**
+     * P2-1d 的 S2：把刚才那一轮在跨过 [saveCheckpointAt] 时存下的检查点取走（取完清空）；没有给 null。
+     *
+     * 默认返回 null = 「这台实现不支持检查点」——纯注意力模型与旧实现因此完全不受影响。
+     */
+    fun takeCheckpointHandle(): Int = -1
+
+    /** 待取的检查点对应哪个位置；没有就是 -1。 */
+    fun takeCheckpointPos(): Int = -1
+
+    /**
+     * 丢掉待取的检查点：**不分配、不抛**（全量审 R2 必修项 2）。
+     *
+     * 清理路径必须用它而不是 [takeCheckpoint]——后者要新建 JByteArray，在异常收尾时可能把原来的
+     * 异常替换成 OOM。默认实现是空操作（假桥没有原生缓冲）。
+     */
+    fun discardCheckpoint() {}
+
+    /**
+     * 落点计算：返回 [带 generation prompt 的 token 数, 不带的]；null = 这台实现不给（旧桥/假桥）。
+     *
+     * 两者之差就是模板给助手头加的 token 数，**不写死常数**（方案 2.1）：换模型、换模板都对。
+     */
+    fun tokenizeBoundary(messages: ByteArray): LongArray? = null
+
+    /** 只给真机诊断：限制预填批次大小，用来构造"同批次形状"的对照。 */
+    fun setPromptBatch(size: Int) {}
+    fun setCheckpointCut(cut: Int) {}
+
+    /** 跨轮稳定的断批点集合（每条消息结束处）；默认空 = 不额外切。 */
+    fun setCheckpointCuts(cuts: IntArray) {}
+    /** 诊断：默认给 [0, 0]（假桥没有原生句柄）。 */
+    fun handlesAlive(): LongArray = longArrayOf(0, 0)
+
+    /** 诊断：分段计时，默认 null。 */
+    fun checkpointTimings(): LongArray? = null
+
+    /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
+    fun restoreCheckpointHandle(handle: Int, pos: Int): Boolean = false
+
+    /** 句柄占多少字节（元数据用；-1 表示句柄不存在）。 */
+    fun checkpointHandleBytes(handle: Int): Long = -1
+
+    /** 释放句柄占的原生内存。 */
+    fun releaseCheckpointHandle(handle: Int) {}
+
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
+    fun canCheckpoint(): Boolean = false
+
+    /** 把一串 token id 还原成文本；默认空串（这台实现不给解码）。 */
+    fun decodeTokens(ids: IntArray): String = ""
+
+    /** 上一次恢复失败在哪一步；默认 -1（没试过）。 */
+    fun lastRestoreStep(): Int = -1
+
+    /**
+     * P2-1d 第 0 步的测量探针：对当前序列 0 的状态分别取 `NONE` 与 `PARTIAL_ONLY` 两份的大小、
+     * 各存一次各恢复一次，并报耗时。**跑完会把整份状态装回去**，所以引擎状态不变。
+     *
+     * 默认返回 null = 「这台实现不支持」（旧桥与假桥都不受影响）。
+     */
+    fun measureCheckpoints(): LongArray? = null
 }
 internal class NativeBridge : EngineBridge {
-    init { System.loadLibrary("mycelium_llm") }
+    // P2-1d：按 CPU 特性在「基线 / 快变体」之间挑一份加载（两份都在 APK 里）。
+    // 直接在 init 里加载，保证任何用到引擎的路径都不会漏掉。
+    init { NativeLibraryVariant.load() }
+    /** 编译这份库时用的 `-march`（真机验收靠它确认到底加载了哪一份变体）。 */
+    external fun archVariant(): String
+    /** 只给真机诊断：限制预填批次大小（0 = 用默认 512）。 */
+    external override fun setPromptBatch(size: Int)
+    /** 固定切法：本轮在哪个 token 位置强制断批（-1 = 不切）。与存不存检查点无关。 */
+    external override fun setCheckpointCut(cut: Int)
+    /** 跨轮稳定的断批点集合（全量审 R2 P1-1）。 */
+    external override fun setCheckpointCuts(cuts: IntArray)
+    /** 全量审 P2-8：[存活句柄数, 句柄持有总字节]——测例据此断言原生不泄漏。 */
+    external override fun handlesAlive(): LongArray
     external override fun begin()
     /** 只给真机测例用：打开后模板按「思考」渲染，默认关。 */
     external fun setThinking(thinking: Boolean)
@@ -82,7 +183,38 @@ internal class NativeBridge : EngineBridge {
     external override fun load(fd: Int, threads: Int, context: Int)
     external override fun unload()
     external override fun tokenize(messages: ByteArray): IntArray
-    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, callback: TokenCallback): LongArray
+    external override fun generate(messages: ByteArray, maximum: Int, temperature: Float, topP: Float, seed: Int, reuseTokens: Int, saveCheckpointAt: Int, checkpointSave: Boolean, restoredTo: Int, callback: TokenCallback): LongArray
+    /** P2-1d 的 S2：把刚才那一轮在跨过 checkpointPos 时存下的检查点取走（取完清空）；没有给 null。 */
+    external override fun takeCheckpointHandle(): Int
+    /** 待取的检查点对应哪个位置；没有就是 -1。 */
+    external override fun takeCheckpointPos(): Int
+    /** 丢掉待取的检查点：不分配、不抛（清理路径专用）。 */
+    external override fun discardCheckpoint()
+    /** 落点计算：返 [带 generation prompt 的 token 数, 不带的]（方案 2.1）。 */
+    external override fun tokenizeBoundary(messages: ByteArray): LongArray?
+    /** 诊断：分段计时 [清空, set_data_ext, get_size, get_data, JNI 拷贝]（毫秒）。 */
+    external override fun checkpointTimings(): LongArray?
+    /** P2-1d 的 S3：恢复检查点并裁到恢复位置；两步都成才 true（方案审必修项 2）。 */
+    external override fun restoreCheckpointHandle(handle: Int, pos: Int): Boolean
+    external override fun checkpointHandleBytes(handle: Int): Long
+    external override fun releaseCheckpointHandle(handle: Int)
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。 */
+    external override fun canCheckpoint(): Boolean
+    /**
+     * 把一串 token id 还原成文本（方案审必修项 1 的取证用）。
+     *
+     * 默认返回空串 = 「这台实现不给解码」，纯注意力与旧实现不受影响。
+     */
+    external override fun decodeTokens(ids: IntArray): String
+    /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
+    external override fun lastRestoreStep(): Int
+    /**
+     * P2-1d 第 0 步的测量探针：对当前序列 0 的状态分别取 `NONE` 与 `PARTIAL_ONLY` 两份的大小、
+     * 各存一次各恢复一次，并报耗时。**跑完会把整份状态装回去**，所以引擎状态不变。
+     *
+     * 返回 null = 这台实现不支持（或没加载模型）。
+     */
+    external override fun measureCheckpoints(): LongArray?
 }
 
 /**
@@ -95,11 +227,31 @@ interface LocalEngine : ChatModel {
     val loadedModel: StateFlow<ModelInfo?>
     val lastStats: GenerationStats?
     suspend fun load(model: ModelInfo, options: EngineOptions, open: () -> ModelFile)
+
+    /**
+     * 同一个会话换了缓存键（第一轮用临时会话、落库后换正式编号）时，把缓存与检查点改挂过去。
+     *
+     * 默认空实现：云端实现没有检查点；假引擎不需要这个能力。真引擎给了实现。
+     */
+    suspend fun rekeyCheckpoints(from: String, to: String) {}
+
+    /** 立即丢掉全部检查点（系统低内存回调用）；默认空实现。 */
+    suspend fun trimCheckpointsNow() {}
 }
 
 /** One process-wide engine. The mutex covers cleanup after cancellation as well. */
 class LocalModelEngine internal constructor(private val bridgeFactory: () -> EngineBridge) : LocalEngine {
-    companion object { val shared by lazy { LocalModelEngine { NativeBridge() } } }
+    companion object {
+        val shared by lazy { LocalModelEngine { NativeBridge() } }
+
+        /**
+         * 入库那份字节时，除「再拷一份」之外还要留的抖动余量（P2-1d 检查点准入用）。
+         *
+         * 16 MiB 是给 ART 的分配/GC 抖动与别的短命对象留的；真机上单份约 55 MB，这条余量不起决定作用，
+         * 但能挡住「刚好差一点点」的分配。
+         */
+        const val CHECKPOINT_COPY_SLACK_BYTES = 16L * 1024 * 1024
+    }
     private val nativeDelegate = lazy(bridgeFactory)
     private val native by nativeDelegate
     private val gate = Mutex()
@@ -113,6 +265,59 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
      */
     private var cacheOwner: String? = null
     private var cachedPrompt: IntArray? = null
+
+    // ---- P2-1d：检查点路径（S2/S3/S4）-----------------------------------------------------
+    /**
+     * 总开关。**默认关**（方案审必修项 7）：真机逐字比对没做之前不许默认开；比对通过以后由统筹决定打开。
+     * 关着时走 P2-1c 的老路，一个检查点接口都不碰。
+     */
+    @Volatile var checkpointEnabled: Boolean = false
+
+    /** 检查点仓库（S1）。只在持有 [gate] 锁的代码里动它——和缓存状态同一把锁，同一套并发前提。 */
+    // 字节归原生：仓库每丢掉一份都要把句柄释放掉，否则那块内存永远回不去。
+    private val checkpoints = CheckpointStore(onDrop = { handle -> native.releaseCheckpointHandle(handle) })
+
+    /** 这一轮恢复到的位置；-1 表示没走恢复（给统计与日志用）。 */
+    @Volatile var checkpointRestoredFrom: Int = -1
+        private set
+
+    /** 这一轮没走检查点的原因码（5/6/7），0 表示这条路没被触发。 */
+    @Volatile var checkpointFallbackReason: Long = 0L
+        private set
+
+    /**
+     * 「系统说内存紧张，下次进锁先把检查点整批丢掉」（Codex R2 必修项 2）。
+     *
+     * 用标记而不是在回调里直接清：仓库约定只在 `gate` 锁内访问，而 `onTrimMemory` 在**主线程**上，
+     * 同步去拿推理锁会把主线程卡在一整轮生成里。
+     */
+    private val trimRequested = AtomicBoolean(false)
+
+    /** 在锁内调用：有「该清了」的标记就整批丢掉。 */
+    private fun applyPendingTrim() {
+        if (trimRequested.compareAndSet(true, false)) forgetCheckpoints()
+    }
+
+    /**
+     * **立即**丢掉全部检查点（全量审 P2-6，2026-10-24）。
+     *
+     * 与 [requestCheckpointTrim] 的区别：那个只置标记、等下一轮生成开始才消费——如果用户之后再没发过
+     * 消息，检查点就一直占着内存。这个入口由系统低内存回调（`ComponentCallbacks2.onTrimMemory`）在
+     * **后台协程**里调用：拿 `gate` 清仓库并释放句柄，主线程不等推理锁。空闲时没有在途快照，清完即净。
+     */
+    /**
+     * 原生侧真实占用（全量审 R2 P2-6）：(存活句柄数, 句柄持有字节)。必须拿 `gate`——它读的是
+     * 原生句柄表，与生成/清理并发就是数据竞争。测例与真机验收据此判断「仓库空但原生还占着」。
+     */
+    suspend fun checkpointHandlesAlive(): Pair<Int, Long> = gate.withLock {
+        val values = runNative { native.handlesAlive() }
+        (values.getOrNull(0)?.toInt() ?: -1) to (values.getOrNull(1) ?: -1L)
+    }
+
+    override suspend fun trimCheckpointsNow() = gate.withLock {
+        trimRequested.set(false)
+        forgetCheckpoints()
+    }
 
     /**
      * 原生最后交回来的那一份读数（提示 token 序列 + 8 项读数）。取消发生时，收集方会被取消，但
@@ -141,7 +346,7 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 runNative {
                     clear()
                     descriptor = open()
-                    native.load(descriptor!!.fd, options.threads, options.contextLength)
+                    native.load(descriptor!!.fd, options.clampedThreads(), options.contextLength)
                     // The native load can return successfully even though a stop landed while it was
                     // working: its flag is only read at its own checkpoints, and the very next
                     // runNative (the generate that would follow) starts by clearing it. Honour the
@@ -162,6 +367,8 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     }
     private fun clear() {
         forgetCachedPrompt()
+        // 换模型 / 卸载 / 引擎清理：检查点跟着一起作废（它们是**这个模型、这个上下文**里的状态）。
+        forgetCheckpoints()
         native.unload()
         val previous = descriptor
         descriptor = null
@@ -172,6 +379,36 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
     private fun forgetCachedPrompt() {
         cacheOwner = null
         cachedPrompt = null
+    }
+
+    /**
+     * 把检查点一起忘掉（P2-1d 必修项 3 的生命周期那一半）。
+     *
+     * 换模型、卸载、引擎清理都要调它：检查点是**某个模型、某个上下文**里的状态，换了模型再拿旧字节去
+     * 恢复，等于往新模型里灌另一份状态。
+     */
+    private fun forgetCheckpoints() {
+        checkpoints.clear()
+        checkpointRestoredFrom = -1
+        checkpointFallbackReason = 0L
+    }
+
+    /**
+     * 把这个会话的缓存与检查点**改挂**到新键上（P2-1d，2026-10-23 夜）。
+     *
+     * 场景：新会话第一轮还没有正式编号，缓存键里用「临时会话」顶替；这一轮落库之后会话才拿到正式
+     * 编号，于是第 2 轮的键变了。不搬的话引擎按「换了键 = 换了一段提示」把上一轮的努力全作废——
+     * 真机上就是第 2 轮 `reason=5`、整段重读，第 3 轮才恢复正常。
+     *
+     * 只在**同一个会话真的换了编号**时调；换人物/换模型/换模式都不该走这里（那些确实是不同提示）。
+     */
+    override suspend fun rekeyCheckpoints(from: String, to: String) = gate.withLock {
+        if (from == to) return@withLock
+        // 全量审 R2 P1-2：**先迁移，成功后才改 `cacheOwner`**。原来先改所有者再迁移，一旦迁移抛异常
+        // （分配失败），所有者已经指向目标键、仓库里却还是源键的数据——上层 `runCatching` 又会把异常
+        // 吞掉，于是这份检查点从此再也匹配不上，等于永久泄漏。
+        checkpoints.rekey(from, to)
+        if (cacheOwner == from) cacheOwner = to
     }
 
     /**
@@ -202,8 +439,10 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         hiddenMillis: Long,
     ): GenerationStats? {
         if (values == null) return null
-        if (values.size != 8) {
-            error("原生读数应有 8 项（提示 token、生成 token、读提示毫秒、生成毫秒、是否停止、复用 token、实读 token、未复用原因），实际 ${values.size} 项")
+        // P2-1d：原生读数从 8 项扩到 10 项（方案审必修项 5：加检查点统计必须一起扩）。旧桥仍然回 8 项，
+        // 缺的两项按「没有检查点」处理——这样同一个引擎既能跑真桥也能跑老假桥。
+        if (values.size != 8 && values.size != 10) {
+            error("原生读数应有 8 或 10 项（第 9/10 项是检查点位置与字节数），实际 ${values.size} 项")
         }
         if (values[0] != prompt.size.toLong()) {
             error("原生报的提示长度 ${values[0]} 与本侧 tokenize 出来的 ${prompt.size} 对不上")
@@ -237,18 +476,34 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         if (reused + read != count && generated != 0L) {
             error("提示还没读完就报了生成 token：读完 ${reused + read}/$count、生成 $generated")
         }
-        if (reason !in 0L..4L) error("原生报的未复用原因码 $reason 不认识")
+        // P2-1d：原因码范围扩到 0..7（5/6/7 是检查点路径的码，见 CheckpointFallback）。
+        // 方案审必修项 5：只改范围不够，下面几条一致性校验要按**执行路径**分开判，否则
+        // 「首轮报 5」「开关关着报 7」会被这里当协议错误直接抛掉，真机读数会是零。
+        if (reason !in 0L..7L) error("原生报的未复用原因码 $reason 不认识")
         if (reason == 4L) error("原生报了这一轮 decode 失败（原因 4），这一轮不能当读数用")
-        if ((reason == 1L) != (requested == 0)) {
+        // 「没有任何东西可复用」（原因 1）只属于「这一轮压根没请求复用」那条路；检查点的三个码
+        // （5/6/7）也可能出现在 requested>0 的轮次里——它们说的是「检查点没帮上」，不是「没请求」。
+        val checkpointReason = reason in 5L..7L
+        if (!checkpointReason && (reason == 1L) != (requested == 0)) {
             error("原因码 $reason 与这一轮请求的复用数 $requested 不一致")
         }
-        if ((reason == 2L || reason == 3L) && reused != 0L) {
+        // 说「没复用」的码：2/3（P2-1c）与 5/6/7（P2-1d）都必须是 reused == 0。
+        if ((reason == 2L || reason == 3L || checkpointReason) && reused != 0L) {
             error("原因码 $reason 说没有复用，却报了复用 $reused")
         }
+        // 请求了复用、报「成功复用」（原因 0），却一个都没复用：没有理由。
         if (reason == 0L && reused == 0L && requested > 0) {
             error("这一轮请求了复用却没复用，也没给出原因")
         }
-        return GenerationStats(count, generated, promptMillis, generationMillis, stopped, reused, read, reason, hiddenTokens, hiddenMillis)
+        return GenerationStats(
+            promptTokens = count, generatedTokens = generated, promptMillis = promptMillis,
+            generationMillis = generationMillis, stopped = stopped, reusedPromptTokens = reused,
+            readPromptTokens = read, reuseFallbackReason = reason, hiddenTokens = hiddenTokens,
+            hiddenMillis = hiddenMillis,
+            // P2-1d：原生交回来的检查点落点与字节数（旧桥缺这两项，按「没有」处理）。
+            checkpointPos = values.getOrNull(8)?.toInt() ?: -1,
+            checkpointBytes = values.getOrNull(9) ?: 0L,
+        )
     }
 
     /**
@@ -267,6 +522,143 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
         return ((visible - firstTokenNanos) / 1_000_000).coerceAtLeast(0)
     }
 
+    /**
+     * 把一段消息按模型自带的聊天模板编成 token 序列（P2-1d）。
+     *
+     * 检查点要存在「位置不超过公共前缀」的地方，所以本侧必须先能拿到某一轮提示的 token 序列，
+     * 再和上一轮的比较、算出分叉点。用的格式与 [generate] 完全一致（同一个 payload、同一个原生
+     * `tokenize`），否则比较出来的前缀没有意义。
+     */
+    suspend fun promptTokenIds(messages: List<ChatMessage>): IntArray {
+        val snapshot = messages.toList()
+        require(snapshot.isNotEmpty() && snapshot.sumOf { it.content.length.toLong() } <= 1_000_000) { "消息为空或过长" }
+        val json = JSONArray()
+        snapshot.forEach { json.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content)) }
+        val payload = json.toString().toByteArray(Charsets.UTF_8)
+        return gate.withLock {
+            checkNotNull(loaded.value) { "请先加载模型" }
+            runNative { native.tokenize(payload) }
+        }
+    }
+
+    /**
+     * 把 token id 还原成文本（P2-1d 必修项 1 的取证：边界两侧各自解码出什么）。
+     *
+     * 只有真机测例用它；界面上不显示。
+     */
+    suspend fun decodeTokens(ids: IntArray): String {
+        require(ids.isNotEmpty()) { "没有 token 可解码" }
+        return gate.withLock {
+            checkNotNull(loaded.value) { "请先加载模型" }
+            runNative { native.decodeTokens(ids) }
+        }
+    }
+
+    /** 这个模型能不能走检查点路径（混合 / 循环才成）。真机取证与界面提示都用它。 */
+    fun canCheckpoint(): Boolean = native.canCheckpoint()
+
+    /** 上一次恢复失败在哪一步（0 成功 / 1 set_data 短读 / 2 seq_rm false / -1 没试过）。 */
+    fun lastRestoreStep(): Int = native.lastRestoreStep()
+
+    /**
+     * 这一轮该把检查点存在哪个 token 位置（P2-1d 方案 2.1）。
+     *
+     * = 「不带 generation prompt 的 token 数」：状态正好停在**用户这一轮结束、助手头之前**，与下一轮的
+     * 真实公共前缀对齐。长度由模板自己除以两次 tokenize，**不写死常数**。算不出来就返回 -1（不存）。
+     *
+     * 只加了两轮 tokenize 的开销（不建上下文、不读 KV），相对几秒的提示读取可以忽略。
+     */
+    /** 诊断：分段计时（拿锁，与其余状态操作串行）。 */
+    suspend fun checkpointTimings(): LongArray? = gate.withLock {
+        if (loaded.value == null) return@withLock null
+        native.checkpointTimings()
+    }
+
+    /** 只给真机诊断用：直接对已经编码好的 payload 调 `tokenizeBoundary()`。 */
+    suspend fun boundaryForTest(payload: ByteArray): LongArray? = gate.withLock {
+        if (loaded.value == null) return@withLock null
+        runNative { native.tokenizeBoundary(payload) }
+    }
+
+    suspend fun checkpointPositionFor(messages: List<ChatMessage>): Int {
+        val snapshot = messages.toList()
+        if (snapshot.isEmpty()) return -1
+        val json = JSONArray()
+        snapshot.forEach { json.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content)) }
+        val payload = json.toString().toByteArray(Charsets.UTF_8)
+        return gate.withLock {
+            if (loaded.value == null) return@withLock -1
+            runNative {
+                val bounds = native.tokenizeBoundary(payload) ?: return@runNative -1
+                if (bounds.size != 2) return@runNative -1
+                val withGeneration = bounds[0].toInt()
+                val withoutGeneration = bounds[1].toInt()
+                // 落点必须严格小于整段长度（至少留一个 token 给生成脚手架，否则原生没有可读的尾巴）。
+                if (withoutGeneration in 1 until withGeneration) withoutGeneration else -1
+            }
+        }
+    }
+
+    /**
+     * 第 0 步测量探针（见 [EngineBridge.measureCheckpoints]）。
+     *
+     * **必须拿 `gate`**（全量审 R2 必修项 6）：它会 set_data_ext 把原生状态装回去，与生成、卸载并发
+     * 就是数据竞争。第一版直接在锁外调，真机跑一次就可能把另一轮的生成状态搅乱。
+     */
+    suspend fun measureCheckpoints(): LongArray? = gate.withLock {
+        checkNotNull(loaded.value) { "请先加载模型" }
+        runNative { native.measureCheckpoints() }
+    }
+
+    /**
+     * 系统内存紧张时整批丢掉检查点（Codex R2 必修项 1/2）。
+     *
+     * 为什么还要**主动预算检查**：Android 16 起 `TRIM_MEMORY_RUNNING_*` 这类级别不再下发给应用，
+     * 单靠这个回调兜不住。所以主防线是保存前的准入（单份超上限就不存），这里只是额外的保险。
+     *
+     * 实现上**不碰 `gate` 锁**：从 `onTrimMemory` 回调里同步拿推理锁会把主线程卡在一整轮生成上。
+     * 改为在同一个引擎上只打一个「该清了」的标记，下一次真正进锁时先清。
+     */
+    /**
+     * 系统低内存信号的总开关（默认开）。真机验收要把「不受打扰时的内存行为」与「系统真的报紧张」
+     * 分开测：测试里关掉它，避免后台回调把检查点反复清空，让读数失去意义。
+     */
+    @Volatile var trimOnSystemSignal = true
+
+    fun requestCheckpointTrim() {
+        if (!trimOnSystemSignal) return
+        trimRequested.set(true)
+    }
+
+    /** 系统真的低内存时调用：同上，只是语义更重。 */
+    fun onLowMemory() = requestCheckpointTrim()
+
+    /** 上一次「取检查点」的经过（字节/位置/落点），只给调试与真机读数用。 */
+    @Volatile var lastTakeDiagnosis: String = ""
+        private set
+
+    /** 这一轮因为托管堆余量不足而**跳过**了存检查点（只做诊断，不影响生成）。 */
+    @Volatile var checkpointSkippedForMemory: Boolean = false
+        private set
+
+    /** 托管堆还能再分配多少字节（不含原生内存）。准入判据用；测例可以替换它。 */
+    internal var heapHeadroomProbe: () -> Long = {
+        val runtime = Runtime.getRuntime()
+        runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+    }
+
+    private fun heapHeadroom(): Long = heapHeadroomProbe()
+
+    /**
+     * 检查点仓库现在的占用（份数与字节），只给真机读数与日志用。
+     *
+     * **也要拿 `gate`**（全量审 R2 必修项 6）：仓库约定只在锁内访问，第一版在锁外遍历，
+     * 与正在写仓库的那一轮撞上就是并发修改。它不该被界面高频调用——只给读数用。
+     */
+    suspend fun checkpointUsage(): Pair<Int, Long> = gate.withLock {
+        checkpoints.size to checkpoints.totalBytes
+    }
+
     override fun generate(messages: List<ChatMessage>, parameters: GenerationParameters): Flow<String> {
         // Freeze caller-owned mutable input before asynchronous collection.
         val snapshot = messages.toList()
@@ -281,6 +673,13 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 val cacheKey = parameters.cacheKey
                 // 上一轮的读数只在它自己那一轮里用；每一轮开头清掉，免得取消收尾读到旧的一份。
                 lastNativeReadings = null
+                // 系统在这之前说过内存紧张：现在已经在锁里了，安全地把检查点整批丢掉。
+                applyPendingTrim()
+                // 每轮重置检查点诊断字段（Codex R2 必修项 4）：否则「上一轮恢复了」会挂在这一轮上，
+                // 界面与日志读到的就是别人的结论。
+                checkpointRestoredFrom = -1
+                checkpointFallbackReason = 0L
+                checkpointSkippedForMemory = false
                 // 这一轮实际请求复用的 token 数：收尾校验要用，所以声明在 try 之外。
                 var requested = 0
                 var filter = ThinkingFilter()
@@ -289,24 +688,104 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                 var hiddenTokens = 0L
                 var firstTokenNanos = 0L
                 var firstVisibleNanos = 0L
+                // P2-1d：这一轮要存检查点的落点（声明在 try 之外：收尾取字节时也要用它）。
+                var checkpointAt = -1
+                // P2-1d：这一轮的状态是否刚从检查点恢复好（>= 0 即恢复位置）。原生据此**直接**从
+                // 那里读，不再走「共享前缀 + 自己裁」那条判断——那条对混合模型会失败并整段重读。
+                var restoredTo = -1
                 try {
-                    // A round without a key must not leave a cached prompt behind either: on this one
-                    // native context such a round clears the KV and reads everything, so afterwards the
-                    // engine holds a prompt the old key does not describe. Keeping the old ownership
-                    // would let a later round with that key reuse a prefix that belongs to another
-                    // round. Nothing is reused here either way (plan review, must-fix 2).
-                    if (cacheKey == null) forgetCachedPrompt()
+                    // 换会话或无键轮次（全量审必修项 4）：检查点与缓存一起作废。
+                    // 引擎本来就只有一组 cacheOwner/cachedPrompt，换了键就不能再保留上一个会话的状态。
+                    if (cacheKey != cacheOwner) {
+                        cacheOwner?.let { checkpoints.invalidate(it) }
+                        forgetCachedPrompt()
+                    }
+                    if (cacheKey == null) {
+                        forgetCachedPrompt()
+                        forgetCheckpoints()
+                    }
                     requested = 0
+                    // P2-1d：这一轮要不要存检查点，**在进原生之前**就定下来（原生那段跑在别的线程上，
+                    // 在里面写外面的变量不安全，第一版就因此丢掉过落点）。
+                    val checkpointWanted = checkpointEnabled && parameters.checkpointPos > 0 &&
+                        cacheKey != null && native.canCheckpoint()
+                    // 固定切法（任务书 2026-10-24 第一节第 2 条）：**切刀位置与「存不存」是两个独立旋钮**。
+                // 切刀位置只要合法就传（关、开、第一轮都在同一位置断批 ⇒ 共同前缀上批次形状一致）；
+                // checkpointAt 保持原语义（只有 checkpointWanted 才非 -1），决定「这一轮存不存、取不取」。
+                val cutAt = if (parameters.checkpointPos > 0) parameters.checkpointPos else -1
+                native.setCheckpointCut(cutAt)
+                if (checkpointWanted) checkpointAt = parameters.checkpointPos
                     val (prompt, values) = runNative {
+                        // 全量审 R2 P1-1：断批点取「每条消息结束处」，只由 token 序列决定 ⇒ **跨轮稳定**。
+                        // 冷读与「从上一轮落点续读」在共同前缀上于是经历完全相同的批次——只在单点（本轮
+                        // 保存点）切是不够的：恢复从上一轮保存点起步，两个位置通常不同，浮点形状仍会偏。
+                        // **总是**计算断批点（全量审 R2 P1-1）：切法只由 token 序列决定（每条消息结束
+                        // 处），与「这一轮存不存」和「落点参数是否为 -1」都无关。之前挂在
+                        // `checkpointPos > 0` 上，关闭组（传 -1）整段一批、开组按边界切——两条路的批次
+                        // 又不一样了，矩阵测例当场抓住。
+                        val cuts = ArrayList<Int>(snapshot.size)
+                        for (size in 1..snapshot.size) {
+                            val prefix = JSONArray()
+                            snapshot.take(size).forEach {
+                                prefix.put(JSONObject().put("role", it.role.name.lowercase()).put("content", it.content))
+                            }
+                            val bounds = native.tokenizeBoundary(prefix.toString().toByteArray(Charsets.UTF_8))
+                            if (bounds != null && bounds.size == 2 && bounds[1] > 0) cuts += bounds[1].toInt()
+                        }
+                        native.setCheckpointCuts(cuts.toIntArray())
                         // The sequence the model is actually asked about decides the reuse; a key that
                         // does not belong to the cached prompt means this round starts from scratch.
                         val tokens = native.tokenize(payload)
-                        val reuse = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
-                        requested = reuse
+                        // 全量审必修项 1（P1）：挑选检查点的上限必须是**真实公共前缀**，绝不能是目标落点！
+                        // 目标落点（checkpointPos）是「这一轮想在哪存」，真实公共前缀（shared）是「和上一轮
+                        // 重合了多少」。若会话被编辑，shared 只有 2 而 checkpointPos 是 15，传 checkpointPos
+                        // 就会挑中 15 的旧快照，把另一条分支的状态恢复出来。
+                        val shared = if (cacheKey != null && cacheKey == cacheOwner) reusablePrefix(tokens) else 0
+                        requested = shared
+                        // 全量审 R2 必修项 1（P1）：**只要这一轮有缓存键，就按真实公共前缀作废旧快照**，
+                        // 不能受「这一轮要不要存检查点」控制。否则关闭开关期间分叉的旧快照会留着，
+                        // 之后重新打开时又被选中——那是另一条分支的状态。注销与恢复都在这里做，
+                        // 让「作废」成为有键轮次的既定动作，而不是优化路径的副作用。
+                        if (cacheKey != null) checkpoints.invalidateBeyond(cacheKey, shared)
+                        if (checkpointWanted) {
+                            when (val plan = planPrefix(
+                                store = checkpoints,
+                                key = cacheKey,
+                                maxPos = shared,
+                                enabled = true,
+                                checkpointable = true,
+                            )) {
+                                is PrefixPlan.Restore -> {
+                                    // 全量审必修项 2（P1）：恢复失败必须「清干净、从 0 重读」。
+                                    if (native.restoreCheckpointHandle(plan.checkpoint.handle, plan.checkpoint.pos)) {
+                                        checkpointRestoredFrom = plan.checkpoint.pos
+                                        restoredTo = plan.checkpoint.pos
+                                        // 恢复后从 cp 接着读：这一轮的「复用数」就是 cp。
+                                        requested = plan.checkpoint.pos
+                                        cacheOwner = cacheKey
+                                        checkpointFallbackReason = 0L
+                                    } else {
+                                        // 恢复失败：作废坏快照、清缓存元数据、从 0 重读，绝不能留着
+                                        // requested>0 去撞原生，否则收尾统计自相矛盾（reason=6, reused>0）。
+                                        checkpoints.invalidate(cacheKey)
+                                        forgetCachedPrompt()
+                                        requested = 0
+                                        restoredTo = -1
+                                        checkpointRestoredFrom = -1
+                                        checkpointFallbackReason = CheckpointFallback.RestoreFailed.code
+                                    }
+                                }
+                                is PrefixPlan.FullReread -> {
+                                    checkpointFallbackReason = plan.reason?.code ?: 0L
+                                }
+                                PrefixPlan.LegacyPrefixCache -> Unit
+                            }
+                        }
                         // 读数在原生回来的那一刻就存下来：收集方被取消时 `runNative` 会抛，但它其实
                         // 还是等到了 worker 退出，这份读数照样能用（方案审必修 6）。
                         (tokens to native.generate(payload, parameters.maxTokens,
-                            parameters.temperature, parameters.topP, parameters.seed, reuse, object : TokenCallback {
+                            parameters.temperature, parameters.topP, parameters.seed, requested, checkpointAt, checkpointWanted, restoredTo,
+                            object : TokenCallback {
                                 override fun onStart(thinking: Boolean) { filter = ThinkingFilter(thinking) }
                                 override fun onToken(bytes: ByteArray): Boolean {
                                     if (!isActive) return false
@@ -328,7 +807,78 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                     val stats = requireNotNull(
                         readingsOf(values, prompt, requested, parameters.maxTokens, hiddenTokens, hiddenMillis(firstTokenNanos, firstVisibleNanos)),
                     ) { "这一轮必须给出读数" }
-                    lastStats = stats
+                    // Codex R2 必修项 4：检查点路径的回退原因必须**真正进统计**（原来只落在旁路字段里，
+                    // 交付报告与界面读的是这一份）。非 0 时优先于原生那个旧码——原生只知道 P2-1c 的
+                    // 1/2/3，不知道检查点为什么没用上。正常结束与取消收尾共用这一段。
+                    lastStats = stats.copy(
+                        reuseFallbackReason = if (checkpointFallbackReason != 0L) checkpointFallbackReason else stats.reuseFallbackReason,
+                    )
+                    // P2-1d 的 S2：把这一轮在「跨过 checkpointPos」时存下的检查点取回来记进仓库。
+                    // 位置与字节都由原生交回来，本侧不猜；取不到（没到落点、存失败、或模型不适用）
+                    // 就什么也不记——不许拿别的位置顶替。
+                    //
+                    // 全量审 R2 必修项 3（P1）：**正常停止的轮次不许保存检查点**。`stop()` 会让原生
+                    // 正常返回（stopped=1），提示可能没读完，那一刻的状态不能当下一轮的起点。第一版
+                    // 只判「要不要存」，停止后仍入库，下一轮就恢复到那个半截位置。
+                    val stoppedThisRound = values[4] != 0L
+                    // 全量审 R2 P2-3：生成期间收到过低内存通知的，这一轮**不许入库**——
+                // 否则刚被告知内存紧张就又多存一份几十 MB 的快照。
+                if (trimRequested.get()) {
+                    checkpointSkippedForMemory = true
+                    trimRequested.set(false)
+                }
+                if (!stoppedThisRound && checkpointAt > 0 && cacheKey != null && !checkpointSkippedForMemory) {
+                        // **先问位置、再取字节**：原生的 takeCheckpoint() 会把位置一起作废，顺序反了就
+                        // 永远拿到 -1（第一版就是这么错的：字节 52 MB 都取到了，位置却一直是 -1，
+                        // 检查点因此永远进不了仓库）。
+                        val savedPos = native.takeCheckpointPos()
+                        // 字节留在原生，只拿句柄；大小向原生问一次（不再拷一份 ByteArray 过来）。
+                        val saved = native.takeCheckpointHandle()
+                        // 全量审 P1-3：句柄一旦交出来就**必须有人负责释放**。取回到入库之间还要查大小、
+                        // 拼诊断串、判断余量——任何一步抛异常，外层只会清已入库的句柄与在途缓冲，
+                        // 这一份就成了「仓库里查不到、原生里还占着」的孤儿。所以从拿到开始就交给
+                        // try/finally，只有仓库真的接管了才移交责任。
+                        var adopted = false
+                        try {
+                            val savedBytes = if (saved > 0) native.checkpointHandleBytes(saved) else -1L
+                            lastTakeDiagnosis = "take=$savedBytes/pos=$savedPos/at=$checkpointAt"
+                            // 全量审 R2 必修项 5（P2）：生成**期间**收到「内存告急」时，这一份不许入库。
+                            // 第一版只在轮次入口消费标记，于是「拿到标记的那一轮照样存了一份」——正是最
+                            // 不该存的时候。这里再判一次，并顺手把已有的清掉。
+                            if (trimRequested.get()) {
+                                // 整批清掉，并把标记消费掉；这一份句柄由 finally 释放，不入库。
+                                trimRequested.set(false)
+                                forgetCheckpoints()
+                            } else if (saved > 0 && savedPos > 0) {
+                                // 托管堆余量准入（全量审 R2 必修项 2，改为句柄后重新算过）：字节现在归
+                                // 原生，不再有「JNI 数组 + 仓库副本」两份托管堆占用，所以只需为句柄释放
+                                // 与抖动留一点余量；余量不足就跳过优化，绝不把生成拖进 OOM。
+                                if (heapHeadroom() >= CHECKPOINT_COPY_SLACK_BYTES) {
+                                    // 仓库拒收（单份就超过总上限）时 adopted 保持 false，由 finally 释放。
+                                    adopted = checkpoints.put(cacheKey, savedPos, saved, savedBytes)
+                                    if (!adopted) {
+                                        // 仓库不收：把这一键上位置可能已经不对的旧检查点作废。
+                                        checkpoints.invalidateBeyond(cacheKey, checkpointAt)
+                                    }
+                                } else {
+                                    checkpoints.invalidate(cacheKey)
+                                    checkpointSkippedForMemory = true
+                                }
+                            } else {
+                                // 没存成：把上一轮留下的、位置可能已经不对的检查点作废，别让下轮选中它。
+                                checkpoints.invalidateBeyond(cacheKey, checkpointAt)
+                            }
+                        } finally {
+                            if (saved > 0 && !adopted) native.releaseCheckpointHandle(saved)
+                        }
+                    } else {
+                        // 不存（或这一轮被停了）：把在途缓冲丢掉，别占着原生内存。
+                        native.discardCheckpoint()
+                        if (stoppedThisRound && cacheKey != null) {
+                            // 停止 ⇒ 这一轮的检查点与缓存一起作废（与 P2-1c 的「停止就不复用」一致）。
+                            checkpoints.invalidate(cacheKey)
+                        }
+                    }
                     // Only a prompt that was read to its end is a cache entry the next round may
                     // reuse. A round that was stopped while the prompt was still being read forgets the
                     // cache instead of carrying a half-read prompt into the next one. A stop after the
@@ -339,14 +889,27 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                             cachedPrompt = prompt
                         } else forgetCachedPrompt()
                     }
+                    // 全量审 R3 P2-4：**收尾统一丢弃在途快照**。正常轮次已经 take 走了（这里是空操作）；
+                    // 停止/未存/落点没到的轮次不丢的话，几十 MB 的在途快照就一直挂在原生侧
+                    // （探针实测：discard 被替换成空操作后 pending 还留在位置 15）。幂等，重复调无害。
+                    native.discardCheckpoint()
                     if (values[4] == 0L) {
                         val tail = filter.push(utf8.push(byteArrayOf(), last = true))
                         if (tail.isNotEmpty()) send(tail)
                     }
                 } catch (failure: Throwable) {
+                    // 全量审 R2 必修项 4（P2）：**先把这一轮的回退原因存下来**再清理，否则
+                    // forgetCheckpoints() 会把 6 清成 0，收尾统计就变成原生那个旧码（1），
+                    // 「恢复失败」这件事在读数里彻底消失。
+                    val checkpointReason = checkpointFallbackReason
                     // Cancellation and native failures alike leave a prompt that may be half read:
                     // drop the cache rather than hand it to the next round.
                     forgetCachedPrompt()
+                    // 全量审必修项 4：异常与取消时，检查点必须跟着作废，不能保留不可信的状态。
+                    forgetCheckpoints()
+                    // 全量审必修项 2（P1）：**丢弃在途缓冲不能走 takeCheckpoint()**——那个会新建
+                    // JByteArray，分配失败时可能把「原本的异常」替换成 OOM。用不分配、不抛的接口。
+                    native.discardCheckpoint()
                     // 收尾统计：有可靠读数就用，读数不合格就当「没有读数」。这里绝不能因为解析出错
                     // 而顶掉原来那个异常（方案审 r2 必修 2）。
                     val readings = lastNativeReadings
@@ -362,12 +925,15 @@ class LocalModelEngine internal constructor(private val bridgeFactory: () -> Eng
                         )
                     }.getOrNull()
                     val cancelled = failure is kotlinx.coroutines.CancellationException
-                    lastStats = stats ?: GenerationStats(
+                    // 正常结束与取消收尾共用同一口径：检查点路径的原因优先于原生旧码。
+                    lastStats = (stats ?: GenerationStats(
                         0, 0, 0, 0,
                         stopped = cancelled,
                         hiddenTokens = hiddenTokens,
                         hiddenMillis = hiddenMillis(firstTokenNanos, firstVisibleNanos),
                         nativeReadingsComplete = false,
+                    )).copy(
+                        reuseFallbackReason = if (checkpointReason != 0L) checkpointReason else (stats?.reuseFallbackReason ?: 0L),
                     )
                     throw failure
                 }

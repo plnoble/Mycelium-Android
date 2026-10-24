@@ -83,6 +83,9 @@ class PromptCacheTest {
             topP: Float,
             seed: Int,
             reuseTokens: Int,
+            saveCheckpointAt: Int,
+            checkpointSave: Boolean,
+            restoredTo: Int,
             callback: TokenCallback,
         ): LongArray {
             if (failNext) {

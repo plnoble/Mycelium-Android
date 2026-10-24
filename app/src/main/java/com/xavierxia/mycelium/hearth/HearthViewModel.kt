@@ -215,8 +215,10 @@ class HearthViewModel @JvmOverloads constructor(
     private val store = AndroidModelStore(application)
     private val cloudSettings = CloudSettingsStore(application, KeystoreSecretBox("mycelium-cloud"))
     private val prefs = application.getSharedPreferences("local-model-options", 0)
+    // 全量审 P2-12：缺省线程数必须与模型页一致（都是 8）。之前这里是 6，于是「新用户直接进炉边聊天」
+    // 走的还是旧的 6 线程，本次宣称的默认值实际没生效。用户已保存的设置仍然优先，核数上限在引擎入口夹。
     private val options = EngineOptions(
-        prefs.getInt("threads", 6).coerceIn(1, 16),
+        prefs.getInt("threads", 8).coerceIn(1, 16),
         prefs.getInt("context", 8192).coerceIn(512, 32768),
     )
     private val mutable = MutableStateFlow(HearthState())
@@ -380,7 +382,7 @@ class HearthViewModel @JvmOverloads constructor(
                 )
             }
         } catch (failure: Exception) {
-            mutable.update { it.copy(notice = failure.message ?: "本地数据打不开") }
+            mutable.update { it.copy(notice = failure.shortMessage("本地数据打不开")) }
             return
         } catch (failure: UnsatisfiedLinkError) {
             // Robolectric and other non-device runs cannot load SQLCipher.
@@ -446,7 +448,7 @@ class HearthViewModel @JvmOverloads constructor(
                         historyFailed = true,
                         openConversation = null,
                         messages = emptyList(),
-                        notice = failure.message ?: "历史读不出来",
+                        notice = failure.shortMessage("历史读不出来"),
                     )
                 }
             }
@@ -788,7 +790,7 @@ class HearthViewModel @JvmOverloads constructor(
                             historyFailed = true,
                             openConversation = null,
                             messages = emptyList(),
-                            notice = failure.message ?: "这段对话读不出来",
+                            notice = failure.shortMessage("这段对话读不出来"),
                         )
                     }
                 }
@@ -1053,6 +1055,18 @@ class HearthViewModel @JvmOverloads constructor(
                     engine.load(chosen.record.info, options) { store.open(chosen.record) }
                     mutable.update { it.copy(notice = null) }
                 }
+                // P2-1d：显式打开检查点复用（库里默认仍是关，方便测例与对照）。
+                //
+                // 2026-10-23 真机对照（同一段 223 token、温度 0）：开=1053 ms（复用 195、实读 28）、
+                // 关=7351 ms（整段 223）——**快 7 倍**；恢复各段合计仅 17 ms（清空 0/set_data 4/JNI 13）。
+                // 一度以为「恢复要 4–5 秒」而关掉它是**错的推断**：拿第 2 轮的绝对耗时去减第 1 轮读 token
+                // 的估计，忽略了「每个 token 的注意力代价随已读长度增长」。不同长度的两轮不能直接比。
+                // **应用级验收已通过（2026-10-24），按任务书默认开**。证据（真机 NX809J，Qwen3.5-4B）：
+                // ① 固定切法后，3 轮开/关温度 0 逐字相同（此前的不一致 = 落点写死 + 跨批次形状浮点差异）；
+                // ② 第 2 轮起真恢复：reused=195 / read=28 / promptMs=706（含 rekey 场景实测）；
+                // ③ 10 轮内存：检查点稳定 1 份（63.2 MB / 上限 300 MiB），JVM 堆 2.61→3.10 MB。
+                // （2026-10-23 夜的「默认关」结论源于当时未定位的逐字差异，现已归因并修复。）
+                (engine as? LocalModelEngine)?.checkpointEnabled = true
                 engine
             }
             is Chosen.Cloud -> {
@@ -1108,7 +1122,27 @@ class HearthViewModel @JvmOverloads constructor(
             withContext(Dispatchers.IO) {
                 stopBeforeGenerating(turn)
                 // 本地模型按这一轮冻好的键决定复用多少（P2-1c）；云端轮次的键是 null，行为不变。
-                model.generate(messages, turn.character.parameters().copy(cacheKey = turn.cacheKey)).collect { delta ->
+                // P2-1d：这一轮的检查点落点由模型自己按模板算（用户这一轮结束、助手头之前）；
+                // 算不出来（或开关关着）就是 -1，引擎不存检查点、行为与之前完全一致。
+                val checkpointPos = if (turn.cacheKey == null) {
+                    -1
+                } else {
+                    (model as? LocalModelEngine)?.let { engine ->
+                        runCatching { engine.checkpointPositionFor(messages) }.getOrDefault(-1)
+                    } ?: -1
+                }
+                val parameters = turn.character.parameters().copy(cacheKey = turn.cacheKey, checkpointPos = checkpointPos)
+                // 诊断（P2-1d）：把每轮提示的头 8 个 token 记下来。若两轮开头就不同，说明系统提示
+                // 每轮在变，公共前缀从源头断掉，检查点永远用不上；若开头相同、后面才分叉，那是历史拼装的问题。
+                runCatching {
+                    val local = model as? LocalModelEngine
+                    if (local != null && turn.cacheKey != null) {
+                        val ids = local.promptTokenIds(messages)
+                        java.io.File(getApplication<android.app.Application>().filesDir, "p2-1d-rounds.txt")
+                            .appendText("prompt-head: n=${ids.size} head=${ids.take(8).joinToString(",")} cacheKeyLen=${turn.cacheKey.length}\n")
+                    }
+                }
+                model.generate(messages, parameters).collect { delta ->
                     // A delta that arrives after the stop is not part of this answer any more: the turn
                     // keeps what it had produced *before* the stop, so this one is dropped instead of
                     // being shown or stored (and it no longer counts as "produced").
@@ -1225,6 +1259,23 @@ class HearthViewModel @JvmOverloads constructor(
     }
 
     private suspend fun finishTurn(turn: Turn, answer: String, stopped: Boolean = false, cancelled: Boolean = false, token: Int) {
+        // 一轮结束的读数（P2-1d 诊断）：真机上看得出「这一轮到底复用了多少、检查点有没有存/恢复」。
+        // 只写日志，不进界面。
+        if (!turn.chosen.isCloud) {
+            val stats = engine.lastStats
+            val localEngine = engine as? LocalModelEngine
+            val line = "round: prompt=${stats?.promptTokens} reused=${stats?.reusedPromptTokens} " +
+                "read=${stats?.readPromptTokens} promptMs=${stats?.promptMillis} " +
+                "reason=${stats?.reuseFallbackReason} restoredFrom=${localEngine?.checkpointRestoredFrom} " +
+                "savedPos=${stats?.checkpointPos} savedBytes=${stats?.checkpointBytes} " +
+                "trimSkipped=${localEngine?.checkpointSkippedForMemory} " +
+                "cacheKeyLen=${turn.cacheKey?.length ?: -1}"
+            // 这台机器上 `adb logcat` 读不到缓冲区（0 行），所以再落一份到应用内文件，方便事后取证。
+            runCatching {
+                java.io.File(getApplication<android.app.Application>().filesDir, "p2-1d-rounds.txt")
+                    .appendText(line + "\n")
+            }
+        }
         // A turn from a page the user has already left is dropped whole: nothing is shown and
         // nothing is stored, no matter where the cancellation happened to land.
         if (token != generationToken) return
@@ -1252,6 +1303,16 @@ class HearthViewModel @JvmOverloads constructor(
         val conversationId = withContext(Dispatchers.IO) {
             chat.finish(turn.character, turn.conversationId, turn.question, answer, turn.chosen.label, now(), turn.mode) {
                 stillCommittable(turn, token) && owned
+            }
+        }
+        // P2-1d：新会话第一轮用的是「临时会话」当缓存键，落库之后才拿到正式编号。第二轮开始键变了，
+        // 引擎本来会把上一轮的缓存与检查点当分叉作废（真机读数：第 2 轮 reason=5、整段重读）。
+        // 这里在拿到正式编号的这一刻把两者一起改挂过去，第 2 轮就能接上。
+        // 测试模式（无痕）没有正式编号，`turn.conversationId` 与 `conversationId` 都是 null，不会走到这里。
+        if (turn.conversationId == null && conversationId != null && turn.cacheKey != null && !turn.chosen.isCloud) {
+            val rekeyed = cacheKeyFor(turn.character, turn.mode, conversationId, turn.chosen)
+            rekeyed?.let { after ->
+                runCatching { engine.rekeyCheckpoints(turn.cacheKey, after) }
             }
         }
         if (conversationId == null) {
@@ -1351,4 +1412,19 @@ class HearthViewModel @JvmOverloads constructor(
     private fun gateway(): AndroidGateway = AndroidGateway(getApplication(), cloudSettings.allBaseUrls())
 
     private fun now(): String = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS).toString()
+    /**
+     * 给用户看的一句话错误。
+     *
+     * 为什么需要它：真机事故里 JSONException 的 message 是**整段 JSON**（几 KB 的登记表内容），
+     * 直接丢到界面上就成了满屏乱码，谁也看不出是「登记表格式不对」。这里只留一句话，长消息截断——
+     * 细节仍然进日志，不在界面上呈现。
+     */
+    private fun Throwable.shortMessage(fallback: String): String {
+        val text = message?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        return when {
+            text.isEmpty() -> fallback
+            text.length > 160 -> text.take(160) + "…"
+            else -> text
+        }
+    }
 }
