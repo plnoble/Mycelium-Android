@@ -1,0 +1,28 @@
+设备：NX809J / SM8850 / Android 16
+模型：Qwen3.5-4B-Q4_K_M.gguf
+温度 0、seed 42、maxTokens 4、上下文 8192、线程 8
+
+预热之后堆占用：2632448 字节（2 MiB）
+诊断：take=take=54757660/pos=63/at=63 restored=-1
+第 2 轮：prompt=70 reused=0 read=70 prompt_ms=1788 reason=5 restoredFrom=-1；堆=2714368（2 MiB）；检查点=1 份/54757660 字节
+诊断：take=take=55708628/pos=92/at=92 restored=63
+第 3 轮：prompt=99 reused=63 read=36 prompt_ms=1022 reason=0 restoredFrom=63；堆=2779904（2 MiB）；检查点=1 份/55708628 字节
+诊断：take=take=56659596/pos=121/at=121 restored=92
+第 4 轮：prompt=128 reused=92 read=36 prompt_ms=1052 reason=0 restoredFrom=92；堆=2861824（2 MiB）；检查点=1 份/56659596 字节
+诊断：take=take=57610564/pos=150/at=150 restored=121
+第 5 轮：prompt=157 reused=121 read=36 prompt_ms=1039 reason=0 restoredFrom=121；堆=2960128（2 MiB）；检查点=1 份/57610564 字节
+诊断：take=take=58561532/pos=179/at=179 restored=150
+第 6 轮：prompt=186 reused=150 read=36 prompt_ms=1127 reason=0 restoredFrom=150；堆=3074816（2 MiB）；检查点=1 份/58561532 字节
+诊断：take=take=59512500/pos=208/at=208 restored=179
+第 7 轮：prompt=215 reused=179 read=36 prompt_ms=1030 reason=0 restoredFrom=179；堆=3238656（3 MiB）；检查点=1 份/59512500 字节
+诊断：take=take=60463468/pos=237/at=237 restored=208
+第 8 轮：prompt=244 reused=208 read=36 prompt_ms=1042 reason=0 restoredFrom=208；堆=3418880（3 MiB）；检查点=1 份/60463468 字节
+诊断：take=take=61414436/pos=266/at=266 restored=237
+第 9 轮：prompt=273 reused=237 read=36 prompt_ms=1048 reason=0 restoredFrom=237；堆=3648256（3 MiB）；检查点=1 份/61414436 字节
+诊断：take=take=62398196/pos=296/at=296 restored=266
+第 10 轮：prompt=303 reused=266 read=37 prompt_ms=1092 reason=0 restoredFrom=266；堆=3910400（3 MiB）；检查点=1 份/62398196 字节
+诊断：take=take=63414748/pos=327/at=327 restored=296
+第 11 轮：prompt=334 reused=296 read=38 prompt_ms=1156 reason=0 restoredFrom=296；堆=4205312（4 MiB）；检查点=1 份/63414748 字节
+结束：检查点 1 份 / 63414748 字节；上限 314572800 字节
+堆占用：首 2632448 → 尾 4205312（差 1572864）
+原生句柄：1 个 / 63414748 字节
