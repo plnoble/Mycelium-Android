@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <mutex>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
@@ -166,6 +167,14 @@ Java_com_xavierxia_mycelium_llm_NativeBridge_load(JNIEnv * env, jobject, jint fd
         std::call_once(backend_init, [] { llama_backend_init(); });
         auto mp = llama_model_default_params();
         mp.n_gpu_layers = 0;
+        // The pinned FILE* loader supports mmap. Large models avoid CPU repacking:
+        // repacked weights need another native allocation beside the mapped GGUF.
+        // Keep the existing accelerated buffers for models at or below 4 GiB.
+        struct stat model_stat {};
+        if (fstat(fd, &model_stat) != 0 || model_stat.st_size <= 0)
+            throw std::runtime_error("Cannot determine model size");
+        mp.load_mode = LLAMA_LOAD_MODE_MMAP;
+        mp.use_extra_bufts = static_cast<uint64_t>(model_stat.st_size) <= 4ULL * 1024 * 1024 * 1024;
         mp.progress_callback = [](float, void *) { return !cancelled.load(); };
         const int duplicate = dup(fd);
         if (duplicate < 0) throw std::runtime_error("Cannot duplicate model descriptor");
