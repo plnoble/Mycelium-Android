@@ -1,4 +1,4 @@
-﻿# P2-1d 交付报告：混合模型的检查点复用
+# P2-1d 交付报告：混合模型的检查点复用
 
 分支 `wp/P2-1d-hybrid-checkpoint`，已由统筹验收合并进 main（`23f4c2b`，门禁 521/0/0）。
 本文写给后续维护者：做了什么、怎么审的、数据在哪、还剩什么。
@@ -67,11 +67,20 @@ R3——rekey 回滚漏掉「从未进目标」的条目。逐条明细见目录
 4. **在途快照瞬时峰值** = 已有句柄 + 一份拷贝；低内存时按准入跳过（`checkpointSkippedForMemory`），
    不代表稳态占用。原生内存峰值观测（PSS）留待后续补。
 
-## 证据位置（`D:\Agent\Worktrees\Mycelium-Android\logs\p2-1d-evidence\`）
+## 证据位置（已放进仓库：`docs/reviews/2026-10-22-P2-1d/evidence/`）
 
-- `p2-1d-batch-matrix-r3.txt`：三组逐字矩阵（开/关-512/关-256）。
-- `p2-1d-ten-rounds-r8.txt`：十轮读数（含逐轮 take/restore 诊断与原生句柄读数）。
-- `p2-1d-variant-fast-fp16.txt` / `p2-1d-variant-baseline.txt`：CPU 变体挑选与逐字对照。
-- `p2-1d-rekey-fix.txt`：换键两轮读数。
-- `p2-1d-s5-r2.txt`：逐字用例完整读数（生产参数、逐轮断言版）。
-- 门禁日志：`logs\p2-1d-gate-r3b.txt` 等；复审报告：本目录 R1/R2/R3。
+| 文件 | 内容 |
+|---|---|
+| `p2-1d-batch-matrix-r3.txt` | 三组逐字矩阵（开/关-512/关-256），恢复@53、reused=53/read=34 |
+| `p2-1d-ten-rounds-r8.txt` | 十轮读数：逐轮 take/restore 诊断、检查点 1 份/63 MB、原生句柄 1 个、堆 +1.5 MB |
+| `p2-1d-variant-fast-fp16.txt` | 快变体：cpu features 列表 + 加载 `mycelium_llm_fast`（armv8.2-a+dotprod+i8mm+fp16） |
+| `p2-1d-variant-baseline.txt` | 基础变体：加载 `mycelium_llm`（armv8-a），正文与快版逐字一致 |
+| `p2-1d-rekey-fix.txt` | 换键两轮读数（存@195 → reused=195） |
+| `p2-1d-s5-r2.txt` | 逐字用例完整读数（生产参数、逐轮断言版） |
+| `p2-1d-sweep-threads.txt` | 线程扫描：6 线程 12.1 tok/s、8 线程 9.9–10.5、10 线程 0.18（超订灾难） |
+| `p2-1d-step0-sizes.txt` | 两份原生库的体积（快版自包含、APK 内共存） |
+| `GATE-521-0-0.txt` | **门禁原文**：commit `4f403ba`、worktree clean、7 个模块共 521 例 0 失败、lint 0/0/0、exit 0 |
+
+> 说明：原先本节写的是本地 logs 目录，并引用了 `p2-1d-gate-r3b.txt`。那份日志**只有 3 行表头、
+> 没有结论**，不能当门禁原文用，已改指向上表里完整的 `GATE-521-0-0.txt`（521 例那次）。
+> 证据文件与门禁摘要中的本机用户目录已脱敏为 `%LOCALAPPDATA%`；未包含设备序列号、用户名或密钥。

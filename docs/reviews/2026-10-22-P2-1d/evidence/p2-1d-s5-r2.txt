@@ -1,0 +1,18 @@
+设备：NX809J / SM8850 / Android 16
+模型：Qwen3.5-4B-Q4_K_M.gguf
+温度：0（贪心）、seed 42、maxTokens 24
+线程数：8、上下文 8192
+
+[A 开] 第 1 轮：prompt=60 reused=0 read=60 prompt_ms=846 gen=5 reason=5 pos=53 saved=53/54429740
+[A 开] 第 2 轮：prompt=87 reused=53 read=34 prompt_ms=476 gen=5 reason=0 pos=80 saved=80/55315124
+[A 开] 检查点占用：1 份 / 55315124 字节
+[A 开] 第 2 轮恢复位置：53
+[A 开] 第 2 轮正文：安静地陪着你。 -> 想静静地看着你。
+[B 关] 第 1 轮：prompt=60 reused=0 read=60 prompt_ms=717 gen=5 reason=1 pos=53 saved=-1/0
+[B 关] 第 2 轮：prompt=87 reused=0 read=87 prompt_ms=1021 gen=5 reason=3 pos=80 saved=-1/0
+[B 关] 第 3 轮：prompt=107 reused=0 read=107 prompt_ms=1252 gen=6 reason=3 pos=100 saved=-1/0
+[B 关] 第 2/3 轮正文：安静地陪着你。 -> 想静静地看着你。 -> 那就这样静静坐着吧。
+[3 轮] 第 1 轮：prompt=60 reused=0 read=60 prompt_ms=1010 gen=5 reason=5 pos=53 saved=53/54429740
+[3 轮] 第 2 轮：prompt=87 reused=53 read=34 prompt_ms=868 gen=5 reason=0 pos=80 saved=80/55315124
+[3 轮] 第 3 轮：prompt=107 reused=80 read=27 prompt_ms=669 gen=6 reason=0 pos=100 saved=100/55970964
+[3 轮] 结束时检查点占用：1 份 / 55970964 字节

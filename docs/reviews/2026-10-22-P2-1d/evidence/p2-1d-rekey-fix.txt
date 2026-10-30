@@ -1,0 +1,4 @@
+设备：NX809J / SM8850
+第 1 轮（临时键）：prompt=202 reused=0 read=202 reason=5 savedPos=195
+第 2 轮（正式键）：prompt=223 reused=195 read=28 reason=0 restoredFrom=195 promptMs=706
+take=take=59774836/pos=216/at=216 restoreStep=0 usage=(1, 59774836)

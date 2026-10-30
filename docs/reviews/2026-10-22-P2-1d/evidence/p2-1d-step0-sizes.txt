@@ -1,0 +1,11 @@
+设备：NX809J / SM8850 / Android 16
+模型：Qwen3.5-4B-Q4_K_M.gguf
+上下文：8192，线程 8
+
+对话 token 数（含模板）：1412
+本轮读数：prompt=1412 read=1412 prompt_ms=48087
+大小：整份(NONE)=99026860 字节（94 MiB）；只循环层(PARTIAL_ONLY)=52691548 字节（50 MiB）
+倍数：1.8793689644494787 倍
+耗时：存整份=5 ms、存循环层=2 ms、恢复整份=5 ms、恢复循环层=2 ms
+一致性：written(NONE)=99026860/size=99026860；written(PARTIAL)=52691548/size=52691548；read(NONE)=99026860；read(PARTIAL)=52691548
+探针之后的生成：『茶还温着，你慢慢说』

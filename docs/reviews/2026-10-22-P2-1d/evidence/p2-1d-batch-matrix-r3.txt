@@ -1,0 +1,5 @@
+设备：NX809J / SM8850
+温度 0、seed 42、maxTokens 8、线程 8、上下文 8192；断批点 = 每条消息结束处
+[open] pos=80 restored=53 reused=53 read=34 reason=0 正文=想静静地看着你。
+[512] reused=0 read=87 正文=想静静地看着你。
+[256] reused=0 read=87 正文=想静静地看着你。
