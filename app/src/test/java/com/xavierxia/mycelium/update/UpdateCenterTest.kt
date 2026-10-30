@@ -142,12 +142,13 @@ class UpdateCenterTest {
         runBlocking { center.checkIfDue() }
         center.ignore("v0.6.0")
 
-        next = testRelease("0.5.1")
+        // UpdateManager 拿安装包自己的版本号比，这里的「更新的版本」必须高于 app/build.gradle.kts 里的 versionName。
+        next = testRelease("0.7.0")
         now += 25 * hour
         runBlocking { center.checkIfDue() }
 
         assertEquals(2, source.calls)
-        assertEquals("0.5.1", center.state.value.release?.versionName)
+        assertEquals("0.7.0", center.state.value.release?.versionName)
     }
 
     @Test
