@@ -673,7 +673,7 @@ P2-1c 的代码已交付：`78fab03`，门禁 447/0，三轮全量审第三轮�
 
 ### 0.6 Codex
 - 每个包：方案审和全量审必做；分步审、专项审，额度够就做。
-- 程序在 `%LOCALAPPDATA%\OpenAI\Codex\bin\` 下**最新的、里面有 `codex.exe` 的**那个哈希子目录里。有的新目录只有 `rg.exe`，不要因为最新目录里没有就记成「本机没有 codex」。10-29 能用的是 `0ab0e7a8f3779036`（codex-cli 0.165）。用法：`codex exec -s read-only -c windows.sandbox=unelevated -C <全新 worktree> -o <报告文件> "<审核要求>"`。
+- 程序在 `%LOCALAPPDATA%\OpenAI\Codex\bin\` 下**最新的、里面有 `codex.exe` 的**那个哈希子目录里。有的新目录只有 `rg.exe`，不要因为最新目录里没有就记成「本机没有 codex」。10-30 是 `22cfb1d302613eae`（codex-cli 0.166）。**只用 Codex 默认模型（ChatGPT 登录），不许用 `-m`、`-c model_provider` 或别的配置把它指到网关**；用户 10-30 已删掉配置里的 magpie 网关。用法：`codex exec -s read-only -c windows.sandbox=unelevated -C <全新 worktree> -o <报告文件> "<审核要求>"`。
 - 额度读数：`%USERPROFILE%\.codex\sessions\<年>\<月>\<日>\rollout-*.jsonl` 最后一条的 `rate_limits`。
   - 5 小时窗口不低于 90%：等重置，先做别的；
   - 每周额度用完：告诉用户，由用户自己重置。
