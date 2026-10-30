@@ -2,7 +2,41 @@
 
 每做完一个决定就更新这里。历史细节看各工作包的 `docs/reviews/` 和 `docs/tracks/`，这里只写现在。
 
-更新：2026-10-29
+更新：2026-10-30
+
+## 2026-10-30 全局盘点
+
+- **开发线只剩一条：`wp/integration-2026-10`（`5e7350b`）。**
+  - 已并入：P2-5 模型管理；模型测速；9B 闪退修复；人物活性；复盘（入口关着）；认知边界；P2-X 加固；P2-3b 炉边体验小件。
+  - 全新 worktree 门禁 904 例、0 失败。
+  - **还没完**：
+    - 按机调优：`wp/adaptive-model-tuning` `8af2a93`，方案已过 Codex，用户 10-30 授权实施；
+    - Codex 补审；
+    - 数据库 v3→v9 升级测试；
+    - 真机回归。
+  - 顺序见 `CURRENT.md`「10-30 进度和接下来的顺序」。做完、验收过，才并进 main，发 0.6.0。
+- `main` = `0f86e6b`，只比 `origin/main`（`59e349e`，0.5.0）多了统筹文档：审核报告、整合计划、状态页、P2-1d 交付证据。代码和 0.5.0 一样。
+- **10-30 清理**：删掉了已经并进 main 或整合分支的本地分支。删除前的提交号如下，要找回用 `git branch <名字> <提交号>`：
+  - 已并进 main 的：
+    - `phase-0-bootstrap` 3a0db9b；
+    - `wp/P0-7-results-docs` 2f8d4cf、`wp/P0-8-contract-consumer` e1ca624、`wp/P0-9-rename-to-mycelium` 45c1f91；
+    - `wp/P1-6-roundtable-skeleton` cae82de、`wp/P1-6a-rename-hearth` 8ff8be9、`wp/P1-7-device-rerun` 20602a6、`wp/P1-7-roundtable-chat` 7df0b8b；
+    - `wp/P2-1-local-llm` 53b31cd、`wp/P2-1b-check-all` d4c5526、`wp/P2-1c-prompt-cache` bd69c9d、`wp/P2-1d-hybrid-checkpoint` 6a166e8；
+    - `wp/P2-2-hearth-chat` 919c814、`wp/P2-2b-persona-pack-wording` 2076456、`wp/P2-2b-release-ready` c6a1027；
+    - `wp/release-0.5.0` 63bb786（这个提交已在 `0f86e6b` 并进 main）。
+  - 已在整合分支里的：
+    - `wp/P2-5-model-manager` 5938d87、`wp/model-benchmark` f4d0e58、`wp/9b-memory-fix` 96bd796；
+    - `wp/P2-3b-character-vitality` 9e87c43、`wp/hearth-reflection` c682de3、`wp/knowledge-boundary` 4d5f749、`wp/P2-X-hardening` 99b40fe；
+    - `wp/P2-3b-hearth-touches` 97b68a6、`wp/P2-3-hearth-memory` 97b68a6。
+  - 留着的分支：
+    - `main`；
+    - `wp/integration-2026-10`；
+    - `wp/adaptive-model-tuning`（等着并进整合分支）；
+    - `spike/P0-7-device`（它的目录里有构建用的 llama.cpp 源码）；
+    - `wp/ci-green`（早已并进 main，但开发主目录正停在它上面，先不动）。
+  - 远端还有三个旧分支没删：`phase-0-bootstrap`、`wp/P0-7-results-docs`、`wp/P0-9-rename-to-mycelium`。删远端要推送，等用户同意。
+  - 工作目录删了 8 个：都已并进 main 或整合分支，而且没有未提交的改动。p2-1c 那处改动 main 上已经有了。
+  - 门禁残留目录删了 4 个，约 7 GB。小日志挪进了 `Mycelium-Android/logs/worktree-archive-2026-10-30/`。
 
 ## 2026-10-29 最新
 
