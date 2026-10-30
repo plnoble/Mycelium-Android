@@ -24,7 +24,8 @@ import java.util.Locale
  * 0.5.1 热修的真机验收：超过 4 GiB 的模型不做 CPU 权重重排以后，连聊三轮不再被系统杀掉。
  *
  * 用调试包里已经登记的模型：所有超过 4 GiB 的，加上最小的一个做对照（它照旧重排，速度不该变）。
- * 用 App 的默认设置（8 线程、上下文 8192），每轮都带缓存键，和炉边一样走检查点复用。
+ * 默认用 App 的默认设置（8 线程、上下文 8192），每轮都带缓存键，和炉边一样走检查点复用。
+ * 对照用的参数：-e threads N、-e context N、-e minBytes N（只测不小于这个字节数的大模型，不测对照）。
  * 模型文件只读；报告写进调试包私有目录，不写文件名，只写大小和序号。
  */
 @RunWith(AndroidJUnit4::class)
@@ -50,21 +51,31 @@ class LargeModelHotfixDeviceTest {
     @Test
     fun largeModelsSurviveThreeRounds() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        // 可选参数（am instrument -e ...），用来对照被杀的条件；不给就是 App 默认设置、全部模型。
+        val args = InstrumentationRegistry.getArguments()
+        val defaults = EngineOptions()
+        val options = EngineOptions(
+            threads = args.getString("threads")?.toIntOrNull() ?: defaults.threads,
+            contextLength = args.getString("context")?.toIntOrNull() ?: defaults.contextLength,
+        )
+        val minBytes = args.getString("minBytes")?.toLongOrNull()
         val report = File(context.filesDir, "hotfix-0.5.1-large-models.txt")
         val store = AndroidModelStore(context)
         val registered = store.registry.list()
         val large = registered.filter { it.size > fourGiB }.sortedBy { it.size }
         val control = registered.filter { it.size <= fourGiB }.minByOrNull { it.size }
         assertTrue("调试包里没有登记超过 4 GiB 的模型", large.isNotEmpty())
-        val models: List<LocalModelRecord> = listOfNotNull(control) + large
+        val models: List<LocalModelRecord> =
+            if (minBytes == null) listOfNotNull(control) + large else large.filter { it.size >= minBytes }
+        assertTrue("没有符合 minBytes 的模型", models.isNotEmpty())
         val engine = LocalModelEngine.shared
-        val lines = mutableListOf("设备：${android.os.Build.MODEL}；默认设置 ${EngineOptions()}；开始 ${memory()}")
+        val lines = mutableListOf("设备：${android.os.Build.MODEL}；设置 $options；开始 ${memory()}")
         report.writeText(lines.joinToString("\n") + "\n")
         for ((index, model) in models.withIndex()) {
             val label = "模型${index + 1}（${String.format(Locale.ROOT, "%.2f", model.size / 1e9)} GB，${if (model.size > fourGiB) "超过 4 GiB，不重排" else "对照，照旧重排"}）"
             val started = SystemClock.elapsedRealtime()
             try {
-                engine.load(model.info, EngineOptions()) { store.open(model) }
+                engine.load(model.info, options) { store.open(model) }
                 lines += "$label 加载 ${SystemClock.elapsedRealtime() - started} ms；${memory()}"
                 report.writeText(lines.joinToString("\n") + "\n")
                 for (round in 1..3) {
